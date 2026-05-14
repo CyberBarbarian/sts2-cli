@@ -2059,8 +2059,17 @@ public class RunSimulator
                             {
                                 try
                                 {
-                                    intentInfo["damage"] = atk.GetTotalDamage(playerCreatures, e);
-                                    if (atk.Repeats > 1) intentInfo["hits"] = atk.Repeats;
+                                    var totalDamage = atk.GetTotalDamage(playerCreatures, e);
+                                    if (atk.Repeats > 1)
+                                    {
+                                        intentInfo["damage"] = totalDamage / atk.Repeats;
+                                        intentInfo["hits"] = atk.Repeats;
+                                        intentInfo["total_damage"] = totalDamage;
+                                    }
+                                    else
+                                    {
+                                        intentInfo["damage"] = totalDamage;
+                                    }
                                 }
                                 catch { }
                             }

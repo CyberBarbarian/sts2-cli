@@ -32,6 +32,19 @@ class TestCombatStructure:
             assert e["max_hp"] > 0
             assert "block" in e
 
+    def test_multi_hit_intent_exports_per_hit_and_total_damage(self, game):
+        state = game.start(seed="multi-hit-intent")
+        game.skip_neow(state)
+        state = game.enter_room("combat", encounter="MAWLER_NORMAL")
+
+        intent = next(
+            it for it in state["enemies"][0]["intents"]
+            if it["type"] == "Attack"
+        )
+        assert intent["hits"] == 2
+        assert intent["damage"] == 4
+        assert intent["total_damage"] == 8
+
 
 class TestPlayCards:
     def test_play_card_costs_energy(self, game):
