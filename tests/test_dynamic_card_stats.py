@@ -35,6 +35,24 @@ class TestDynamicCardStats:
 
         assert card["stats"]["calculateddamage"] == 16
 
+    def test_perfected_strike_after_upgrade_exports_dynamic_calculated_damage(self, game):
+        state = game.start(seed="perfected-upgrade-preview")
+        game.skip_neow(state)
+        state = game.set_player(deck=[
+            "PERFECTED_STRIKE",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+        ])
+
+        card = next(c for c in state["player"]["deck"] if c["name"] == "Perfected Strike")
+        upgraded_stats = card["after_upgrade"]["stats"]
+
+        assert upgraded_stats["calculateddamage"] == (
+            upgraded_stats["calculationbase"] + upgraded_stats["extradamage"] * 5
+        )
+
     def test_bully_exports_damage_from_enemy_vulnerable(self, game):
         state = game.start(seed="bully-stats")
         game.skip_neow(state)

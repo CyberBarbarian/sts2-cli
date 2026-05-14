@@ -31,6 +31,14 @@ class TestShopStructure:
         has_upgrade = any(c.get("after_upgrade") for c in state["cards"])
         assert has_upgrade
 
+    def test_shop_cards_export_base_stats(self, game):
+        state = game.start(seed="shop-stats-probe")
+        game.skip_neow(state)
+        state = game.enter_room("shop")
+
+        twin_strike = next(c for c in state["cards"] if c["name"] == "Twin Strike")
+        assert twin_strike["stats"]["damage"] == 5
+
     def test_shop_relics_have_description(self, game):
         state = game.start(seed="ss4")
         game.skip_neow(state)

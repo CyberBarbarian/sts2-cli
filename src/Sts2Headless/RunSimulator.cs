@@ -1749,7 +1749,7 @@ public class RunSimulator
                     ["description"] = _loc.Bilingual("cards", cr.Card.Id.Entry + ".description"),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
-                    ["after_upgrade"] = GetUpgradedInfo(cr.Card),
+                    ["after_upgrade"] = GetUpgradedInfo(cr.Card, player),
                 };
             }).ToList();
 
@@ -1785,7 +1785,7 @@ public class RunSimulator
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
-                    ["after_upgrade"] = GetUpgradedInfo(card),
+                    ["after_upgrade"] = GetUpgradedInfo(card, player),
                 };
             }).ToList();
 
@@ -2261,7 +2261,7 @@ public class RunSimulator
                 ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["keywords"] = crkws?.Count > 0 ? crkws : null,
-                ["after_upgrade"] = GetUpgradedInfo(c),
+                ["after_upgrade"] = GetUpgradedInfo(c, player),
             };
         }).ToList();
 
@@ -2523,8 +2523,8 @@ public class RunSimulator
                     if (card != null)
                     {
                         cardCost = card.EnergyCost?.GetResolved() ?? 0;
-                        var mutable = card.ToMutable();
-                        stats = ExtractCardStats(mutable, _runState?.Players[0]);
+                        var mutable = ModelDb.GetById<CardModel>(card.Id).ToMutable();
+                        stats = ExtractCardStats(mutable, _runState?.Players[0], card);
                     }
                 }
                 catch { }
@@ -2539,7 +2539,7 @@ public class RunSimulator
                     ["description"] = _loc.Bilingual("cards", entry + ".description"),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["keywords"] = shopkws?.Count > 0 ? shopkws : null,
-                    ["after_upgrade"] = card != null ? GetUpgradedInfo(card) : null,
+                    ["after_upgrade"] = card != null ? GetUpgradedInfo(card, _runState?.Players[0]) : null,
                     ["cost"] = e.Cost,
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
@@ -2759,7 +2759,7 @@ public class RunSimulator
         }
     }
 
-    private Dictionary<string, object?> ExtractCardStats(CardModel card, Player? player = null)
+    private Dictionary<string, object?> ExtractCardStats(CardModel card, Player? player = null, CardModel? countAsCard = null)
     {
         var stats = new Dictionary<string, object?>();
         try
@@ -2773,7 +2773,7 @@ public class RunSimulator
         {
             var baseDamage = GetStatInt(stats, "calculationbase", 6);
             var extraDamage = GetStatInt(stats, "extradamage", 2);
-            var strikeCount = CountStrikeNameCards(player, card);
+            var strikeCount = CountStrikeNameCards(player, countAsCard ?? card);
             stats["calculateddamage"] = baseDamage + extraDamage * strikeCount;
         }
 
@@ -2884,7 +2884,7 @@ public class RunSimulator
     }
 
     /// <summary>Compute what a card would look like after upgrading (stats + cost + description).</summary>
-    private Dictionary<string, object?>? GetUpgradedInfo(CardModel card)
+    private Dictionary<string, object?>? GetUpgradedInfo(CardModel card, Player? player = null)
     {
         if (!card.IsUpgradable) return null;
         try
@@ -2900,8 +2900,7 @@ public class RunSimulator
             clone.UpgradeInternal();
             clone.FinalizeUpgradeInternal();
 
-            var stats = new Dictionary<string, object?>();
-            try { foreach (var dv in clone.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+            var stats = ExtractCardStats(clone, player, card);
 
             // Compare keywords before/after upgrade
             var oldKws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToHashSet() ?? new();
@@ -2970,7 +2969,7 @@ public class RunSimulator
                     ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
                     ["stats"] = dstats.Count > 0 ? dstats : null,
                     ["keywords"] = dkws?.Count > 0 ? dkws : null,
-                    ["after_upgrade"] = GetUpgradedInfo(c),
+                    ["after_upgrade"] = GetUpgradedInfo(c, player),
                 };
             }).ToList(),
         };
