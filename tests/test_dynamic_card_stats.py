@@ -94,3 +94,21 @@ class TestDynamicCardStats:
         assert target_stats[0]["calculateddamage"] > target_stats[1]["calculateddamage"]
         assert target_stats[0]["vulnerable"] == 2
         assert target_stats[1]["vulnerable"] == 0
+
+    def test_attack_damage_stats_include_player_strength(self, game):
+        state = game.start(seed="strength-damage-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "SETUP_STRIKE",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        setup_strike = next(c for c in state["hand"] if c["name"] == "Setup Strike")
+
+        state = game.act("play_card", card_index=setup_strike["index"], target_index=0)
+
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+        assert strike["stats"]["damage"] == 8

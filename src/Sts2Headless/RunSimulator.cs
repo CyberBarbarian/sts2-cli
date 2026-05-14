@@ -1997,7 +1997,7 @@ public class RunSimulator
 
         var hand = pcs?.Hand?.Cards?.Select((c, i) =>
         {
-            var stats = ExtractCardStats(c, player);
+            var stats = ExtractCardStats(c, player, applyCombatModifiers: true);
 
             // Use CurrentStarCost (combat-modified) for UI/can_play; BaseStarCost ignores temporary reductions.
             var starCost = c.CurrentStarCost;
@@ -2759,7 +2759,11 @@ public class RunSimulator
         }
     }
 
-    private Dictionary<string, object?> ExtractCardStats(CardModel card, Player? player = null, CardModel? countAsCard = null)
+    private Dictionary<string, object?> ExtractCardStats(
+        CardModel card,
+        Player? player = null,
+        CardModel? countAsCard = null,
+        bool applyCombatModifiers = false)
     {
         var stats = new Dictionary<string, object?>();
         try
@@ -2796,7 +2800,67 @@ public class RunSimulator
             }
         }
 
+        if (applyCombatModifiers)
+            ApplyCombatStatModifiers(stats, player);
+
         return stats;
+    }
+
+    private void ApplyCombatStatModifiers(Dictionary<string, object?> stats, Player? player)
+    {
+        if (player?.PlayerCombatState == null)
+            return;
+
+        var strength = GetPlayerPowerAmount(player, "STRENGTH", "Strength");
+        if (strength != 0)
+        {
+            AddStat(stats, "damage", strength);
+            AddStat(stats, "calculateddamage", strength);
+            AddTargetStat(stats, "calculateddamage_by_target", "calculateddamage", strength);
+        }
+    }
+
+    private static void AddStat(Dictionary<string, object?> stats, string key, int delta)
+    {
+        if (!stats.TryGetValue(key, out var value) || value == null)
+            return;
+
+        stats[key] = Math.Max(0, Convert.ToInt32(value) + delta);
+    }
+
+    private static void AddTargetStat(
+        Dictionary<string, object?> stats,
+        string collectionKey,
+        string statKey,
+        int delta)
+    {
+        if (!stats.TryGetValue(collectionKey, out var value)
+            || value is not IEnumerable<Dictionary<string, object?>> rows)
+            return;
+
+        foreach (var row in rows)
+            AddStat(row, statKey, delta);
+    }
+
+    private int GetPlayerPowerAmount(Player player, params string[] powerKeys)
+    {
+        try
+        {
+            return player.Creature?.Powers?
+                .Where(power =>
+                {
+                    var entry = power.Id.Entry;
+                    var localizedName = _loc.Power(entry);
+                    return powerKeys.Any(key =>
+                        string.Equals(entry, key, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(localizedName, key, StringComparison.OrdinalIgnoreCase));
+                })
+                .Sum(power => power.Amount) ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static int GetStatInt(Dictionary<string, object?> stats, string key, int fallback)
