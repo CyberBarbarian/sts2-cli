@@ -112,3 +112,15 @@ class TestDynamicCardStats:
 
         strike = next(c for c in state["hand"] if c["name"] == "Strike")
         assert strike["stats"]["damage"] == 8
+
+    def test_block_stats_include_player_frail(self, game):
+        state = game.start(seed="codex-frail-block")
+        game.skip_neow(state)
+        game.set_player(deck=["DEFEND_IRONCLAD"] * 10)
+        state = game.enter_room("combat", encounter="RUBY_RAIDERS_NORMAL")
+
+        state = game.act("end_turn")
+
+        assert any(power["name"] == "Frail" for power in state["player_powers"])
+        defend = next(c for c in state["hand"] if c["name"] == "Defend")
+        assert defend["stats"]["block"] == 3

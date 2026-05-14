@@ -2818,6 +2818,10 @@ public class RunSimulator
             AddStat(stats, "calculateddamage", strength);
             AddTargetStat(stats, "calculateddamage_by_target", "calculateddamage", strength);
         }
+
+        var frail = GetPlayerPowerAmount(player, "FRAIL", "Frail");
+        if (frail > 0)
+            ScaleStat(stats, "block", 3, 4);
     }
 
     private static void AddStat(Dictionary<string, object?> stats, string key, int delta)
@@ -2826,6 +2830,14 @@ public class RunSimulator
             return;
 
         stats[key] = Math.Max(0, Convert.ToInt32(value) + delta);
+    }
+
+    private static void ScaleStat(Dictionary<string, object?> stats, string key, int numerator, int denominator)
+    {
+        if (!stats.TryGetValue(key, out var value) || value == null)
+            return;
+
+        stats[key] = Math.Max(0, Convert.ToInt32(value) * numerator / denominator);
     }
 
     private static void AddTargetStat(
