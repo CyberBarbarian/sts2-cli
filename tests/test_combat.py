@@ -136,6 +136,90 @@ class TestCombatEnd:
 
 
 class TestCombatEdgeCases:
+    def test_bygone_effigy_wake_talk_vfx_does_not_deadlock_headless(self, game):
+        state = game.start(seed="effigy-wake-talk")
+        game.skip_neow(state)
+        game.set_player(
+            hp=80,
+            max_hp=80,
+            deck=["BREAKTHROUGH"] * 20,
+        )
+        state = game.enter_room("combat", encounter="BYGONE_EFFIGY_ELITE")
+
+        for _ in range(4):
+            while state.get("decision") == "combat_play":
+                playable_attacks = [
+                    card for card in state.get("hand", [])
+                    if card.get("type") == "Attack"
+                    and card.get("can_play")
+                    and card.get("cost", 99) <= state.get("energy", 0)
+                ]
+                if not playable_attacks:
+                    break
+                card = playable_attacks[0]
+                args = {"card_index": card["index"]}
+                if card.get("target_type") == "AnyEnemy":
+                    args["target_index"] = state["enemies"][0]["index"]
+                state = game.act("play_card", **args)
+
+            assert state.get("decision") == "combat_play"
+            state = game.act("end_turn")
+            assert state.get("decision") != "game_over"
+            assert state.get("type") != "error"
+
+        assert state["decision"] == "combat_play"
+        assert state["player"]["hp"] > 0
+
+    def test_kin_priest_ritual_talk_vfx_does_not_deadlock_headless(self, game):
+        state = game.start(seed="kin-ritual-talk")
+        game.skip_neow(state)
+        game.set_player(
+            hp=80,
+            max_hp=80,
+            deck=["DEFEND_IRONCLAD"] * 10 + ["SHRUG_IT_OFF"] * 10,
+        )
+        state = game.enter_room("combat", encounter="THE_KIN_BOSS")
+
+        for _ in range(4):
+            while state.get("decision") == "combat_play":
+                playable_skills = [
+                    card for card in state.get("hand", [])
+                    if card.get("type") == "Skill"
+                    and card.get("can_play")
+                    and card.get("cost", 99) <= state.get("energy", 0)
+                ]
+                if not playable_skills:
+                    break
+                state = game.act("play_card", card_index=playable_skills[0]["index"])
+
+            assert state.get("decision") == "combat_play"
+            state = game.act("end_turn")
+            assert state.get("type") != "error"
+
+        assert state["decision"] == "combat_play"
+        assert state["round"] == 5
+        assert state["player"]["hp"] > 0
+
+    def test_end_turn_during_card_select_keeps_selection(self, game):
+        state = game.start(seed="pending-select-end-turn")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "BURNING_PACT",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "STRIKE_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        burning_pact = next(c for c in state["hand"] if c["name"] == "Burning Pact")
+
+        state = game.act("play_card", card_index=burning_pact["index"])
+
+        assert state["decision"] == "card_select"
+        state = game.act("end_turn")
+        assert state["decision"] == "card_select"
+        assert state["player"]["hp"] > 0
+
     def test_exhaust_all_and_end_turn(self, game):
         state = game.start(seed="ce1")
         game.skip_neow(state)

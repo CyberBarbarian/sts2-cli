@@ -17,15 +17,24 @@ import argparse
 import random
 from game_log import GameLogger
 
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(ROOT))
 PROJECT = os.path.join(ROOT, "src", "Sts2Headless", "Sts2Headless.csproj")
 LIB_DIR = os.path.join(ROOT, "lib")
 SAVE_DIR = os.path.join(ROOT, "saves")
+LOCAL_DOTNET_DIR = os.path.join(REPO_ROOT, ".tools", "dotnet")
+LOCAL_DOTNET = os.path.join(LOCAL_DOTNET_DIR, "dotnet.exe" if os.name == "nt" else "dotnet")
+HEADLESS_DLL = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug", "net9.0", "Sts2Headless.dll")
 
 
 def _find_dotnet():
     """Find .NET SDK binary."""
     candidates = [
+        LOCAL_DOTNET,
         os.path.expanduser("~/.dotnet-arm64/dotnet"),
         os.path.expanduser("~/.dotnet/dotnet"),
         "dotnet",
@@ -166,6 +175,11 @@ def ensure_setup():
     # Set STS2_GAME_DIR env var for runtime DLL resolution (point to lib/ where DLLs were copied)
     if "STS2_GAME_DIR" not in os.environ:
         os.environ["STS2_GAME_DIR"] = LIB_DIR
+    if "STS2_LIB" not in os.environ:
+        os.environ["STS2_LIB"] = LIB_DIR
+    if os.path.isfile(LOCAL_DOTNET):
+        os.environ["DOTNET_ROOT"] = LOCAL_DOTNET_DIR
+        os.environ["PATH"] = LOCAL_DOTNET_DIR + os.pathsep + os.environ.get("PATH", "")
 
     # Check if built
     exe_dir = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug", "net9.0")
@@ -1498,10 +1512,20 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
     logger = GameLogger(character, actual_seed, enabled=log)
     action_log = []
+    env = os.environ.copy()
+    if os.path.isfile(LOCAL_DOTNET):
+        env["DOTNET_ROOT"] = LOCAL_DOTNET_DIR
+        env["PATH"] = LOCAL_DOTNET_DIR + os.pathsep + env.get("PATH", "")
+    env.setdefault("STS2_LIB", LIB_DIR)
+    env.setdefault("STS2_GAME_DIR", LIB_DIR)
+    command = [DOTNET, HEADLESS_DLL] if os.path.isfile(HEADLESS_DLL) else [
+        DOTNET, "run", "--no-build", "--project", PROJECT
+    ]
     proc = subprocess.Popen(
-        [DOTNET, "run", "--no-build", "--project", PROJECT],
+        command,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, bufsize=1,
+        stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+        bufsize=1, env=env,
     )
 
     def read():

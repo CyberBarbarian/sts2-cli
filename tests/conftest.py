@@ -2,15 +2,24 @@
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import pytest
 
-DOTNET = os.path.expanduser("~/.dotnet-arm64/dotnet")
-if not os.path.isfile(DOTNET):
-    DOTNET = shutil.which("dotnet") or DOTNET
-PROJECT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "src", "Sts2Headless", "Sts2Headless.csproj")
+STS2_CLI_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = STS2_CLI_ROOT.parents[1]
+LOCAL_DOTNET_DIR = REPO_ROOT / ".tools" / "dotnet"
+LOCAL_DOTNET = LOCAL_DOTNET_DIR / ("dotnet.exe" if os.name == "nt" else "dotnet")
+MAC_ARM_DOTNET = Path(os.path.expanduser("~/.dotnet-arm64/dotnet"))
+if LOCAL_DOTNET.is_file():
+    DOTNET = str(LOCAL_DOTNET)
+elif MAC_ARM_DOTNET.is_file():
+    DOTNET = str(MAC_ARM_DOTNET)
+else:
+    DOTNET = shutil.which("dotnet") or str(MAC_ARM_DOTNET)
+PROJECT = str(STS2_CLI_ROOT / "src" / "Sts2Headless" / "Sts2Headless.csproj")
+HEADLESS_DLL = STS2_CLI_ROOT / "src" / "Sts2Headless" / "bin" / "Debug" / "net9.0" / "Sts2Headless.dll"
 
 
 class Game:
@@ -18,13 +27,24 @@ class Game:
 
     def __init__(self):
         env = os.environ.copy()
-        env.setdefault("STS2_GAME_DIR",
-                       os.path.expanduser("~/Library/Application Support/Steam/steamapps/common/"
-                                          "Slay the Spire 2/SlayTheSpire2.app/Contents/Resources/"
-                                          "data_sts2_macos_arm64"))
+        local_lib = STS2_CLI_ROOT / "lib"
+        if LOCAL_DOTNET.is_file():
+            env["DOTNET_ROOT"] = str(LOCAL_DOTNET_DIR)
+            env["PATH"] = str(LOCAL_DOTNET_DIR) + os.pathsep + env.get("PATH", "")
+        if (local_lib / "sts2.dll").is_file():
+            env.setdefault("STS2_LIB", str(local_lib))
+            env.setdefault("STS2_GAME_DIR", str(local_lib))
+        else:
+            env.setdefault("STS2_GAME_DIR",
+                           os.path.expanduser("~/Library/Application Support/Steam/steamapps/common/"
+                                              "Slay the Spire 2/SlayTheSpire2.app/Contents/Resources/"
+                                              "data_sts2_macos_arm64"))
+        command = [DOTNET, str(HEADLESS_DLL)] if HEADLESS_DLL.is_file() else [
+            DOTNET, "run", "--no-build", "--project", PROJECT
+        ]
         self.proc = subprocess.Popen(
-            [DOTNET, "run", "--no-build", "--project", PROJECT],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            command,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, bufsize=1, env=env,
         )
         ready = self._read()

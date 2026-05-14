@@ -1,5 +1,14 @@
 # sts2-cli
 
+> Fork notice: this repository is a fork of
+> [wuhao21/sts2-cli](https://github.com/wuhao21/sts2-cli), maintained for
+> BG-Agent headless Slay the Spire 2 benchmark work. This fork carries local
+> Windows/headless API fixes for pending event and card selections, dynamic
+> state export, potion targeting, treasure-room state cleanup, and headless
+> dialogue/VFX crashes. These fixes are limited to the CLI/headless API,
+> harness, and tests; they do not intentionally change underlying Slay the
+> Spire 2 card, relic, enemy, or combat rules.
+
 <details open>
 <summary><b>English</b></summary>
 
