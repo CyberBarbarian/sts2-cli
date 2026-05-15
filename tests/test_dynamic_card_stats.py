@@ -174,6 +174,41 @@ class TestDynamicCardStats:
         state = game.act("play_card", card_index=dismantle["index"], target_index=0)
         assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
 
+    def test_x_cost_aoe_exports_current_repeat_damage(self, game):
+        state = game.start(seed="whirlwind-current-repeat-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "WHIRLWIND",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SLIMES_WEAK")
+
+        whirlwind = next(c for c in state["hand"] if c["name"] == "Whirlwind")
+        target_stats = whirlwind["stats"]["damage_by_target"]
+        assert len(target_stats) >= 2
+        target = next(
+            t for t in target_stats
+            if next(e for e in state["enemies"] if e["index"] == t["target_index"])["hp"]
+            > t["damage"] * state["energy"]
+        )
+        assert target["repeat"] == state["energy"]
+        assert target["total_damage"] == (
+            target["damage"] * state["energy"]
+        )
+
+        hp_before = next(
+            e["hp"] for e in state["enemies"] if e["index"] == target["target_index"]
+        )
+        state = game.act("play_card", card_index=whirlwind["index"])
+        hp_after = next(
+            (e["hp"] for e in state.get("enemies", []) if e["name"] == target["target_name"]),
+            0,
+        )
+        assert hp_before - hp_after == target["total_damage"]
+
     def test_attack_damage_stats_include_player_strength(self, game):
         state = game.start(seed="strength-damage-stats")
         game.skip_neow(state)

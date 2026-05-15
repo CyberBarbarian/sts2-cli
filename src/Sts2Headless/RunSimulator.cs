@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
@@ -3685,6 +3686,7 @@ public class RunSimulator
         if (applyCombatModifiers)
         {
             ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null);
+            AddEnergyXAttackRepeat(stats, card);
             AddCalculatedDamageByTarget(stats, card, player);
             AddAttackDamageByTarget(stats, card, player);
         }
@@ -3726,6 +3728,25 @@ public class RunSimulator
         {
             return false;
         }
+    }
+
+    private static void AddEnergyXAttackRepeat(Dictionary<string, object?> stats, CardModel card)
+    {
+        if (card.Type != CardType.Attack
+            || !stats.ContainsKey("damage")
+            || card.EnergyCost?.CostsX != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var xValue = card.EnergyCost.GetAmountToSpend();
+            if (card.CombatState != null)
+                xValue = Hook.ModifyXValue(card.CombatState, card, xValue);
+            stats["repeat"] = Math.Max(0, xValue);
+        }
+        catch { }
     }
 
     private static Dictionary<string, int>? TryGetCardPreviewStats(
@@ -3793,7 +3814,10 @@ public class RunSimulator
                 var vulnerable = GetCreaturePowerAmount(enemy, "VULNERABLE", "Vulnerable");
                 var slow = GetCreaturePowerAmount(enemy, "SLOW", "Slow");
                 var targetDamage = previewStats?.GetValueOrDefault("damage") ?? Convert.ToInt32(damageObj);
-                var targetRepeat = GetTargetAttackRepeat(card, enemy, previewStats?.GetValueOrDefault("repeat") ?? repeat);
+                var previewRepeat = previewStats != null && previewStats.TryGetValue("repeat", out var repeatValue)
+                    ? repeatValue
+                    : repeat;
+                var targetRepeat = GetTargetAttackRepeat(card, enemy, previewRepeat);
                 var totalDamage = targetDamage * targetRepeat;
                 var block = Math.Max(0, enemy.Block);
                 var row = new Dictionary<string, object?>
