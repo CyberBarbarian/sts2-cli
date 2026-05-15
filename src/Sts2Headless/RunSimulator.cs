@@ -3390,7 +3390,24 @@ public class RunSimulator
 
     private static string? InterpolateDynamicVars(string? text, Dictionary<string, object?>? vars)
     {
-        if (string.IsNullOrEmpty(text) || vars == null || vars.Count == 0)
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:energyIcons\((?<arg>[^)]*)\)\}",
+            match =>
+            {
+                var key = match.Groups["key"].Value;
+                object? value = null;
+                if (vars != null)
+                    vars.TryGetValue(key, out value);
+
+                value ??= ParseEnergyIconArgument(match.Groups["arg"].Value);
+                return value == null ? match.Value : FormatEnergyText(value);
+            });
+
+        if (vars == null || vars.Count == 0)
             return text;
 
         text = System.Text.RegularExpressions.Regex.Replace(
@@ -3416,6 +3433,30 @@ public class RunSimulator
         }
 
         return text;
+    }
+
+    private static int? ParseEnergyIconArgument(string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg))
+            return null;
+
+        var match = System.Text.RegularExpressions.Regex.Match(arg, @"-?\d+");
+        if (!match.Success)
+            return null;
+
+        return int.TryParse(match.Value, out var value) ? value : null;
+    }
+
+    private static string FormatEnergyText(object value)
+    {
+        try
+        {
+            return $"{Convert.ToInt32(value)} Energy";
+        }
+        catch
+        {
+            return $"{value} Energy";
+        }
     }
 
     private static bool IsSingularValue(object value)
@@ -3823,15 +3864,11 @@ public class RunSimulator
 
         var potions = inv.PotionEntries.Select((e, i) =>
         {
-            var entry = e.Model?.Id.Entry ?? "?";
-            var exported = new Dictionary<string, object?>
-            {
-                ["index"] = i,
-                ["name"] = _loc.Potion(entry),
-                ["description"] = _loc.Bilingual("potions", entry + ".description"),
-                ["cost"] = e.Cost,
-                ["is_stocked"] = e.IsStocked,
-            };
+            var exported = e.Model != null
+                ? PotionInfo(e.Model, index: i)
+                : new Dictionary<string, object?> { ["index"] = i, ["name"] = "?", ["description"] = null };
+            exported["cost"] = e.Cost;
+            exported["is_stocked"] = e.IsStocked;
             return ShopItemState(e, exported, e.Model != null);
         }).ToList();
 
@@ -4817,7 +4854,9 @@ public class RunSimulator
         {
             ["id"] = potion.Id.Entry,
             ["name"] = _loc.Potion(entry),
-            ["description"] = _loc.Bilingual("potions", entry + ".description"),
+            ["description"] = InterpolateDynamicVars(
+                _loc.Bilingual("potions", entry + ".description"),
+                vars.Count > 0 ? vars : null),
             ["vars"] = vars.Count > 0 ? vars : null,
             ["target_type"] = potion.TargetType.ToString(),
         };
@@ -4940,16 +4979,7 @@ public class RunSimulator
             ["potions"] = player.Potions?.Select((p, i) =>
             {
                 if (p == null) return null;
-                var pvars = new Dictionary<string, object?>();
-                try { foreach (var dv in p.DynamicVars.Values) pvars[dv.Name] = (int)dv.BaseValue; } catch { }
-                return new Dictionary<string, object?>
-                {
-                    ["index"] = i,
-                    ["name"] = _loc.Potion(p.Id.Entry),
-                    ["description"] = _loc.Bilingual("potions", p.Id.Entry + ".description"),
-                    ["vars"] = pvars.Count > 0 ? pvars : null,
-                    ["target_type"] = p.TargetType.ToString(),
-                };
+                return PotionInfo(p, i);
             }).Where(x => x != null).ToList(),
             ["deck_size"] = player.Deck?.Cards?.Count(c => c != null) ?? 0,
             ["deck"] = player.Deck?.Cards?.Where(c => c != null).Select(c =>

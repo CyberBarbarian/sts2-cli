@@ -2,6 +2,33 @@
 
 
 class TestPotionActions:
+    def test_player_potions_export_resolved_descriptions(self, game):
+        state = game.start(seed="potion-description-formatters")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["CURE_ALL", "RADIANT_TINCTURE"],
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        potions = {p["name"]: p for p in state["player"]["potions"]}
+
+        cure_all = potions["Cure All"]
+        assert "{Energy:energyIcons()}" not in cure_all["description"]
+        assert "{Cards:plural" not in cure_all["description"]
+        assert "2 cards" in cure_all["description"]
+
+        radiant = potions["Radiant Tincture"]
+        assert "{energyPrefix:energyIcons(1)}" not in radiant["description"]
+        assert "{RadiancePower:plural" not in radiant["description"]
+        assert "3 turns" in radiant["description"]
+
     def test_enemy_target_potion_requires_target_index(self, game):
         state = game.start(seed="explicit-potion-target")
         game.skip_neow(state)

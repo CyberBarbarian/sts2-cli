@@ -54,6 +54,18 @@ def test_treasure_relic_exports_effect_vars_and_resolved_description(game):
     assert "{ThornsPower}" not in owned["description"]
 
 
+def test_player_relic_descriptions_resolve_energy_icons(game):
+    state = game.start(seed="relic-energy-description")
+    game.skip_neow(state)
+    game.set_player(relics=["BLOOD_SOAKED_ROSE"])
+
+    state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+    rose = next(r for r in state["player"]["relics"] if r["id"] == "BLOOD_SOAKED_ROSE")
+
+    assert "{Energy:energyIcons()}" not in rose["description"]
+    assert "1" in rose["description"]
+
+
 def test_empty_treasure_from_silver_crucible_is_explicit_and_proceeds(game):
     game.start(seed="silver-crucible-empty-chest")
     game.set_player(relics=["SILVER_CRUCIBLE"])
