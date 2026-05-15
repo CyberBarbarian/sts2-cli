@@ -136,6 +136,17 @@ class Game:
             state = self.auto_combat(state)
         raise RuntimeError("Combat did not end")
 
+    def claim_combat_rewards(self, state, max_steps=20):
+        """Claim all explicit non-card combat rewards."""
+        for _ in range(max_steps):
+            if state.get("decision") != "combat_reward":
+                return state
+            rewards = state.get("rewards", [])
+            if not rewards:
+                return state
+            state = self.act("claim_reward", reward_index=rewards[0]["index"])
+        raise RuntimeError("Combat rewards did not resolve")
+
     def skip_neow(self, state):
         """Skip the Neow event and all follow-up rewards until map_select."""
         for _ in range(20):
@@ -145,6 +156,8 @@ class Game:
             if dec == "event_choice":
                 opts = [o for o in state["options"] if not o.get("is_locked")]
                 state = self.act("choose_option", option_index=opts[0]["index"])
+            elif dec == "combat_reward":
+                state = self.claim_combat_rewards(state)
             elif dec == "card_reward":
                 state = self.act("skip_card_reward")
             elif dec == "bundle_select":

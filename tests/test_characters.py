@@ -48,6 +48,8 @@ class TestFullRun:
             elif dec == "event_choice":
                 opts = [o for o in state["options"] if not o.get("is_locked")]
                 state = game.act("choose_option", option_index=opts[0]["index"]) if opts else game.act("leave_room")
+            elif dec == "combat_reward":
+                state = game.claim_combat_rewards(state)
             elif dec == "card_reward":
                 state = game.act("skip_card_reward")
             elif dec == "bundle_select":

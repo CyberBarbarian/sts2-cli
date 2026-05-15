@@ -257,6 +257,17 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
                 else:
                     state = send({"cmd": "action", "action": "leave_room"})
 
+            elif decision == "combat_reward":
+                rewards = state.get("rewards", [])
+                if rewards:
+                    state = send({
+                        "cmd": "action",
+                        "action": "claim_reward",
+                        "args": {"reward_index": rewards[0]["index"]}
+                    })
+                else:
+                    state = send({"cmd": "action", "action": "proceed"})
+
             elif decision == "card_reward":
                 # Pick the first card offered
                 cards = state.get("cards", [])

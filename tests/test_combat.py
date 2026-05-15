@@ -214,7 +214,7 @@ class TestCombatEnd:
         game.skip_neow(state)
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         state = game.auto_play_combat(state)
-        assert state["decision"] in ("card_reward", "map_select", "card_select", "bundle_select")
+        assert state["decision"] in ("combat_reward", "card_reward", "map_select", "card_select", "bundle_select")
 
     def test_player_powers_after_enemy_debuff(self, game):
         """Shrinker Beetle applies Shrink debuff to player after its turn."""
@@ -463,9 +463,17 @@ class TestCombatEdgeCases:
             else:
                 state = game.act("end_turn")
 
+        assert state["decision"] == "combat_reward"
+        assert any(
+            reward["kind"] == "relic" and reward.get("name") and reward.get("description")
+            for reward in state["rewards"]
+        )
+
+        state = game.claim_combat_rewards(state)
         assert state["decision"] == "card_reward"
 
         state = game.act("skip_card_reward")
+        state = game.claim_combat_rewards(state)
         assert state["decision"] == "map_select"
 
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")

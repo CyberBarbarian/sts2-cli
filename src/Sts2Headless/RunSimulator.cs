@@ -976,6 +976,8 @@ public class RunSimulator
                     return DoSelectCardReward(player, args);
                 case "skip_card_reward":
                     return DoSkipCardReward(player);
+                case "claim_reward":
+                    return DoClaimCombatReward(player, args);
                 case "buy_card":
                     return DoBuyCard(player, args);
                 case "buy_relic":
@@ -1340,8 +1342,9 @@ public class RunSimulator
         }
         catch (Exception ex) { Log($"Add card to deck: {ex.Message}"); }
 
-        _pendingCardReward = null;
         // Check if more rewards pending
+        _pendingRewards?.Remove(_pendingCardReward);
+        _pendingCardReward = null;
         return DetectDecisionPoint();
     }
 
@@ -1360,9 +1363,40 @@ public class RunSimulator
         if (_pendingCardReward != null)
         {
             Log("Skipping card reward");
+            _pendingRewards?.Remove(_pendingCardReward);
             _pendingCardReward.OnSkipped();
             _pendingCardReward = null;
         }
+        return DetectDecisionPoint();
+    }
+
+    private Dictionary<string, object?> DoClaimCombatReward(Player player, Dictionary<string, object?>? args)
+    {
+        if (_pendingRewards == null || _pendingRewards.Count == 0)
+            return Error("No pending combat rewards");
+        if (args == null || !args.ContainsKey("reward_index"))
+            return Error("claim_reward requires 'reward_index'");
+
+        var rewardIndex = Convert.ToInt32(args["reward_index"]);
+        if (rewardIndex < 0 || rewardIndex >= _pendingRewards.Count)
+            return Error($"Invalid reward_index {rewardIndex}, {_pendingRewards.Count} rewards pending");
+
+        var reward = _pendingRewards[rewardIndex];
+        if (reward is CardReward)
+            return Error("Card rewards must use select_card_reward or skip_card_reward");
+
+        try
+        {
+            Log($"Claiming combat reward {rewardIndex}: {reward.GetType().Name}");
+            reward.OnSelectWrapper().GetAwaiter().GetResult();
+            _syncCtx.Pump();
+            _pendingRewards.RemoveAt(rewardIndex);
+        }
+        catch (Exception ex)
+        {
+            return Error($"Claim reward failed: {ex.Message}");
+        }
+
         return DetectDecisionPoint();
     }
 
@@ -2470,35 +2504,33 @@ public class RunSimulator
                 var rewards = rewardsSet.GenerateWithoutOffering().GetAwaiter().GetResult();
                 _syncCtx.Pump();
 
-                // Auto-collect gold and potions, but present card choices to agent
-                var cardRewards = new List<CardReward>();
-                foreach (var reward in rewards)
-                {
-                    if (reward is GoldReward || reward is MegaCrit.Sts2.Core.Rewards.RelicReward
-                        || reward is MegaCrit.Sts2.Core.Rewards.PotionReward)
-                    {
-                        try { reward.OnSelectWrapper().GetAwaiter().GetResult(); _syncCtx.Pump(); }
-                        catch (Exception ex) { Log($"Auto-collect reward: {ex.Message}"); }
-                    }
-                    else if (reward is CardReward cr)
-                    {
-                        cardRewards.Add(cr);
-                    }
-                }
-
-                if (cardRewards.Count > 0)
-                {
-                    _pendingCardReward = cardRewards[0];
-                    _pendingRewards = rewards;
-                    return CardRewardState(player, combatRoom);
-                }
-
-                _pendingRewards = null;
+                _pendingRewards = rewards;
             }
             catch (Exception ex) { Log($"Generate rewards: {ex.Message}"); }
         }
 
-        // No more pending rewards — proceed
+        // Resolve pending rewards before returning to the map or next act.
+        if (_pendingCardReward != null)
+            return CardRewardState(player, combatRoom);
+
+        if (_pendingRewards != null)
+        {
+            var claimableRewards = _pendingRewards
+                .Select((reward, i) => CombatRewardInfo(reward, i))
+                .Where(info => !string.Equals(info.GetValueOrDefault("kind") as string, "card_reward", StringComparison.Ordinal))
+                .ToList();
+
+            if (claimableRewards.Count > 0)
+                return CombatRewardState(player, claimableRewards);
+
+            var nextCardReward = _pendingRewards.OfType<CardReward>().FirstOrDefault();
+            if (nextCardReward != null)
+            {
+                _pendingCardReward = nextCardReward;
+                return CardRewardState(player, combatRoom);
+            }
+        }
+
         _pendingCardReward = null;
         _pendingRewards = null;
         _rewardsProcessed = true;
@@ -2520,6 +2552,68 @@ public class RunSimulator
         // Normal → go to map
         ForceToMap();
         return MapSelectState();
+    }
+
+    private Dictionary<string, object?> CombatRewardState(
+        Player player,
+        List<Dictionary<string, object?>> rewards)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "combat_reward",
+            ["context"] = RunContext(),
+            ["rewards"] = rewards,
+            ["gold_earned"] = player.Gold - _goldBeforeCombat,
+            ["player"] = PlayerSummary(player),
+        };
+    }
+
+    private Dictionary<string, object?> CombatRewardInfo(Reward reward, int index)
+    {
+        var kind = CombatRewardKind(reward);
+        var info = new Dictionary<string, object?>
+        {
+            ["index"] = index,
+            ["kind"] = kind,
+            ["type_name"] = reward.GetType().Name,
+        };
+
+        if (kind == "gold")
+        {
+            var amount = TryGetIntMember(reward, "Amount", "Gold", "GoldAmount", "Value");
+            if (amount != null)
+                info["amount"] = amount.Value;
+        }
+        else if (kind == "relic")
+        {
+            var relic = TryGetModelMember<RelicModel>(reward, "Relic", "RelicModel", "Model");
+            if (relic != null)
+            {
+                foreach (var kv in RelicInfo(relic, index))
+                    info[kv.Key] = kv.Value;
+            }
+        }
+        else if (kind == "potion")
+        {
+            var potion = TryGetModelMember<PotionModel>(reward, "Potion", "PotionModel", "Model");
+            if (potion != null)
+            {
+                foreach (var kv in PotionInfo(potion, index))
+                    info[kv.Key] = kv.Value;
+            }
+        }
+
+        return info;
+    }
+
+    private static string CombatRewardKind(Reward reward)
+    {
+        if (reward is GoldReward) return "gold";
+        if (reward is MegaCrit.Sts2.Core.Rewards.RelicReward) return "relic";
+        if (reward is MegaCrit.Sts2.Core.Rewards.PotionReward) return "potion";
+        if (reward is CardReward) return "card_reward";
+        return reward.GetType().Name;
     }
 
     private Dictionary<string, object?> CardRewardState(Player player, CombatRoom? combatRoom)
@@ -4380,6 +4474,102 @@ public class RunSimulator
             return info;
         }
         catch { return null; }
+    }
+
+    private Dictionary<string, object?> PotionInfo(PotionModel potion, int? index = null)
+    {
+        var entry = potion.Id.Entry;
+        var vars = new Dictionary<string, object?>();
+        try
+        {
+            foreach (var dv in potion.DynamicVars.Values)
+                vars[dv.Name] = (int)dv.BaseValue;
+        }
+        catch { }
+
+        var info = new Dictionary<string, object?>
+        {
+            ["id"] = potion.Id.Entry,
+            ["name"] = _loc.Potion(entry),
+            ["description"] = _loc.Bilingual("potions", entry + ".description"),
+            ["vars"] = vars.Count > 0 ? vars : null,
+            ["target_type"] = potion.TargetType.ToString(),
+        };
+        if (index.HasValue)
+            info["index"] = index.Value;
+        return info;
+    }
+
+    private static int? TryGetIntMember(object obj, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var value = TryGetMember(obj, name);
+            if (value is int i) return i;
+            if (value is long l) return checked((int)l);
+            if (value is short s) return s;
+            if (value is byte b) return b;
+        }
+        return null;
+    }
+
+    private static T? TryGetModelMember<T>(object obj, params string[] names) where T : class
+    {
+        foreach (var name in names)
+        {
+            var value = TryGetMember(obj, name);
+            var model = TryGetModelFromValue<T>(value);
+            if (model != null)
+                return model;
+        }
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        try
+        {
+            foreach (var prop in obj.GetType().GetProperties(flags))
+            {
+                if (prop.GetIndexParameters().Length != 0)
+                    continue;
+                var model = TryGetModelFromValue<T>(prop.GetValue(obj));
+                if (model != null)
+                    return model;
+            }
+
+            foreach (var field in obj.GetType().GetFields(flags))
+            {
+                var model = TryGetModelFromValue<T>(field.GetValue(obj));
+                if (model != null)
+                    return model;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static T? TryGetModelFromValue<T>(object? value) where T : class
+    {
+        if (value is T typed)
+            return typed;
+
+        var nestedModel = value != null ? TryGetMember(value, "Model") : null;
+        return nestedModel as T;
+    }
+
+    private static object? TryGetMember(object obj, string name)
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        try
+        {
+            var prop = obj.GetType().GetProperty(name, flags);
+            if (prop != null && prop.GetIndexParameters().Length == 0)
+                return prop.GetValue(obj);
+
+            var field = obj.GetType().GetField(name, flags);
+            if (field != null)
+                return field.GetValue(obj);
+        }
+        catch { }
+        return null;
     }
 
     private Dictionary<string, object?> RelicInfo(RelicModel relic, int? index = null)

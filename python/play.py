@@ -930,6 +930,27 @@ def show_card_reward(state):
     else:
         print(f"  {c(t('No cards to pick.', '没有可选卡牌。'), 'dim')}")
 
+def show_combat_reward(state):
+    print(f"\n{'-' * 60}")
+    print(f"  {c('Combat Rewards', 'bold')}")
+    show_player(state.get("player", {}))
+    print()
+    rewards = state.get("rewards", [])
+    for reward in rewards:
+        kind = reward.get("kind", "?")
+        idx = reward.get("index", "?")
+        name = reward.get("name")
+        if kind == "gold":
+            label = f"{reward.get('amount', '?')} gold"
+        elif name:
+            label = f"{name} ({kind})"
+        else:
+            label = kind
+        print(f"  [{idx}] {label}")
+        description = reward.get("description")
+        if description:
+            print(f"      {desc(description)}")
+
 def show_shop(state):
     print(f"\n{'─' * 60}")
     print(f"  {c(t('Shop','商店'), 'bold')}")
@@ -1840,6 +1861,23 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                                            {str(e["index"]) for e in enemies})
                             args["target_index"] = int(tgt)
                     state = send({"cmd": "action", "action": "play_card", "args": args})
+
+            elif dec == "combat_reward":
+                show_combat_reward(state)
+                rewards = state.get("rewards", [])
+                valid = {str(r["index"]): r for r in rewards}
+
+                if auto:
+                    choice = str(rewards[0]["index"]) if rewards else "0"
+                else:
+                    choice = get_input(
+                        "Claim reward index",
+                        set(valid.keys()),
+                        state=state,
+                    )
+
+                state = send({"cmd": "action", "action": "claim_reward",
+                              "args": {"reward_index": int(choice)}})
 
             elif dec == "card_reward":
                 show_card_reward(state)
