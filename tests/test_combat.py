@@ -89,6 +89,18 @@ class TestCombatStructure:
 
 
 class TestPlayCards:
+    def test_enemy_target_card_requires_target_index(self, game):
+        state = game.start(seed="explicit-card-target")
+        game.skip_neow(state)
+        game.set_player(deck=["STRIKE_IRONCLAD"] * 5)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+
+        result = game.act("play_card", card_index=strike["index"])
+
+        assert result["type"] == "error"
+        assert "target_index" in result["message"]
+
     def test_play_card_costs_energy(self, game):
         state = game.start(seed="cp1")
         game.skip_neow(state)

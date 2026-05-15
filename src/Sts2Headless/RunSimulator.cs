@@ -980,6 +980,8 @@ public class RunSimulator
                     return DoUsePotion(player, args);
                 case "discard_potion":
                     return DoDiscardPotion(player, args);
+                case "claim_relic":
+                    return DoClaimTreasureRelic(player, args);
                 case "leave_room":
                     return DoLeaveRoom(player);
                 case "proceed":
@@ -1045,33 +1047,24 @@ public class RunSimulator
 
         var card = hand[cardIndex];
 
-        // Determine target based on card's TargetType first
-        // Self/None/All cards: target = null (game handles internally)
-        // AnyEnemy cards: use target_index or auto-pick first alive enemy
+        // Determine target based on card's TargetType first.
+        // Self/None/All cards: target = null (game handles internally).
+        // AnyEnemy cards require an explicit target_index; the CLI must not choose silently.
         Creature? target = null;
         var cardTargetType = card.TargetType;
         if (cardTargetType == TargetType.AnyEnemy)
         {
-            // Use caller's target_index if provided
-            if (args.TryGetValue("target_index", out var targetObj) && targetObj != null)
-            {
-                var targetIndex = Convert.ToInt32(targetObj);
-                var state = CombatManager.Instance.DebugOnlyGetState();
-                if (state != null)
-                {
-                    var enemies = state.Enemies.Where(e => e != null && e.IsAlive).ToList();
-                    if (targetIndex >= 0 && targetIndex < enemies.Count)
-                        target = enemies[targetIndex];
-                }
-            }
-            // Fallback: auto-target first alive enemy
-            if (target == null)
-            {
-                var state = CombatManager.Instance.DebugOnlyGetState();
-                target = state?.Enemies?.FirstOrDefault(e => e != null && e.IsAlive);
-            }
+            if (!args.TryGetValue("target_index", out var targetObj) || targetObj == null)
+                return Error("play_card requires 'target_index' for AnyEnemy card");
+
+            var targetIndex = Convert.ToInt32(targetObj);
+            var state = CombatManager.Instance.DebugOnlyGetState();
+            var enemies = state?.Enemies?.Where(e => e != null && e.IsAlive).ToList() ?? new();
+            if (targetIndex < 0 || targetIndex >= enemies.Count)
+                return Error($"Invalid target_index {targetIndex}, combat has {enemies.Count} alive enemies");
+            target = enemies[targetIndex];
         }
-        // All other target types (None, All, etc.) → leave target as null
+        // All other target types (None, All, etc.) leave target as null.
 
         // Check if card can be played
         if (!card.CanPlay(out var reason, out var _))
@@ -1539,7 +1532,8 @@ public class RunSimulator
         var potion = potionsList[idx];
         if (potion == null) return Error($"No potion at index {idx}");
 
-        // Determine target based on potion's TargetType first, then fall back to target_index
+        // Determine target based on potion's TargetType. Enemy-targeted potions
+        // require target_index; the CLI must not choose silently.
         Creature? target = null;
         var potionTargetType = potion.TargetType;
 
@@ -1554,25 +1548,17 @@ public class RunSimulator
         }
         else if (potionTargetType == TargetType.AnyEnemy)
         {
-            // Use caller's target_index if provided, otherwise pick first alive enemy
-            if (args.TryGetValue("target_index", out var tObj) && tObj != null)
-            {
-                var targetIdx = Convert.ToInt32(tObj);
-                var combatState = CombatManager.Instance.DebugOnlyGetState();
-                if (combatState != null)
-                {
-                    var enemies = combatState.Enemies.Where(e => e != null && e.IsAlive).ToList();
-                    if (targetIdx >= 0 && targetIdx < enemies.Count)
-                        target = enemies[targetIdx];
-                }
-            }
-            if (target == null && CombatManager.Instance.IsInProgress)
-            {
-                var combatState = CombatManager.Instance.DebugOnlyGetState();
-                target = combatState?.Enemies?.FirstOrDefault(e => e != null && e.IsAlive);
-            }
+            if (!args.TryGetValue("target_index", out var tObj) || tObj == null)
+                return Error("use_potion requires 'target_index' for AnyEnemy potion");
+
+            var targetIdx = Convert.ToInt32(tObj);
+            var combatState = CombatManager.Instance.DebugOnlyGetState();
+            var enemies = combatState?.Enemies?.Where(e => e != null && e.IsAlive).ToList() ?? new();
+            if (targetIdx < 0 || targetIdx >= enemies.Count)
+                return Error($"Invalid target_index {targetIdx}, combat has {enemies.Count} alive enemies");
+            target = enemies[targetIdx];
         }
-        // All other target types (None, All, etc.) → leave target as null
+        // All other target types (None, All, etc.) leave target as null.
 
         Log($"Using potion: {potion.GetType().Name} at slot {idx} target={target?.GetType().Name ?? "none"}");
         try
@@ -1590,17 +1576,14 @@ public class RunSimulator
             var afterPotions = player.Potions?.ToList() ?? new();
             if (afterPotions.Contains(potion))
             {
-                // Potion wasn't consumed — manually discard it
-                Log("Potion not consumed by action, manually discarding");
-                MegaCrit.Sts2.Core.Commands.PotionCmd.Discard(potion).GetAwaiter().GetResult();
-                _syncCtx.Pump();
+                Log("Potion action completed but potion was not consumed");
+                return Error("Potion action completed but potion was not consumed; state left unchanged");
             }
         }
         catch (Exception ex)
         {
             Log($"Use potion failed: {ex.Message}");
-            // Try manual discard as fallback
-            try { MegaCrit.Sts2.Core.Commands.PotionCmd.Discard(potion).GetAwaiter().GetResult(); } catch { }
+            return Error($"Use potion failed: {ex.Message}");
         }
 
         return DetectDecisionPoint();
@@ -2435,16 +2418,24 @@ public class RunSimulator
             return _runState?.CurrentRoom is MapRoom ? MapSelectState() : DetectDecisionPoint();
         }
 
+        var eventEntry = localEvent.Id?.Entry ?? localEvent.GetType().Name.ToUpperInvariant();
         var currentOptions = localEvent.CurrentOptions;
         if (currentOptions == null || currentOptions.Count == 0)
         {
-            Log($"Event {localEvent.GetType().Name} has no options, auto-skipping");
-            try { RunManager.Instance.EnterRoom(new MapRoom()).GetAwaiter().GetResult(); _syncCtx.Pump(); }
-            catch { }
-            return MapSelectState();
+            Log($"Event {localEvent.GetType().Name} has no options and is not finished");
+            var player = _runState!.Players[0];
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "decision",
+                ["decision"] = "event_blocked",
+                ["context"] = RunContext(),
+                ["event_id"] = eventEntry,
+                ["event_name"] = _loc.Bilingual("events", eventEntry + ".title"),
+                ["message"] = "Event has no current options but is not finished; no headless default was applied",
+                ["player"] = PlayerSummary(player),
+            };
         }
 
-        var eventEntry = localEvent.Id?.Entry ?? localEvent.GetType().Name.ToUpperInvariant();
         var options = currentOptions
             .Select((opt, i) =>
             {
@@ -2984,25 +2975,15 @@ public class RunSimulator
     private Dictionary<string, object?> TreasureState(TreasureRoom treasureRoom)
     {
         // Treasure rooms give relics via TreasureRoomRelicSynchronizer
-        Log("Treasure room — collecting rewards");
+        Log("Treasure room: collecting rewards");
 
         // BUG-013: Ensure any pending relic picking session is complete before starting new one
         WaitForActionExecutor();
         _syncCtx.Pump();
 
-        try
+        var synchronizer = RunManager.Instance.TreasureRoomRelicSynchronizer;
+        if (synchronizer?.CurrentRelics == null)
         {
-            treasureRoom.DoNormalRewards().GetAwaiter().GetResult();
-            _syncCtx.Pump();
-            treasureRoom.DoExtraRewardsIfNeeded().GetAwaiter().GetResult();
-            _syncCtx.Pump();
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("relic picking session"))
-        {
-            // BUG-013: Relic session conflict — wait for pending session then retry
-            Log($"Relic session conflict, waiting and retrying: {ex.Message}");
-            WaitForActionExecutor();
-            _syncCtx.Pump();
             try
             {
                 treasureRoom.DoNormalRewards().GetAwaiter().GetResult();
@@ -3010,21 +2991,72 @@ public class RunSimulator
                 treasureRoom.DoExtraRewardsIfNeeded().GetAwaiter().GetResult();
                 _syncCtx.Pump();
             }
-            catch (Exception retryEx) { Log($"Treasure rewards retry failed: {retryEx.Message}"); }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("relic picking session"))
+            {
+                // BUG-013: Relic session conflict means a choice is already pending.
+                Log($"Relic session already pending: {ex.Message}");
+            }
+            catch (Exception ex) { Log($"Treasure rewards: {ex.Message}"); }
         }
-        catch (Exception ex) { Log($"Treasure rewards: {ex.Message}"); }
 
-        ResolveTreasureRelic();
-        ForceToMap();
-        return MapSelectState();
+        synchronizer = RunManager.Instance.TreasureRoomRelicSynchronizer;
+        var relics = synchronizer?.CurrentRelics;
+        if (relics == null)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "decision",
+                ["decision"] = "treasure_blocked",
+                ["context"] = RunContext(),
+                ["message"] = "Treasure room did not expose relic choices and was not advanced automatically",
+                ["player"] = PlayerSummary(_runState!.Players[0]),
+            };
+        }
+
+        if (relics.Count == 0)
+        {
+            Log("Treasure room: completing empty relic session");
+            synchronizer!.CompleteWithNoRelics();
+            _syncCtx.Pump();
+            ForceToMap();
+            return MapSelectState();
+        }
+
+        var exportedRelics = relics.Select((relic, i) =>
+        {
+            var entry = relic?.Id.Entry ?? "?";
+            return new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["id"] = entry,
+                ["name"] = _loc.Relic(entry),
+                ["description"] = _loc.Bilingual("relics", entry + ".description"),
+            };
+        }).ToList();
+
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "treasure",
+            ["context"] = RunContext(),
+            ["relics"] = exportedRelics,
+            ["player"] = PlayerSummary(_runState!.Players[0]),
+        };
     }
 
-    private void ResolveTreasureRelic()
+    private Dictionary<string, object?> DoClaimTreasureRelic(Player player, Dictionary<string, object?>? args)
     {
+        if (args == null || !args.ContainsKey("relic_index"))
+            return Error("claim_relic requires 'relic_index'");
+
         var synchronizer = RunManager.Instance.TreasureRoomRelicSynchronizer;
         var relics = synchronizer?.CurrentRelics;
         if (relics == null)
-            return;
+            return Error("No pending treasure relic choices");
+
+        var idx = Convert.ToInt32(args["relic_index"]);
+        if (idx < 0 || idx >= relics.Count)
+            return Error($"Invalid relic_index {idx}, treasure has {relics.Count} relic choices");
 
         try
         {
@@ -3035,16 +3067,11 @@ public class RunSimulator
             }
             else
             {
-                var relic = relics[0];
+                var relic = relics[idx];
                 if (relic == null)
-                {
-                    Log("Treasure room: relic choice was null, completing session");
-                    synchronizer!.CompleteWithNoRelics();
-                    return;
-                }
+                    return Error($"Treasure relic choice {idx} is null");
 
-                Log($"Treasure room: auto-picking relic 0 ({relic.Id.Entry})");
-                var player = _runState!.Players[0];
+                Log($"Treasure room: claiming relic {idx} ({relic.Id.Entry})");
                 RelicCmd.Obtain(relic.ToMutable(), player, player.Relics.Count).GetAwaiter().GetResult();
                 EndTreasureRelicVoting(synchronizer!);
             }
@@ -3052,11 +3079,14 @@ public class RunSimulator
             _syncCtx.Pump();
             WaitForActionExecutor();
             _syncCtx.Pump();
+            ForceToMap();
         }
         catch (Exception ex)
         {
-            Log($"Treasure relic resolution failed: {ex.Message}");
+            return Error($"Claim treasure relic failed: {ex.Message}");
         }
+
+        return MapSelectState();
     }
 
     private static void EndTreasureRelicVoting(object synchronizer)
@@ -4057,10 +4087,6 @@ public class RunSimulator
             var optList = options.ToList();
             if (optList.Count == 0)
                 return Task.FromResult<IEnumerable<CardModel>>(Array.Empty<CardModel>());
-
-            // If only one option and minSelect requires it, auto-select
-            if (optList.Count == 1 && minSelect >= 1)
-                return Task.FromResult<IEnumerable<CardModel>>(optList);
 
             // Store pending selection and wait
             PendingOptions = optList;

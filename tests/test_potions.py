@@ -2,6 +2,28 @@
 
 
 class TestPotionActions:
+    def test_enemy_target_potion_requires_target_index(self, game):
+        state = game.start(seed="explicit-potion-target")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["FIRE_POTION"],
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        assert state["player"]["potions"][0]["target_type"] == "AnyEnemy"
+
+        result = game.act("use_potion", potion_index=0)
+
+        assert result["type"] == "error"
+        assert "target_index" in result["message"]
+
     def test_any_player_potion_targets_player(self, game):
         state = game.start(seed="blood-search-75")
         state = game.skip_neow(state)

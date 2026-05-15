@@ -241,6 +241,17 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
                 else:
                     state = send({"cmd": "action", "action": "skip_card_reward"})
 
+            elif decision == "treasure":
+                relics = state.get("relics", [])
+                if relics:
+                    state = send({
+                        "cmd": "action",
+                        "action": "claim_relic",
+                        "args": {"relic_index": relics[0]["index"]}
+                    })
+                else:
+                    state = send({"cmd": "action", "action": "proceed"})
+
             elif decision == "bundle_select":
                 state = send({"cmd": "action", "action": "select_bundle",
                              "args": {"bundle_index": 0}})

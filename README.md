@@ -4,7 +4,7 @@
 > [wuhao21/sts2-cli](https://github.com/wuhao21/sts2-cli), maintained for
 > BG-Agent headless Slay the Spire 2 benchmark work. This fork carries local
 > Windows/headless API fixes for pending event and card selections, dynamic
-> state export, potion targeting, treasure-room state cleanup, and headless
+> state export, explicit potion targeting, treasure-room choice export, and headless
 > dialogue/VFX crashes. These fixes are limited to the CLI/headless API,
 > harness, and tests; they do not intentionally change underlying Slay the
 > Spire 2 card, relic, enemy, or combat rules.
@@ -58,6 +58,7 @@ Type `help` in-game:
   Rest:    option index
   Event:   option index / leave
   Shop:    c0 (card) / r0 (relic) / p0 (potion) / rm (remove) / leave
+  Treasure: relic index
 ```
 
 ## JSON Protocol
@@ -77,7 +78,7 @@ dotnet run --project src/Sts2Headless/Sts2Headless.csproj
 {"cmd": "quit"}
 ```
 
-Each command returns a JSON decision point (`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`). All names are in English.
+Each command returns a JSON decision point (`map_select` / `combat_play` / `card_reward` / `treasure` / `rest_site` / `event_choice` / `shop` / `game_over`). All names are in English.
 
 ## Game Logs
 

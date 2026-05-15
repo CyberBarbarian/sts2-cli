@@ -1799,6 +1799,29 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     state = send({"cmd": "action", "action": "select_card_reward",
                                  "args": {"card_index": int(choice)}})
 
+            elif dec == "treasure":
+                print(f"\n{'─' * 60}")
+                ctx = state.get("context", {})
+                if ctx:
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+                print(f"  {c(t('Choose a relic','选择遗物'), 'bold')}")
+                show_player(state.get("player", {}))
+                print()
+                relics = state.get("relics", [])
+                for r in relics:
+                    print(f"  [{r['index']}] {c(n(r.get('name','?')), 'yellow')}")
+                    desc = n(r.get("description", ""))
+                    if desc:
+                        print(f"      {desc}")
+
+                valid = {str(r["index"]): r for r in relics}
+                if auto:
+                    choice = str(relics[0]["index"]) if relics else "0"
+                else:
+                    choice = get_input(t("Choose relic [index]", "选择遗物 [编号]"), set(valid.keys()), state=state)
+                state = send({"cmd": "action", "action": "claim_relic",
+                             "args": {"relic_index": int(choice)}})
+
             elif dec == "bundle_select":
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})

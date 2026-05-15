@@ -10,10 +10,27 @@ def test_multiple_treasure_rooms_clear_relic_picking_session(game):
     starting_relics = relic_count(state)
 
     state = game.enter_room("treasure")
+    assert state["decision"] == "treasure"
+    assert len(state["relics"]) >= 1
+    state = game.act("claim_relic", relic_index=0)
     assert state["decision"] == "map_select"
     after_first = relic_count(state)
     assert after_first == starting_relics + 1
 
     state = game.enter_room("treasure")
+    assert state["decision"] == "treasure"
+    state = game.act("claim_relic", relic_index=0)
     assert state["decision"] == "map_select"
     assert relic_count(state) == after_first + 1
+
+
+def test_treasure_room_does_not_auto_claim_relic(game):
+    state = game.start(seed="treasure-explicit-claim")
+    starting_relics = relic_count(state)
+
+    state = game.enter_room("treasure")
+
+    assert state["decision"] == "treasure"
+    assert relic_count(state) == starting_relics
+    assert state["relics"][0]["index"] == 0
+    assert state["relics"][0]["name"]
