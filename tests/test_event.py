@@ -395,6 +395,34 @@ class TestFutureOfPotions:
             assert "{" not in option["description"]
 
 
+class TestRelicTrader:
+    def test_trade_options_export_owned_and_new_relic_details(self, game):
+        state = game.start(seed="relic-trader-preview")
+        game.skip_neow(state)
+        game.set_player(relics=[
+            "ICE_CREAM",
+            "PEN_NIB",
+            "STRIKE_DUMMY",
+            "BURNING_BLOOD",
+            "BRONZE_SCALES",
+            "CENTENNIAL_PUZZLE",
+        ])
+        state = game.enter_room("event", event="RELIC_TRADER")
+
+        trade_options = [
+            option for option in state["options"]
+            if option["text_key"].startswith("RELIC_TRADER.pages.INITIAL.options.")
+        ]
+
+        assert len(trade_options) == 3
+        for option in trade_options:
+            trade = option["relic_trade"]
+            assert trade["owned"]["name"] in option["description"]
+            assert trade["owned"]["description"]
+            assert trade["new"]["name"] in option["description"]
+            assert trade["new"]["description"]
+
+
 class TestJungleMazeAdventure:
     def test_join_forces_awards_gold_and_finishes_event(self, game):
         state = game.start(seed="jungle-maze-join")

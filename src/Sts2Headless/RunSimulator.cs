@@ -2859,7 +2859,7 @@ public class RunSimulator
                 title = InterpolateDynamicVars(title, optVars) ?? title;
                 optDesc = InterpolateDynamicVars(optDesc, optVars);
 
-                return new Dictionary<string, object?>
+                var exportedOption = new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["title"] = title,
@@ -2868,6 +2868,12 @@ public class RunSimulator
                     ["is_locked"] = opt.IsLocked,
                     ["vars"] = optVars?.Count > 0 ? optVars : null,
                 };
+
+                var relicTrade = BuildRelicTradePreview(eventEntry, localEvent, opt, i);
+                if (relicTrade != null)
+                    exportedOption["relic_trade"] = relicTrade;
+
+                return exportedOption;
             }).ToList();
 
         // Resolve event name — try ancients table first (for Neow), then events
@@ -2907,6 +2913,73 @@ public class RunSimulator
         AddEventDynamicVars(vars, eventEntry, GetPropertyValue(option, "DynamicVars"));
         AddPotionConversionOptionVars(vars, localEvent, option, optionIndex);
         return vars.Count > 0 ? vars : null;
+    }
+
+    private Dictionary<string, object?>? BuildRelicTradePreview(
+        string eventEntry,
+        object localEvent,
+        EventOption option,
+        int optionIndex)
+    {
+        if (!string.Equals(eventEntry, "RELIC_TRADER", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var tradeIndex = RelicTraderTradeIndex(option.TextKey, optionIndex);
+        if (!tradeIndex.HasValue)
+            return null;
+
+        var ownedRelics = TryGetRelicListMember(localEvent, "OwnedRelics", "_ownedRelics");
+        var newRelics = TryGetRelicListMember(localEvent, "NewRelics", "_newRelics");
+        if (ownedRelics == null || newRelics == null)
+            return null;
+        if (tradeIndex.Value < 0 || tradeIndex.Value >= ownedRelics.Count || tradeIndex.Value >= newRelics.Count)
+            return null;
+
+        return new Dictionary<string, object?>
+        {
+            ["owned"] = RelicInfo(ownedRelics[tradeIndex.Value]),
+            ["new"] = RelicInfo(newRelics[tradeIndex.Value]),
+        };
+    }
+
+    private static int? RelicTraderTradeIndex(string? textKey, int optionIndex)
+    {
+        if (textKey?.EndsWith(".TOP", StringComparison.OrdinalIgnoreCase) == true)
+            return 0;
+        if (textKey?.EndsWith(".MIDDLE", StringComparison.OrdinalIgnoreCase) == true)
+            return 1;
+        if (textKey?.EndsWith(".BOTTOM", StringComparison.OrdinalIgnoreCase) == true)
+            return 2;
+
+        return optionIndex is >= 0 and < 3 ? optionIndex : null;
+    }
+
+    private static IReadOnlyList<RelicModel>? TryGetRelicListMember(object obj, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var relics = TryGetRelicList(TryGetMember(obj, name));
+            if (relics != null)
+                return relics;
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<RelicModel>? TryGetRelicList(object? value)
+    {
+        if (value is IReadOnlyList<RelicModel> direct)
+            return direct;
+
+        if (value is not System.Collections.IEnumerable items)
+            return null;
+
+        var relics = new List<RelicModel>();
+        foreach (var item in items)
+        {
+            if (item is RelicModel relic)
+                relics.Add(relic);
+        }
+        return relics.Count > 0 ? relics : null;
     }
 
     private void AddEventDynamicVars(
