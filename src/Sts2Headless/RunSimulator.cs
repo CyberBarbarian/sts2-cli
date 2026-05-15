@@ -4392,6 +4392,7 @@ public class RunSimulator
                 || IsDebugAudioStop(method)
                 || IsScreenRumble(method)
                 || IsNGameHitStop(method)
+                || IsNGameScreenShakeTrauma(method)
                 || IsFullscreenHealVfxPlay(method);
         }
 
@@ -4422,6 +4423,12 @@ public class RunSimulator
         private static bool IsNGameHitStop(MethodInfo method)
         {
             return method.Name == "DoHitStop"
+                && (method.DeclaringType?.FullName ?? "").Contains("NGame", StringComparison.Ordinal);
+        }
+
+        private static bool IsNGameScreenShakeTrauma(MethodInfo method)
+        {
+            return method.Name == "ScreenShakeTrauma"
                 && (method.DeclaringType?.FullName ?? "").Contains("NGame", StringComparison.Ordinal);
         }
 

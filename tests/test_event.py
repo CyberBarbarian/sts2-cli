@@ -154,6 +154,25 @@ class TestDenseVegetation:
         assert state["enemies"]
 
 
+class TestAmalgamator:
+    def test_combine_defends_finishes_after_card_selection(self, game):
+        state = game.start(seed="amalgamator-combine-defends")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="AMALGAMATOR")
+
+        combine = next(o for o in state["options"] if o["title"] == "Combine Defends")
+        state = game.act("choose_option", option_index=combine["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 2
+        assert state["max_select"] == 2
+
+        state = game.act("select_cards", indices="0,1")
+
+        assert state["decision"] == "map_select"
+        assert any(card["name"] == "Ultimate Defend" for card in state["player"]["deck"])
+
+
 class TestByrdonisNest:
     def test_take_option_names_byrdonis_egg(self, game):
         state = game.start(seed="byrdonis-nest-card-var")
