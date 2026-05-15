@@ -219,6 +219,33 @@ class TestCrystalSphere:
             and any(o["title"] == "Uncover Future" for o in state.get("options", []))
         )
 
+    def test_crystal_sphere_exports_partial_item_fragments(self, game):
+        state = game.start(seed="crystal-partial-0")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("event", event="CRYSTAL_SPHERE")
+
+        option = next(o for o in state["options"] if o["title"] == "Payment Plan")
+        state = game.act("choose_option", option_index=option["index"])
+        state = game.act("crystal_sphere_set_tool", tool="small")
+
+        for x, y in [(3, 0), (4, 0), (5, 0)]:
+            state = game.act("crystal_sphere_click_cell", x=x, y=y)
+
+        partial_items = [
+            item for item in state["visible_items"]
+            if item["is_fully_revealed"] is False
+        ]
+        assert partial_items
+        partial = partial_items[0]
+        assert partial["item_kind"] == "card_reward"
+        assert partial["visible_cells"] == [{"x": 5, "y": 0}]
+        assert partial["revealed_cells"] == 1
+        assert partial["total_cells"] == 4
+
+        revealed_indexes = {item["index"] for item in state["revealed_items"]}
+        assert partial["index"] not in revealed_indexes
+
 
 class TestByrdonisNest:
     def test_take_option_names_byrdonis_egg(self, game):

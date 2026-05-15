@@ -2750,6 +2750,9 @@ public class RunSimulator
         var height = minigame.GridSize.Y;
         var cells = new List<Dictionary<string, object?>>();
         var clickableCells = new List<Dictionary<string, object?>>();
+        var itemIndexes = minigame.Items
+            .Select((item, index) => new { item, index })
+            .ToDictionary(entry => entry.item, entry => entry.index);
 
         for (var y = 0; y < height; y++)
         {
@@ -2768,7 +2771,9 @@ public class RunSimulator
                 };
                 if (!cell.IsHidden && cell.Item != null)
                 {
+                    exported["item_index"] = itemIndexes.TryGetValue(cell.Item, out var itemIndex) ? itemIndex : null;
                     exported["item_type"] = cell.Item.GetType().Name;
+                    exported["item_kind"] = CrystalSphereItemKind(cell.Item);
                     exported["is_good"] = cell.Item.IsGood;
                 }
                 cells.Add(exported);
@@ -2784,17 +2789,14 @@ public class RunSimulator
             }
         }
 
+        var visibleItems = minigame.Items
+            .Select((item, index) => CrystalSphereItemState(minigame, item, index))
+            .Where(item => ((List<Dictionary<string, object?>>)item["visible_cells"]!).Count > 0)
+            .ToList();
+
         var revealedItems = minigame.Items
-            .Where(item => IsCrystalSphereItemRevealed(minigame, item))
-            .Select(item => new Dictionary<string, object?>
-            {
-                ["item_type"] = item.GetType().Name,
-                ["x"] = item.Position.X,
-                ["y"] = item.Position.Y,
-                ["width"] = item.Size.X,
-                ["height"] = item.Size.Y,
-                ["is_good"] = item.IsGood,
-            })
+            .Select((item, index) => CrystalSphereItemState(minigame, item, index))
+            .Where(item => (bool)item["is_fully_revealed"]!)
             .ToList();
 
         return new Dictionary<string, object?>
@@ -2812,6 +2814,7 @@ public class RunSimulator
             ["can_proceed"] = minigame.IsFinished,
             ["cells"] = cells,
             ["clickable_cells"] = clickableCells,
+            ["visible_items"] = visibleItems,
             ["revealed_items"] = revealedItems,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
@@ -2863,6 +2866,69 @@ public class RunSimulator
             }
         }
         return true;
+    }
+
+    private static Dictionary<string, object?> CrystalSphereItemState(
+        CrystalSphereMinigame minigame,
+        CrystalSphereItem item,
+        int index)
+    {
+        var visibleCells = new List<Dictionary<string, object?>>();
+        for (var dx = 0; dx < item.Size.X; dx++)
+        {
+            for (var dy = 0; dy < item.Size.Y; dy++)
+            {
+                var x = item.Position.X + dx;
+                var y = item.Position.Y + dy;
+                if (x < 0 || x >= minigame.GridSize.X || y < 0 || y >= minigame.GridSize.Y)
+                    continue;
+                if (!minigame.cells[x, y].IsHidden)
+                {
+                    visibleCells.Add(new Dictionary<string, object?>
+                    {
+                        ["x"] = x,
+                        ["y"] = y,
+                    });
+                }
+            }
+        }
+
+        var isFullyRevealed = visibleCells.Count == item.Size.X * item.Size.Y;
+        var state = new Dictionary<string, object?>
+        {
+            ["index"] = index,
+            ["item_type"] = item.GetType().Name,
+            ["item_kind"] = CrystalSphereItemKind(item),
+            ["is_good"] = item.IsGood,
+            ["visible_cells"] = visibleCells,
+            ["revealed_cells"] = visibleCells.Count,
+            ["total_cells"] = item.Size.X * item.Size.Y,
+            ["is_fully_revealed"] = isFullyRevealed,
+        };
+        if (isFullyRevealed)
+        {
+            state["x"] = item.Position.X;
+            state["y"] = item.Position.Y;
+            state["width"] = item.Size.X;
+            state["height"] = item.Size.Y;
+        }
+        return state;
+    }
+
+    private static string CrystalSphereItemKind(CrystalSphereItem item)
+    {
+        var typeName = item.GetType().Name;
+        if (typeName.EndsWith("Relic", StringComparison.Ordinal))
+            return "relic";
+        if (typeName.EndsWith("Potion", StringComparison.Ordinal))
+            return "potion";
+        if (typeName.EndsWith("CardReward", StringComparison.Ordinal))
+            return "card_reward";
+        if (typeName.EndsWith("Curse", StringComparison.Ordinal))
+            return "curse";
+        if (typeName.EndsWith("Gold", StringComparison.Ordinal))
+            return "gold";
+        return typeName;
     }
 
     private static string CrystalSphereToolName(CrystalSphereMinigame.CrystalSphereToolType tool)
