@@ -440,3 +440,5 @@ class TestWoodCarvings:
 
         deck_card = next(c for c in state["player"]["deck"] if c["name"] == "Perfected Strike")
         assert deck_card["enchantment"] == "Slither"
+        assert deck_card["enchantment_id"] == "SLITHER"
+        assert "randomize its cost" in deck_card["enchantment_description"]

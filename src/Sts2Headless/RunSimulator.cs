@@ -4315,6 +4315,10 @@ public class RunSimulator
             var entry = card.Enchantment.Id.Entry;
             cardInfo["enchantment"] = _loc.Bilingual("enchantments", entry + ".title");
             cardInfo["enchantment_id"] = entry;
+            var vars = ExportEnhancementVars(card.Enchantment);
+            cardInfo["enchantment_description"] =
+                InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
+            cardInfo["enchantment_vars"] = vars;
             try
             {
                 if (card.Enchantment.Amount != 0)
@@ -4328,6 +4332,10 @@ public class RunSimulator
             var entry = card.Affliction.Id.Entry;
             cardInfo["affliction"] = _loc.Bilingual("afflictions", entry + ".title");
             cardInfo["affliction_id"] = entry;
+            var vars = ExportEnhancementVars(card.Affliction);
+            cardInfo["affliction_description"] =
+                InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
+            cardInfo["affliction_vars"] = vars;
             try
             {
                 if (card.Affliction.Amount != 0)
@@ -4335,6 +4343,19 @@ public class RunSimulator
             }
             catch { }
         }
+    }
+
+    private static Dictionary<string, object?>? ExportEnhancementVars(object enhancement)
+    {
+        var vars = ExportDynamicVars(enhancement) ?? new Dictionary<string, object?>();
+        try
+        {
+            var amount = enhancement.GetType().GetProperty("Amount")?.GetValue(enhancement);
+            if (amount != null)
+                vars["Amount"] = amount;
+        }
+        catch { }
+        return vars.Count > 0 ? vars : null;
     }
 
     private static int GetStatInt(Dictionary<string, object?> stats, string key, int fallback)
