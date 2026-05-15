@@ -40,6 +40,89 @@ class TestCardReward:
             assert "cost" in card
             assert "type" in card
 
+    def test_special_card_reward_exports_card_details(self, game):
+        state = game.start(seed="hopper-special-reward-2")
+        game.skip_neow(state)
+        game.set_player(
+            hp=80,
+            max_hp=80,
+            relics=["BURNING_BLOOD", "VERY_HOT_COCOA"],
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "THUNDERCLAP",
+                "PERFECTED_STRIKE",
+                "PERFECTED_STRIKE",
+                "BLUDGEON",
+                "BLUDGEON",
+                "TWIN_STRIKE",
+                "DISMANTLE",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="THIEVING_HOPPER_WEAK")
+
+        thunderclap = next(c for c in state["hand"] if c["name"] == "Thunderclap")
+        state = game.act("play_card", card_index=thunderclap["index"])
+        perfected = next(c for c in state["hand"] if c["name"] == "Perfected Strike")
+        state = game.act("play_card", card_index=perfected["index"], target_index=0)
+        game.set_draw_order([
+            "BLUDGEON",
+            "BLUDGEON",
+            "TWIN_STRIKE",
+            "DISMANTLE",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+        ])
+        state = game.act("end_turn")
+
+        for _ in range(20):
+            if state["decision"] != "combat_play":
+                break
+            playable_attacks = []
+            for card in state["hand"]:
+                if not card.get("can_play"):
+                    continue
+                if card.get("target_type") not in ("AnyEnemy", "AllEnemies"):
+                    continue
+                stats = card.get("stats") or {}
+                rows = stats.get("damage_by_target") or stats.get("calculateddamage_by_target") or []
+                damage = 0
+                if rows:
+                    damage = (
+                        rows[0].get("total_damage")
+                        or rows[0].get("calculateddamage")
+                        or rows[0].get("damage")
+                        or 0
+                    )
+                playable_attacks.append((damage, card))
+            if not playable_attacks:
+                state = game.act("end_turn")
+                continue
+            card = max(playable_attacks, key=lambda item: item[0])[1]
+            args = {"card_index": card["index"]}
+            if card["target_type"] == "AnyEnemy":
+                args["target_index"] = 0
+            state = game.act("play_card", **args)
+
+        assert state["decision"] == "combat_reward"
+        special = next(r for r in state["rewards"] if r["type_name"] == "SpecialCardReward")
+
+        assert special["kind"] == "card"
+        assert special["id"].startswith("CARD.")
+        assert special["name"]
+        assert special["cost"] is not None
+        assert special["type"]
+        assert special["rarity"]
+        assert "stats" in special
+
     def test_select_card_adds_to_deck(self, game):
         state = game.start(seed="cr3")
         game.skip_neow(state)

@@ -2667,7 +2667,15 @@ public class RunSimulator
                     info[kv.Key] = kv.Value;
             }
         }
-
+        else if (kind == "card")
+        {
+            var card = TryGetModelMember<CardModel>(reward, "Card", "CardModel", "Model");
+            if (card != null)
+            {
+                foreach (var kv in SingleCardRewardInfo(card, index))
+                    info[kv.Key] = kv.Value;
+            }
+        }
         return info;
     }
 
@@ -2677,7 +2685,32 @@ public class RunSimulator
         if (reward is MegaCrit.Sts2.Core.Rewards.RelicReward) return "relic";
         if (reward is MegaCrit.Sts2.Core.Rewards.PotionReward) return "potion";
         if (reward is CardReward) return "card_reward";
+        if (TryGetModelMember<CardModel>(reward, "Card", "CardModel", "Model") != null) return "card";
         return reward.GetType().Name;
+    }
+
+    private Dictionary<string, object?> SingleCardRewardInfo(CardModel card, int? index = null)
+    {
+        var stats = ExtractCardStats(card, _runState?.Players[0]);
+        var keywords = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
+        var info = new Dictionary<string, object?>
+        {
+            ["id"] = card.Id.ToString(),
+            ["name"] = _loc.Card(card.Id.Entry),
+            ["cost"] = GetEnergyCostDisplay(card),
+            ["type"] = card.Type.ToString(),
+            ["rarity"] = card.Rarity.ToString(),
+            ["upgraded"] = card.IsUpgraded,
+            ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+            ["stats"] = stats.Count > 0 ? stats : null,
+            ["keywords"] = keywords?.Count > 0 ? keywords : null,
+            ["after_upgrade"] = GetUpgradedInfo(card, _runState?.Players[0]),
+        };
+        if (index.HasValue)
+            info["index"] = index.Value;
+        AddEnergyCostDetails(info, card);
+        AddCardEnhancements(info, card);
+        return info;
     }
 
     private Dictionary<string, object?> CardRewardState(Player player, CombatRoom? combatRoom)
