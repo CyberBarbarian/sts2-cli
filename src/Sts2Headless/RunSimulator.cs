@@ -3341,7 +3341,10 @@ public class RunSimulator
         }
 
         if (applyCombatModifiers)
+        {
             ApplyCombatStatModifiers(stats, card, player);
+            AddAttackDamageByTarget(stats, card);
+        }
 
         return stats;
     }
@@ -3398,6 +3401,66 @@ public class RunSimulator
         var frail = GetPlayerPowerAmount(player, "FRAIL", "Frail");
         if (frail > 0)
             ScaleStat(stats, "block", 3, 4);
+    }
+
+    private void AddAttackDamageByTarget(Dictionary<string, object?> stats, CardModel card)
+    {
+        if (card.Type != CardType.Attack
+            || !stats.TryGetValue("damage", out var damageObj)
+            || damageObj == null)
+        {
+            return;
+        }
+
+        var rows = new List<Dictionary<string, object?>>();
+        try
+        {
+            var combatState = CombatManager.Instance.DebugOnlyGetState();
+            var enemies = combatState?.Enemies?
+                .Where(e => e != null && e.IsAlive)
+                .ToList();
+            if (enemies == null || enemies.Count == 0)
+                return;
+
+            var baseDamage = Convert.ToInt32(damageObj);
+            var repeat = GetStatInt(stats, "repeat", 1);
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                var vulnerable = GetCreaturePowerAmount(enemy, "VULNERABLE", "Vulnerable");
+                var targetDamage = vulnerable > 0
+                    ? baseDamage * 3 / 2
+                    : baseDamage;
+                var totalDamage = targetDamage * repeat;
+                var block = Math.Max(0, enemy.Block);
+                var row = new Dictionary<string, object?>
+                {
+                    ["target_index"] = i,
+                    ["target_name"] = MonsterDisplayName(enemy.Monster, enemy),
+                    ["vulnerable"] = vulnerable,
+                    ["block"] = block,
+                    ["damage"] = targetDamage,
+                };
+                if (repeat > 1)
+                {
+                    row["repeat"] = repeat;
+                    row["total_damage"] = totalDamage;
+                    row["unblocked_total_damage"] = Math.Max(0, totalDamage - block);
+                }
+                else
+                {
+                    row["unblocked_damage"] = Math.Max(0, targetDamage - block);
+                }
+                rows.Add(row);
+            }
+        }
+        catch
+        {
+            return;
+        }
+
+        if (rows.Count > 0)
+            stats["damage_by_target"] = rows;
     }
 
     private static void AddStat(Dictionary<string, object?> stats, string key, int delta)
@@ -3478,6 +3541,42 @@ public class RunSimulator
                     if (powerKeys.Any(key =>
                         string.Equals(entry, key, StringComparison.OrdinalIgnoreCase)
                         || string.Equals(normalizedEntry, key, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        total += power.Amount;
+                    }
+                }
+                catch { }
+            }
+        }
+        catch
+        {
+            return total;
+        }
+        return total;
+    }
+
+    private int GetCreaturePowerAmount(Creature? creature, params string[] powerKeys)
+    {
+        var total = 0;
+        try
+        {
+            var powers = creature?.Powers;
+            if (powers == null)
+                return 0;
+
+            foreach (var power in powers)
+            {
+                try
+                {
+                    var entry = power.Id.Entry;
+                    var normalizedEntry = entry.EndsWith("_POWER", StringComparison.OrdinalIgnoreCase)
+                        ? entry[..^"_POWER".Length]
+                        : entry;
+                    var localizedName = _loc.Power(entry);
+                    if (powerKeys.Any(key => string.Equals(localizedName, key, StringComparison.OrdinalIgnoreCase)
+                                             || string.Equals(entry, key, StringComparison.OrdinalIgnoreCase)
+                                             || string.Equals(normalizedEntry, key, StringComparison.OrdinalIgnoreCase)
+                                             || entry.Contains(key, StringComparison.OrdinalIgnoreCase)))
                     {
                         total += power.Amount;
                     }

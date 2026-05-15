@@ -95,6 +95,30 @@ class TestDynamicCardStats:
         assert target_stats[0]["vulnerable"] == 2
         assert target_stats[1]["vulnerable"] == 0
 
+    def test_attack_damage_exports_target_specific_vulnerable_damage(self, game):
+        state = game.start(seed="attack-target-vulnerable-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "BASH",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="NIBBITS_NORMAL")
+        bash = next(c for c in state["hand"] if c["name"] == "Bash")
+
+        state = game.act("play_card", card_index=bash["index"], target_index=0)
+
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+        target_stats = strike["stats"]["damage_by_target"]
+        assert len(target_stats) >= 2
+        assert strike["stats"]["damage"] == 6
+        assert target_stats[0]["damage"] == 9
+        assert target_stats[1]["damage"] == 6
+        assert target_stats[0]["vulnerable"] == 2
+        assert target_stats[1]["vulnerable"] == 0
+
     def test_attack_damage_stats_include_player_strength(self, game):
         state = game.start(seed="strength-damage-stats")
         game.skip_neow(state)
