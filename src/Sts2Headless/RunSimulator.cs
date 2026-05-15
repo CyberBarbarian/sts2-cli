@@ -1934,7 +1934,7 @@ public class RunSimulator
                 {
                     var stats = ExtractCardStats(card, player);
                     var bkws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                    return new Dictionary<string, object?>
+                    var cardInfo = new Dictionary<string, object?>
                     {
                         ["name"] = _loc.Card(card.Id.Entry),
                         ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
@@ -1944,6 +1944,8 @@ public class RunSimulator
                         ["stats"] = stats.Count > 0 ? stats : null,
                         ["keywords"] = bkws?.Count > 0 ? bkws : null,
                     };
+                    AddCardEnhancements(cardInfo, card);
+                    return cardInfo;
                 }).ToList(),
             }).ToList();
 
@@ -1965,7 +1967,7 @@ public class RunSimulator
             {
                 var stats = ExtractCardStats(cr.Card, player);
                 var rrkws = cr.Card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                return new Dictionary<string, object?>
+                var cardInfo = new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["id"] = cr.Card.Id.ToString(),
@@ -1978,6 +1980,8 @@ public class RunSimulator
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card, player),
                 };
+                AddCardEnhancements(cardInfo, cr.Card);
+                return cardInfo;
             }).ToList();
 
             return new Dictionary<string, object?>
@@ -2000,7 +2004,7 @@ public class RunSimulator
             {
                 var stats = ExtractCardStats(card, player);
                 var selkws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                return new Dictionary<string, object?>
+                var cardInfo = new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["id"] = card.Id.ToString(),
@@ -2014,6 +2018,8 @@ public class RunSimulator
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card, player),
                 };
+                AddCardEnhancements(cardInfo, card);
+                return cardInfo;
             }).ToList();
 
             return new Dictionary<string, object?>
@@ -2250,16 +2256,7 @@ public class RunSimulator
             }
             var kws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
             if (kws?.Count > 0) cardInfo["keywords"] = kws;
-            if (c.Enchantment != null)
-            {
-                cardInfo["enchantment"] = _loc.Bilingual("enchantments", c.Enchantment.Id.Entry + ".title");
-                try { if (c.Enchantment.Amount != 0) cardInfo["enchantment_amount"] = c.Enchantment.Amount; } catch { }
-            }
-            if (c.Affliction != null)
-            {
-                cardInfo["affliction"] = _loc.Bilingual("afflictions", c.Affliction.Id.Entry + ".title");
-                try { if (c.Affliction.Amount != 0) cardInfo["affliction_amount"] = c.Affliction.Amount; } catch { }
-            }
+            AddCardEnhancements(cardInfo, c);
             return cardInfo;
         }).ToList() ?? new();
 
@@ -2487,7 +2484,7 @@ public class RunSimulator
         {
             var stats = ExtractCardStats(c, player);
             var crkws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-            return new Dictionary<string, object?>
+            var cardInfo = new Dictionary<string, object?>
             {
                 ["index"] = i,
                 ["id"] = c.Id.ToString(),
@@ -2500,6 +2497,8 @@ public class RunSimulator
                 ["keywords"] = crkws?.Count > 0 ? crkws : null,
                 ["after_upgrade"] = GetUpgradedInfo(c, player),
             };
+            AddCardEnhancements(cardInfo, c);
+            return cardInfo;
         }).ToList();
 
         return new Dictionary<string, object?>
@@ -3059,6 +3058,8 @@ public class RunSimulator
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
                 };
+                if (card != null)
+                    AddCardEnhancements(exported, card);
                 return ShopItemState(e, exported, card != null);
             }).ToList();
 
@@ -3591,6 +3592,35 @@ public class RunSimulator
         return total;
     }
 
+    private void AddCardEnhancements(Dictionary<string, object?> cardInfo, CardModel card)
+    {
+        if (card.Enchantment != null)
+        {
+            var entry = card.Enchantment.Id.Entry;
+            cardInfo["enchantment"] = _loc.Bilingual("enchantments", entry + ".title");
+            cardInfo["enchantment_id"] = entry;
+            try
+            {
+                if (card.Enchantment.Amount != 0)
+                    cardInfo["enchantment_amount"] = card.Enchantment.Amount;
+            }
+            catch { }
+        }
+
+        if (card.Affliction != null)
+        {
+            var entry = card.Affliction.Id.Entry;
+            cardInfo["affliction"] = _loc.Bilingual("afflictions", entry + ".title");
+            cardInfo["affliction_id"] = entry;
+            try
+            {
+                if (card.Affliction.Amount != 0)
+                    cardInfo["affliction_amount"] = card.Affliction.Amount;
+            }
+            catch { }
+        }
+    }
+
     private static int GetStatInt(Dictionary<string, object?> stats, string key, int fallback)
     {
         return stats.TryGetValue(key, out var value) && value != null
@@ -3820,7 +3850,7 @@ public class RunSimulator
             {
                 var dstats = ExtractCardStats(c, player);
                 var dkws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                return new Dictionary<string, object?>
+                var cardInfo = new Dictionary<string, object?>
                 {
                     ["id"] = c.Id.ToString(),
                     ["name"] = _loc.Card(c.Id.Entry),
@@ -3832,6 +3862,8 @@ public class RunSimulator
                     ["keywords"] = dkws?.Count > 0 ? dkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(c, player),
                 };
+                AddCardEnhancements(cardInfo, c);
+                return cardInfo;
             }).ToList(),
         };
     }

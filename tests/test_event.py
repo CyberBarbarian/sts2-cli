@@ -247,3 +247,25 @@ class TestSapphireSeed:
         assert plant["vars"]["Enchantment"] == "Sown"
         assert "Sown" in plant["description"]
         assert "with 0" not in plant["description"]
+
+
+class TestWoodCarvings:
+    def test_snake_enchantment_is_exported_on_deck_card(self, game):
+        state = game.start(seed="wood-carvings-slither-export")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "PERFECTED_STRIKE",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("event", event="WOOD_CARVINGS")
+        snake = next(o for o in state["options"] if o["title"] == "Snake")
+
+        state = game.act("choose_option", option_index=snake["index"])
+        perfected = next(c for c in state["cards"] if c["name"] == "Perfected Strike")
+        state = game.act("select_cards", indices=str(perfected["index"]))
+
+        deck_card = next(c for c in state["player"]["deck"] if c["name"] == "Perfected Strike")
+        assert deck_card["enchantment"] == "Slither"
