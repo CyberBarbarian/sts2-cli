@@ -1090,9 +1090,14 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
+    private bool HasPendingHeadlessChoice()
+    {
+        return _cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null;
+    }
+
     private Dictionary<string, object?> DoEndTurn(Player player)
     {
-        if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
+        if (HasPendingHeadlessChoice())
             return DetectDecisionPoint();
 
         if (!CombatManager.Instance.IsPlayPhase)
@@ -1128,6 +1133,8 @@ public class RunSimulator
         {
             PlayerCmd.EndTurn(player, canBackOut: false);
             _syncCtx.Pump();
+            if (HasPendingHeadlessChoice())
+                return DetectDecisionPoint();
 
             // Fallback: if turn didn't complete synchronously, keep pumping with SuppressYield on
             if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase && !player.Creature.IsDead)
@@ -1135,6 +1142,7 @@ public class RunSimulator
                 for (int i = 0; i < 50; i++)
                 {
                     _syncCtx.Pump();
+                    if (HasPendingHeadlessChoice()) break;
                     if (_turnStarted.IsSet || _combatEnded.IsSet) break;
                     if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
                     if (CombatManager.Instance.IsPlayPhase) break;
@@ -1146,6 +1154,8 @@ public class RunSimulator
         {
             YieldPatches.SuppressYield = false;
         }
+        if (HasPendingHeadlessChoice())
+            return DetectDecisionPoint();
 
         // Second fallback: if still stuck after SuppressYield window, cancel and retry.
         // The WaitUntilQueue TCS is likely deadlocked.
@@ -1173,15 +1183,20 @@ public class RunSimulator
                 {
                     YieldPatches.SuppressYield = false;
                 }
+                if (HasPendingHeadlessChoice())
+                    return DetectDecisionPoint();
 
                 for (int i = 0; i < 100; i++)
                 {
                     _syncCtx.Pump();
+                    if (HasPendingHeadlessChoice()) break;
                     if (_turnStarted.IsSet || _combatEnded.IsSet) break;
                     if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
                     if (CombatManager.Instance.IsPlayPhase) break;
                     Thread.Sleep(10);
                 }
+                if (HasPendingHeadlessChoice())
+                    return DetectDecisionPoint();
             }
             catch (Exception ex) { Log($"Cancel retry: {ex.Message}"); }
 
@@ -1217,6 +1232,7 @@ public class RunSimulator
                     for (int i = 0; i < 500; i++)
                     {
                         _syncCtx.Pump();
+                        if (HasPendingHeadlessChoice()) break;
                         if (endTurnTask.IsCompleted) break;
                         if (_turnStarted.IsSet || _combatEnded.IsSet) break;
                         if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
@@ -1224,6 +1240,8 @@ public class RunSimulator
                         Thread.Sleep(10);
                     }
                     YieldPatches.SuppressYield = false;
+                    if (HasPendingHeadlessChoice())
+                        return DetectDecisionPoint();
 
                     // If still not play phase, try just waiting a bit more
                     if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase && !player.Creature.IsDead)
@@ -1231,11 +1249,14 @@ public class RunSimulator
                         for (int i = 0; i < 200; i++)
                         {
                             _syncCtx.Pump();
+                            if (HasPendingHeadlessChoice()) break;
                             Thread.Sleep(10);
                             if (CombatManager.Instance.IsPlayPhase || !CombatManager.Instance.IsInProgress || player.Creature.IsDead)
                                 break;
                         }
                     }
+                    if (HasPendingHeadlessChoice())
+                        return DetectDecisionPoint();
 
                     if (CombatManager.Instance.IsPlayPhase)
                         Log("Nuclear fallback SUCCEEDED — play phase resumed");

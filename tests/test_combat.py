@@ -411,3 +411,23 @@ class TestCombatEdgeCases:
                 break
         assert state["decision"] == "game_over"
         assert state["victory"] is False
+
+    def test_enemy_turn_card_selection_is_returned_before_retrying_end_turn(self, game):
+        state = game.start(seed="knowledge-demon-selection")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=["STRIKE_IRONCLAD"] * 5 + ["DEFEND_IRONCLAD"] * 5,
+        )
+        state = game.enter_room("combat", encounter="KNOWLEDGE_DEMON_BOSS")
+
+        assert state["decision"] == "combat_play"
+        assert state["enemies"][0]["move_name"] == "Curse of Knowledge"
+
+        state = game.act("end_turn")
+
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 0
+        assert state["max_select"] == 1
+        assert state["cards"]
