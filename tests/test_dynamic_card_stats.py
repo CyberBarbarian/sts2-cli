@@ -348,6 +348,25 @@ class TestDynamicCardStats:
         assert all(not name.endswith(".title") for name in power_names)
         assert all(not description.endswith(".description") for description in power_descriptions)
 
+    def test_power_descriptions_interpolate_amount(self, game):
+        state = game.start(seed="power-description-amount")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "DRUM_OF_BATTLE",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        drum = next(c for c in state["hand"] if c["name"] == "Drum of Battle")
+
+        state = game.act("play_card", card_index=drum["index"])
+        power = next(p for p in state["player_powers"] if p["name"] == "Drum of Battle")
+
+        assert "{Amount:plural" not in power["description"]
+        assert "Exhaust the top card" in power["description"]
+
     def test_block_stats_include_player_frail(self, game):
         state = game.start(seed="codex-frail-block")
         game.skip_neow(state)

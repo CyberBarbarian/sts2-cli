@@ -2393,11 +2393,15 @@ public class RunSimulator
                 catch { }
 
                 // Enemy powers
-                var ePowers = e.Powers?.Select(pw => new Dictionary<string, object?>
+                var ePowers = e.Powers?.Select(pw =>
                 {
-                    ["name"] = _loc.Power(pw.Id.Entry),
-                    ["description"] = _loc.PowerDescription(pw.Id.Entry),
-                    ["amount"] = pw.Amount,
+                    var vars = new Dictionary<string, object?> { ["Amount"] = pw.Amount };
+                    return new Dictionary<string, object?>
+                    {
+                        ["name"] = _loc.Power(pw.Id.Entry),
+                        ["description"] = InterpolateDynamicVars(_loc.PowerDescription(pw.Id.Entry), vars),
+                        ["amount"] = pw.Amount,
+                    };
                 }).ToList();
 
                 var enemyInfo = new Dictionary<string, object?>
@@ -2424,11 +2428,15 @@ public class RunSimulator
             }).ToList() ?? new();
 
         // Player powers/buffs
-        var playerPowers = player.Creature?.Powers?.Select(pw => new Dictionary<string, object?>
+        var playerPowers = player.Creature?.Powers?.Select(pw =>
         {
-            ["name"] = _loc.Power(pw.Id.Entry),
-            ["description"] = _loc.PowerDescription(pw.Id.Entry),
-            ["amount"] = pw.Amount,
+            var vars = new Dictionary<string, object?> { ["Amount"] = pw.Amount };
+            return new Dictionary<string, object?>
+            {
+                ["name"] = _loc.Power(pw.Id.Entry),
+                ["description"] = InterpolateDynamicVars(_loc.PowerDescription(pw.Id.Entry), vars),
+                ["amount"] = pw.Amount,
+            };
         }).ToList();
 
         var result = new Dictionary<string, object?>
