@@ -2905,6 +2905,7 @@ public class RunSimulator
             ["total_cells"] = item.Size.X * item.Size.Y,
             ["is_fully_revealed"] = isFullyRevealed,
         };
+        AddCrystalSphereRewardPreview(state, item);
         if (isFullyRevealed)
         {
             state["x"] = item.Position.X;
@@ -2913,6 +2914,80 @@ public class RunSimulator
             state["height"] = item.Size.Y;
         }
         return state;
+    }
+
+    private static void AddCrystalSphereRewardPreview(Dictionary<string, object?> state, CrystalSphereItem item)
+    {
+        var kind = Convert.ToString(state["item_kind"]) ?? "unknown";
+        var preview = new Dictionary<string, object?>
+        {
+            ["category"] = kind,
+        };
+
+        switch (kind)
+        {
+            case "card_reward":
+            {
+                var rarity = GetPrivateFieldValue(item, "_rarity")?.ToString() ?? "Unknown";
+                state["card_rarity"] = rarity;
+                state["visual_variant"] = $"{rarity.ToLowerInvariant()}_card_reward";
+                preview["card_rarity"] = rarity;
+                preview["card_choices"] = 3;
+                break;
+            }
+            case "potion":
+            {
+                var potion = GetPrivateFieldValue(item, "_potion");
+                var rarity = GetPropertyValue(potion, "Rarity")?.ToString() ?? "Unknown";
+                state["potion_rarity"] = rarity;
+                state["visual_variant"] = $"{rarity.ToLowerInvariant()}_potion";
+                preview["potion_rarity"] = rarity;
+                break;
+            }
+            case "gold":
+            {
+                var isBig = GetPrivateFieldValue(item, "_isBig") is bool value && value;
+                var amount = isBig ? 30 : 10;
+                var size = isBig ? "big" : "small";
+                state["gold_amount"] = amount;
+                state["gold_size"] = size;
+                state["visual_variant"] = isBig ? "big_gold" : "gold";
+                preview["amount"] = amount;
+                preview["size"] = size;
+                break;
+            }
+            case "curse":
+                state["curse_card"] = "Doubt";
+                state["visual_variant"] = "curse";
+                preview["curse_card"] = "Doubt";
+                break;
+            case "relic":
+                state["visual_variant"] = "relic";
+                break;
+            default:
+                state["visual_variant"] = kind;
+                break;
+        }
+
+        state["reward_preview"] = preview;
+    }
+
+    private static object? GetPrivateFieldValue(object? instance, string fieldName)
+    {
+        if (instance == null)
+            return null;
+        return instance.GetType()
+            .GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(instance);
+    }
+
+    private static object? GetPropertyValue(object? instance, string propertyName)
+    {
+        if (instance == null)
+            return null;
+        return instance.GetType()
+            .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(instance);
     }
 
     private static string CrystalSphereItemKind(CrystalSphereItem item)

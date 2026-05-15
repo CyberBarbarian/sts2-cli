@@ -239,12 +239,72 @@ class TestCrystalSphere:
         assert partial_items
         partial = partial_items[0]
         assert partial["item_kind"] == "card_reward"
+        assert partial["card_rarity"] == "Uncommon"
+        assert partial["reward_preview"]["category"] == "card_reward"
+        assert partial["reward_preview"]["card_rarity"] == "Uncommon"
+        assert partial["reward_preview"]["card_choices"] == 3
         assert partial["visible_cells"] == [{"x": 5, "y": 0}]
         assert partial["revealed_cells"] == 1
         assert partial["total_cells"] == 4
 
         revealed_indexes = {item["index"] for item in state["revealed_items"]}
         assert partial["index"] not in revealed_indexes
+
+        gold = next(item for item in state["revealed_items"] if item["item_kind"] == "gold")
+        assert gold["gold_amount"] == 10
+        assert gold["reward_preview"] == {
+            "category": "gold",
+            "amount": 10,
+            "size": "small",
+        }
+
+    def test_crystal_sphere_exports_all_visual_reward_variants(self, game):
+        state = game.start(seed="crystal-all-0")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("event", event="CRYSTAL_SPHERE")
+
+        option = next(o for o in state["options"] if o["title"] == "Payment Plan")
+        state = game.act("choose_option", option_index=option["index"])
+
+        for x, y in [(3, 3), (7, 3), (3, 7), (7, 7), (5, 5), (5, 1)]:
+            state = game.act("crystal_sphere_click_cell", x=x, y=y)
+
+        visible = state["visible_items"]
+        kinds = {item["item_kind"] for item in visible}
+        assert {"relic", "potion", "card_reward", "curse", "gold"} <= kinds
+
+        assert any(
+            item["item_kind"] == "potion"
+            and item["potion_rarity"] == "Rare"
+            and item["visual_variant"] == "rare_potion"
+            for item in visible
+        )
+        assert any(
+            item["item_kind"] == "card_reward"
+            and item["card_rarity"] == "Rare"
+            and item["visual_variant"] == "rare_card_reward"
+            and item["reward_preview"]["card_choices"] == 3
+            for item in visible
+        )
+        assert any(
+            item["item_kind"] == "gold"
+            and item["gold_size"] == "big"
+            and item["gold_amount"] == 30
+            and item["visual_variant"] == "big_gold"
+            for item in visible
+        )
+        assert any(
+            item["item_kind"] == "curse"
+            and item["is_good"] is False
+            and item["reward_preview"]["curse_card"] == "Doubt"
+            for item in visible
+        )
+        assert any(
+            item["item_kind"] == "relic"
+            and item["reward_preview"] == {"category": "relic"}
+            for item in visible
+        )
 
 
 class TestByrdonisNest:

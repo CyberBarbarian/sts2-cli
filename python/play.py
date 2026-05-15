@@ -1103,15 +1103,19 @@ def show_crystal_sphere(state):
         print(f"  {t('Visible items','Visible items')}:")
         for item in state.get("visible_items", []):
             kind = item.get("item_kind") or item.get("item_type", "?")
+            detail = item.get("card_rarity") or item.get("potion_rarity") or item.get("gold_size")
+            label = f"{detail} {kind}" if detail else kind
             status = "complete" if item.get("is_fully_revealed") else "partial"
-            print(f"    - #{item.get('index')} {kind} ({status}, "
+            print(f"    - #{item.get('index')} {label} ({status}, "
                   f"{item.get('revealed_cells')}/{item.get('total_cells')} cells)")
     if state.get("revealed_items"):
         print(f"  {t('Revealed','Revealed')}:")
         for item in state.get("revealed_items", []):
             kind = item.get("item_kind") or item.get("item_type", "?")
+            detail = item.get("card_rarity") or item.get("potion_rarity") or item.get("gold_size")
+            label = f"{detail} {kind}" if detail else kind
             value = "good" if item.get("is_good") else "bad"
-            print(f"    - #{item.get('index')} {kind} ({value}) "
+            print(f"    - #{item.get('index')} {label} ({value}) "
                   f"at {item.get('x')},{item.get('y')} "
                   f"{item.get('width')}x{item.get('height')}")
     print(f"  {c('? hidden, . empty, G good item, B bad item', 'dim')}")
