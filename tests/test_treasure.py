@@ -34,3 +34,21 @@ def test_treasure_room_does_not_auto_claim_relic(game):
     assert relic_count(state) == starting_relics
     assert state["relics"][0]["index"] == 0
     assert state["relics"][0]["name"]
+
+
+def test_treasure_relic_exports_effect_vars_and_resolved_description(game):
+    state = game.start(seed="relic-vars-a")
+    state = game.enter_room("treasure")
+
+    relic = state["relics"][0]
+
+    assert relic["id"] == "BRONZE_SCALES"
+    assert relic["vars"]["ThornsPower"] == 3
+    assert "{ThornsPower}" not in relic["description"]
+    assert "3" in relic["description"]
+
+    state = game.act("claim_relic", relic_index=relic["index"])
+    owned = next(r for r in state["player"]["relics"] if r["id"] == "BRONZE_SCALES")
+
+    assert owned["vars"]["ThornsPower"] == 3
+    assert "{ThornsPower}" not in owned["description"]

@@ -2931,15 +2931,11 @@ public class RunSimulator
 
         var relics = inv.RelicEntries.Select((e, i) =>
         {
-            var entry = e.Model?.Id.Entry ?? "?";
-            var exported = new Dictionary<string, object?>
-            {
-                ["index"] = i,
-                ["name"] = _loc.Relic(entry),
-                ["description"] = _loc.Bilingual("relics", entry + ".description"),
-                ["cost"] = e.Cost,
-                ["is_stocked"] = e.IsStocked,
-            };
+            var exported = e.Model != null
+                ? RelicInfo(e.Model, index: i)
+                : new Dictionary<string, object?> { ["index"] = i, ["name"] = "?", ["description"] = null };
+            exported["cost"] = e.Cost;
+            exported["is_stocked"] = e.IsStocked;
             return ShopItemState(e, exported, e.Model != null);
         }).ToList();
 
@@ -3024,14 +3020,9 @@ public class RunSimulator
 
         var exportedRelics = relics.Select((relic, i) =>
         {
-            var entry = relic?.Id.Entry ?? "?";
-            return new Dictionary<string, object?>
-            {
-                ["index"] = i,
-                ["id"] = entry,
-                ["name"] = _loc.Relic(entry),
-                ["description"] = _loc.Bilingual("relics", entry + ".description"),
-            };
+            if (relic == null)
+                return new Dictionary<string, object?> { ["index"] = i, ["id"] = "?", ["name"] = "?", ["description"] = null };
+            return RelicInfo(relic, index: i);
         }).ToList();
 
         return new Dictionary<string, object?>
@@ -3613,6 +3604,35 @@ public class RunSimulator
         catch { return null; }
     }
 
+    private Dictionary<string, object?> RelicInfo(RelicModel relic, int? index = null)
+    {
+        var entry = relic.Id.Entry;
+        var vars = RelicVars(relic);
+        var varsOrNull = vars.Count > 0 ? vars : null;
+        var info = new Dictionary<string, object?>
+        {
+            ["id"] = entry,
+            ["name"] = _loc.Relic(entry),
+            ["description"] = InterpolateDynamicVars(_loc.Bilingual("relics", entry + ".description"), varsOrNull),
+            ["vars"] = varsOrNull,
+        };
+        if (index.HasValue)
+            info["index"] = index.Value;
+        return info;
+    }
+
+    private static Dictionary<string, object?> RelicVars(RelicModel relic)
+    {
+        var vars = new Dictionary<string, object?>();
+        try
+        {
+            foreach (var dv in relic.DynamicVars.Values)
+                vars[dv.Name] = (int)dv.BaseValue;
+        }
+        catch { }
+        return vars;
+    }
+
     private Dictionary<string, object?> PlayerSummary(Player player)
     {
         return new Dictionary<string, object?>
@@ -3622,17 +3642,7 @@ public class RunSimulator
             ["max_hp"] = player.Creature?.MaxHp ?? 0,
             ["block"] = player.Creature?.Block ?? 0,
             ["gold"] = player.Gold,
-            ["relics"] = player.Relics?.Select(r =>
-            {
-                var vars = new Dictionary<string, object?>();
-                try { foreach (var dv in r.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch { }
-                return new Dictionary<string, object?>
-                {
-                    ["name"] = _loc.Relic(r.Id.Entry),
-                    ["description"] = _loc.Bilingual("relics", r.Id.Entry + ".description"),
-                    ["vars"] = vars.Count > 0 ? vars : null,
-                };
-            }).ToList(),
+            ["relics"] = player.Relics?.Select(r => RelicInfo(r)).ToList(),
             ["potions"] = player.Potions?.Select((p, i) =>
             {
                 if (p == null) return null;
