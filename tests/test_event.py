@@ -135,6 +135,24 @@ class TestDenseVegetation:
         assert state["player"]["gold"] == gold_before + trudge["vars"]["Gold"]
         assert state["player"]["deck_size"] == deck_size_before
 
+    def test_rest_option_advances_to_fight_page(self, game):
+        state = game.start(seed="dense-vegetation-rest")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="DENSE_VEGETATION")
+
+        rest = next(o for o in state["options"] if o["title"] == "Rest")
+        state = game.act("choose_option", option_index=rest["index"])
+
+        assert state["decision"] == "event_choice"
+        assert state["event_name"] == "Dense Vegetation"
+        assert [o["title"] for o in state["options"]] == ["Fight!"]
+
+        state = game.act("choose_option", option_index=state["options"][0]["index"])
+
+        assert state["decision"] == "combat_play"
+        assert state["context"]["room_type"] == "Monster"
+        assert state["enemies"]
+
 
 class TestByrdonisNest:
     def test_take_option_names_byrdonis_egg(self, game):

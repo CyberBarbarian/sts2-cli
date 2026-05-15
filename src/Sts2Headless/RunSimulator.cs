@@ -4280,6 +4280,8 @@ public class RunSimulator
         {
             return IsTalkCmdPlay(method)
                 || IsDebugAudioPlay(method)
+                || IsDebugAudioStop(method)
+                || IsScreenRumble(method)
                 || IsFullscreenHealVfxPlay(method);
         }
 
@@ -4293,6 +4295,18 @@ public class RunSimulator
         {
             return method.Name == "Play"
                 && (method.DeclaringType?.FullName ?? "").Contains("NDebugAudioManager", StringComparison.Ordinal);
+        }
+
+        private static bool IsDebugAudioStop(MethodInfo method)
+        {
+            return method.Name == "Stop"
+                && (method.DeclaringType?.FullName ?? "").Contains("NDebugAudioManager", StringComparison.Ordinal);
+        }
+
+        private static bool IsScreenRumble(MethodInfo method)
+        {
+            return method.Name == "ScreenRumble"
+                && (method.DeclaringType?.FullName ?? "").Contains("NGame", StringComparison.Ordinal);
         }
 
         private static bool IsFullscreenHealVfxPlay(MethodInfo method)
