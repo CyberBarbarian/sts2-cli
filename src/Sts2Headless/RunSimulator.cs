@@ -3343,11 +3343,70 @@ public class RunSimulator
 
         if (applyCombatModifiers)
         {
-            ApplyCombatStatModifiers(stats, card, player);
+            if (!ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null))
+                ApplyCombatStatModifiers(stats, card, player);
             AddAttackDamageByTarget(stats, card, player);
         }
 
         return stats;
+    }
+
+    private static bool ApplyCardPreviewStats(
+        Dictionary<string, object?> stats,
+        CardModel card,
+        CardPreviewMode previewMode,
+        Creature? target)
+    {
+        var previewStats = TryGetCardPreviewStats(card, previewMode, target);
+        if (previewStats == null)
+            return false;
+
+        foreach (var (key, value) in previewStats)
+        {
+            if (HasCardSpecificOverride(stats, card, key))
+                continue;
+            stats[key] = value;
+        }
+        return true;
+    }
+
+    private static bool HasCardSpecificOverride(Dictionary<string, object?> stats, CardModel card, string key)
+    {
+        if (!stats.TryGetValue(key, out var currentValue) || currentValue == null)
+            return false;
+
+        try
+        {
+            var dynamicVar = card.DynamicVars.Values
+                .FirstOrDefault(dv => string.Equals(dv.Name, key, StringComparison.OrdinalIgnoreCase));
+            return dynamicVar != null && Convert.ToInt32(currentValue) != (int)dynamicVar.BaseValue;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static Dictionary<string, int>? TryGetCardPreviewStats(
+        CardModel card,
+        CardPreviewMode previewMode,
+        Creature? target)
+    {
+        try
+        {
+            var dynamicVars = card.DynamicVars.Clone(card);
+            dynamicVars.ClearPreview();
+            card.UpdateDynamicVarPreview(previewMode, target, dynamicVars);
+
+            var stats = new Dictionary<string, int>();
+            foreach (var dv in dynamicVars.Values)
+                stats[dv.Name.ToLowerInvariant()] = (int)dv.PreviewValue;
+            return stats;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static bool LostHpThisTurn(Creature creature)
@@ -3423,20 +3482,16 @@ public class RunSimulator
             if (enemies == null || enemies.Count == 0)
                 return;
 
-            var baseDamage = Convert.ToInt32(damageObj);
             var repeat = GetStatInt(stats, "repeat", 1);
-            var cardsPlayedThisTurn = GetCardsPlayedThisTurn(player);
             for (int i = 0; i < enemies.Count; i++)
             {
                 var enemy = enemies[i];
+                var previewStats = TryGetCardPreviewStats(card, CardPreviewMode.MultiCreatureTargeting, enemy);
                 var vulnerable = GetCreaturePowerAmount(enemy, "VULNERABLE", "Vulnerable");
                 var slow = GetCreaturePowerAmount(enemy, "SLOW", "Slow");
-                var targetDamage = baseDamage;
-                if (vulnerable > 0)
-                    targetDamage = targetDamage * 3 / 2;
-                if (slow > 0 && cardsPlayedThisTurn > 0)
-                    targetDamage = targetDamage * (10 + cardsPlayedThisTurn * slow) / 10;
-                var totalDamage = targetDamage * repeat;
+                var targetDamage = previewStats?.GetValueOrDefault("damage") ?? Convert.ToInt32(damageObj);
+                var targetRepeat = GetTargetAttackRepeat(card, enemy, previewStats?.GetValueOrDefault("repeat") ?? repeat);
+                var totalDamage = targetDamage * targetRepeat;
                 var block = Math.Max(0, enemy.Block);
                 var row = new Dictionary<string, object?>
                 {
@@ -3449,11 +3504,10 @@ public class RunSimulator
                 if (slow > 0)
                 {
                     row["slow"] = slow;
-                    row["slow_cards_played"] = cardsPlayedThisTurn;
                 }
-                if (repeat > 1)
+                if (targetRepeat > 1)
                 {
-                    row["repeat"] = repeat;
+                    row["repeat"] = targetRepeat;
                     row["total_damage"] = totalDamage;
                     row["unblocked_total_damage"] = Math.Max(0, totalDamage - block);
                 }
@@ -3473,37 +3527,12 @@ public class RunSimulator
             stats["damage_by_target"] = rows;
     }
 
-    private static int GetCardsPlayedThisTurn(Player? player)
+    private static int GetTargetAttackRepeat(CardModel card, Creature target, int baseRepeat)
     {
-        try
-        {
-            var combatState = player?.Creature?.CombatState;
-            return CombatManager.Instance.History.Entries.Count(entry =>
-                string.Equals(entry.GetType().Name, "CardPlayFinishedEntry", StringComparison.Ordinal)
-                && EntryHappenedThisTurn(entry, combatState));
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static bool EntryHappenedThisTurn(object entry, object? combatState)
-    {
-        if (combatState == null)
-            return true;
-
-        try
-        {
-            var method = entry.GetType().GetMethod(
-                "HappenedThisTurn",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            return method == null || Convert.ToBoolean(method.Invoke(entry, new[] { combatState }));
-        }
-        catch
-        {
-            return true;
-        }
+        var repeat = Math.Max(1, baseRepeat);
+        if (card is MegaCrit.Sts2.Core.Models.Cards.Dismantle && target.HasPower<VulnerablePower>())
+            repeat *= 2;
+        return repeat;
     }
 
     private static void AddStat(Dictionary<string, object?> stats, string key, int delta)

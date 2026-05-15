@@ -145,6 +145,31 @@ class TestDynamicCardStats:
         state = game.act("play_card", card_index=strike["index"], target_index=0)
         assert hp_before - state["enemies"][0]["hp"] == target_stats["damage"]
 
+    def test_dismantle_exports_target_specific_vulnerable_repeat(self, game):
+        state = game.start(seed="dismantle-target-repeat-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "BASH",
+            "DISMANTLE",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        bash = next(c for c in state["hand"] if c["name"] == "Bash")
+
+        state = game.act("play_card", card_index=bash["index"], target_index=0)
+
+        dismantle = next(c for c in state["hand"] if c["name"] == "Dismantle")
+        target_stats = dismantle["stats"]["damage_by_target"][0]
+        assert target_stats["damage"] == 12
+        assert target_stats["repeat"] == 2
+        assert target_stats["total_damage"] == 24
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=dismantle["index"], target_index=0)
+        assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
+
     def test_attack_damage_stats_include_player_strength(self, game):
         state = game.start(seed="strength-damage-stats")
         game.skip_neow(state)
