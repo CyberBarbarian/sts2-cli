@@ -373,6 +373,28 @@ class TestRanwidTheElder:
         assert gold["title"] == "Give 100 Gold"
 
 
+class TestFutureOfPotions:
+    def test_potion_options_export_source_and_result_details(self, game):
+        state = game.start(seed="future-of-potions-vars")
+        game.skip_neow(state)
+        game.set_player(potions=["FLEX_POTION", "GAMBLERS_BREW"])
+        state = game.enter_room("event", event="THE_FUTURE_OF_POTIONS")
+
+        potion_options = [
+            option for option in state["options"]
+            if option["text_key"].endswith(".POTION")
+        ]
+
+        assert len(potion_options) == 2
+        assert potion_options[0]["vars"]["Potion"] == "Flex Potion"
+        assert potion_options[1]["vars"]["Potion"] == "Gambler's Brew"
+        for option in potion_options:
+            assert option["vars"]["Rarity"]
+            assert option["vars"]["Type"]
+            assert "{" not in option["title"]
+            assert "{" not in option["description"]
+
+
 class TestJungleMazeAdventure:
     def test_join_forces_awards_gold_and_finishes_event(self, game):
         state = game.start(seed="jungle-maze-join")

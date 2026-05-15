@@ -2779,21 +2779,8 @@ public class RunSimulator
                         optDesc = rd;
                 }
 
-                // Extract vars: try event's own DynamicVars first, then relic
-                Dictionary<string, object?>? optVars = null;
-                try
-                {
-                    // Event's DynamicVars (covers Gold, HpLoss, Heal, etc.)
-                    if (localEvent.DynamicVars?.Values != null)
-                    {
-                        optVars = new Dictionary<string, object?>();
-                        foreach (var dv in localEvent.DynamicVars.Values)
-                        {
-                            optVars[dv.Name] = ExportEventDynamicVar(eventEntry, dv);
-                        }
-                    }
-                }
-                catch { }
+                // Extract vars from the event and any option-specific engine state.
+                var optVars = ExportEventOptionVars(eventEntry, localEvent, opt, i);
                 // Also try relic vars (for Neow options)
                 if (opt.TextKey != null)
                 {
@@ -2851,6 +2838,97 @@ public class RunSimulator
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    private Dictionary<string, object?>? ExportEventOptionVars(
+        string eventEntry,
+        object localEvent,
+        EventOption option,
+        int optionIndex)
+    {
+        var vars = new Dictionary<string, object?>();
+        AddEventDynamicVars(vars, eventEntry, GetPropertyValue(localEvent, "DynamicVars"));
+        AddEventDynamicVars(vars, eventEntry, GetPropertyValue(option, "DynamicVars"));
+        AddPotionConversionOptionVars(vars, localEvent, option, optionIndex);
+        return vars.Count > 0 ? vars : null;
+    }
+
+    private void AddEventDynamicVars(
+        Dictionary<string, object?> vars,
+        string eventEntry,
+        object? dynamicVarSet)
+    {
+        try
+        {
+            var values = dynamicVarSet?.GetType().GetProperty("Values")?.GetValue(dynamicVarSet)
+                         as System.Collections.IEnumerable;
+            if (values == null)
+                return;
+
+            foreach (var value in values)
+            {
+                if (value is DynamicVar dynamicVar)
+                    vars[dynamicVar.Name] = ExportEventDynamicVar(eventEntry, dynamicVar);
+            }
+        }
+        catch { }
+    }
+
+    private void AddPotionConversionOptionVars(
+        Dictionary<string, object?> vars,
+        object localEvent,
+        EventOption option,
+        int optionIndex)
+    {
+        if (option.TextKey?.EndsWith(".POTION", StringComparison.OrdinalIgnoreCase) != true)
+            return;
+
+        var potionToCardType = GetPropertyValue(localEvent, "PotionToCardType");
+        if (potionToCardType == null)
+            return;
+
+        var potions = _runState?.Players[0].Potions?.Where(p => p != null).ToList();
+        if (potions == null || optionIndex < 0 || optionIndex >= potions.Count)
+            return;
+
+        var potion = potions[optionIndex];
+        var potionEntry = potion.Id.Entry;
+        vars["Potion"] = _loc.Potion(potionEntry);
+
+        var rarity = GetPropertyValue(potion, "Rarity")?.ToString();
+        if (!string.IsNullOrWhiteSpace(rarity))
+            vars["Rarity"] = HumanizeEnumToken(rarity);
+
+        var cardType = TryGetPotionConversionCardType(potionToCardType, potion);
+        if (!string.IsNullOrWhiteSpace(cardType))
+            vars["Type"] = HumanizeEnumToken(cardType);
+    }
+
+    private static string? TryGetPotionConversionCardType(object potionToCardType, PotionModel potion)
+    {
+        var potionEntry = potion.Id.Entry;
+        if (potionToCardType is System.Collections.IEnumerable entries)
+        {
+            foreach (var entry in entries)
+            {
+                var key = GetPropertyValue(entry, "Key");
+                var value = GetPropertyValue(entry, "Value");
+                if (key == null)
+                    continue;
+                if (ReferenceEquals(key, potion)
+                    || string.Equals(ModelEntry(key), potionEntry, StringComparison.OrdinalIgnoreCase))
+                {
+                    return value?.ToString();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string HumanizeEnumToken(string value)
+    {
+        return value.Replace("_", " ", StringComparison.Ordinal);
     }
 
     private Dictionary<string, object?> CrystalSphereState(CrystalSphereMinigame minigame)
