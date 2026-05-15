@@ -347,6 +347,8 @@ class TestDynamicCardStats:
         assert "Setup Strike" in power_names
         assert all(not name.endswith(".title") for name in power_names)
         assert all(not description.endswith(".description") for description in power_descriptions)
+        assert all("{" not in description for description in power_descriptions)
+        assert any("Gain 2 Strength" in description for description in power_descriptions)
 
     def test_power_descriptions_interpolate_amount(self, game):
         state = game.start(seed="power-description-amount")

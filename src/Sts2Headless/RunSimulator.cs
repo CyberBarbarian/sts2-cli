@@ -2401,11 +2401,10 @@ public class RunSimulator
                 // Enemy powers
                 var ePowers = e.Powers?.Select(pw =>
                 {
-                    var vars = new Dictionary<string, object?> { ["Amount"] = pw.Amount };
                     return new Dictionary<string, object?>
                     {
                         ["name"] = _loc.Power(pw.Id.Entry),
-                        ["description"] = InterpolateDynamicVars(_loc.PowerDescription(pw.Id.Entry), vars),
+                        ["description"] = PowerDescription(pw.Id.Entry, pw, pw.Amount),
                         ["amount"] = pw.Amount,
                     };
                 }).ToList();
@@ -2436,11 +2435,10 @@ public class RunSimulator
         // Player powers/buffs
         var playerPowers = player.Creature?.Powers?.Select(pw =>
         {
-            var vars = new Dictionary<string, object?> { ["Amount"] = pw.Amount };
             return new Dictionary<string, object?>
             {
                 ["name"] = _loc.Power(pw.Id.Entry),
-                ["description"] = InterpolateDynamicVars(_loc.PowerDescription(pw.Id.Entry), vars),
+                ["description"] = PowerDescription(pw.Id.Entry, pw, pw.Amount),
                 ["amount"] = pw.Amount,
             };
         }).ToList();
@@ -3784,6 +3782,43 @@ public class RunSimulator
         if (monsterKey == "THE_KIN")
             monsterKey = "KIN_PRIEST";
         return _loc.Monster(monsterKey);
+    }
+
+    private string PowerDescription(string entry, object power, int amount)
+    {
+        var vars = PowerDescriptionVars(entry, power, amount);
+        return InterpolateDynamicVars(_loc.PowerDescription(entry), vars) ?? _loc.PowerDescription(entry);
+    }
+
+    private static Dictionary<string, object?> PowerDescriptionVars(string entry, object power, int amount)
+    {
+        var vars = new Dictionary<string, object?>();
+
+        if (entry.EndsWith("_POWER", StringComparison.Ordinal))
+        {
+            var cardEntry = entry[..^"_POWER".Length];
+            try
+            {
+                var card = ModelDb.GetById<CardModel>(new ModelId("CARD", cardEntry));
+                var cardVars = ExportDynamicVars(card);
+                if (cardVars != null)
+                {
+                    foreach (var (key, value) in cardVars)
+                        vars[key] = value;
+                }
+            }
+            catch { }
+        }
+
+        var powerVars = ExportDynamicVars(power);
+        if (powerVars != null)
+        {
+            foreach (var (key, value) in powerVars)
+                vars[key] = value;
+        }
+
+        vars["Amount"] = amount;
+        return vars;
     }
 
     private static string? ModelEntry(object? model)
