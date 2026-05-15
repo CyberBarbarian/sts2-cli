@@ -2017,7 +2017,7 @@ public class RunSimulator
                         ["cost"] = GetEnergyCostDisplay(card),
                         ["type"] = card.Type.ToString(),
                         ["rarity"] = card.Rarity.ToString(),
-                        ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+                        ["description"] = CardDescription(card, stats),
                         ["stats"] = stats.Count > 0 ? stats : null,
                         ["keywords"] = bkws?.Count > 0 ? bkws : null,
                     };
@@ -2053,7 +2053,7 @@ public class RunSimulator
                     ["cost"] = GetEnergyCostDisplay(cr.Card),
                     ["type"] = cr.Card.Type.ToString(),
                     ["rarity"] = cr.Card.Rarity.ToString(),
-                    ["description"] = _loc.Bilingual("cards", cr.Card.Id.Entry + ".description"),
+                    ["description"] = CardDescription(cr.Card, stats),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card, player),
@@ -2093,7 +2093,7 @@ public class RunSimulator
                     ["rarity"] = card.Rarity.ToString(),
                     ["upgraded"] = card.IsUpgraded,
                     ["stats"] = stats.Count > 0 ? stats : null,
-                    ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+                    ["description"] = CardDescription(card, stats),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card, player),
                 };
@@ -2333,7 +2333,7 @@ public class RunSimulator
                 ["can_play"] = c.CanPlay(out _, out _),
                 ["target_type"] = c.TargetType.ToString(),
                 ["stats"] = stats.Count > 0 ? stats : null,
-                ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+                ["description"] = CardDescription(c, stats, includeCombatText: true),
             };
             AddEnergyCostDetails(cardInfo, c);
             if (starCost > 0)
@@ -2701,7 +2701,7 @@ public class RunSimulator
             ["type"] = card.Type.ToString(),
             ["rarity"] = card.Rarity.ToString(),
             ["upgraded"] = card.IsUpgraded,
-            ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+            ["description"] = CardDescription(card, stats),
             ["stats"] = stats.Count > 0 ? stats : null,
             ["keywords"] = keywords?.Count > 0 ? keywords : null,
             ["after_upgrade"] = GetUpgradedInfo(card, _runState?.Players[0]),
@@ -2730,7 +2730,7 @@ public class RunSimulator
                 ["cost"] = GetEnergyCostDisplay(c),
                 ["type"] = c.Type.ToString(),
                 ["rarity"] = c.Rarity.ToString(),
-                ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+                ["description"] = CardDescription(c, stats),
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["keywords"] = crkws?.Count > 0 ? crkws : null,
                 ["after_upgrade"] = GetUpgradedInfo(c, player),
@@ -3500,6 +3500,111 @@ public class RunSimulator
         return description;
     }
 
+    private string CardDescription(
+        CardModel card,
+        Dictionary<string, object?>? stats = null,
+        bool includeCombatText = false)
+    {
+        var raw = _loc.Bilingual("cards", card.Id.Entry + ".description");
+        return ResolveCardDescription(raw, card, stats, includeCombatText) ?? raw;
+    }
+
+    private static string? ResolveCardDescription(
+        string? text,
+        CardModel card,
+        Dictionary<string, object?>? stats,
+        bool includeCombatText)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var vars = ExportDynamicVars(card) ?? new Dictionary<string, object?>();
+        if (stats != null)
+        {
+            foreach (var (key, value) in stats)
+            {
+                if (value == null)
+                    continue;
+                vars.TryAdd(key, value);
+            }
+        }
+
+        text = ReplaceFormatterBlocks(text, "IfUpgraded:show:", body =>
+            ResolveConditionalFormatterChoice(body, card.IsUpgraded));
+        text = ReplaceFormatterBlocks(text, "InCombat:", body =>
+            ResolveConditionalFormatterChoice(body, includeCombatText));
+
+        text = InterpolateDynamicVars(text, vars.Count > 0 ? vars : null);
+        return NormalizeInlineResourceIcons(text);
+    }
+
+    private static string ReplaceFormatterBlocks(
+        string text,
+        string formatterPrefix,
+        Func<string, string> resolve)
+    {
+        var tokenPrefix = "{" + formatterPrefix;
+        var guard = 0;
+        while (guard++ < 100)
+        {
+            var start = text.IndexOf(tokenPrefix, StringComparison.Ordinal);
+            if (start < 0)
+                return text;
+
+            var end = FindMatchingBrace(text, start);
+            if (end < 0)
+                return text;
+
+            var bodyStart = start + tokenPrefix.Length;
+            var body = text.Substring(bodyStart, end - bodyStart);
+            var replacement = resolve(body);
+            text = text[..start] + replacement + text[(end + 1)..];
+        }
+
+        return text;
+    }
+
+    private static int FindMatchingBrace(string text, int start)
+    {
+        var depth = 0;
+        for (var i = start; i < text.Length; i++)
+        {
+            if (text[i] == '{')
+                depth++;
+            else if (text[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                    return i;
+            }
+        }
+        return -1;
+    }
+
+    private static string ResolveConditionalFormatterChoice(string body, bool condition)
+    {
+        var separator = FindTopLevelSeparator(body, '|');
+        if (separator >= 0)
+            return condition ? body[..separator] : body[(separator + 1)..];
+
+        return condition ? body : "";
+    }
+
+    private static int FindTopLevelSeparator(string text, char separator)
+    {
+        var depth = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '{')
+                depth++;
+            else if (text[i] == '}')
+                depth--;
+            else if (text[i] == separator && depth == 0)
+                return i;
+        }
+        return -1;
+    }
+
     private static string? InterpolateDynamicVars(string? text, Dictionary<string, object?>? vars)
     {
         if (string.IsNullOrEmpty(text))
@@ -3519,8 +3624,33 @@ public class RunSimulator
                 return value == null ? match.Value : FormatEnergyText(value);
             });
 
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:starIcons\((?<arg>[^)]*)\)\}",
+            match =>
+            {
+                var key = match.Groups["key"].Value;
+                object? value = null;
+                if (vars != null)
+                    vars.TryGetValue(key, out value);
+
+                value ??= ParseEnergyIconArgument(match.Groups["arg"].Value);
+                return value == null ? match.Value : FormatCountText(value, "Star");
+            });
+
         if (vars == null || vars.Count == 0)
             return text;
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:diff\(\)\}",
+            match =>
+            {
+                var key = match.Groups["key"].Value;
+                return vars.TryGetValue(key, out var value) && value != null
+                    ? value.ToString() ?? ""
+                    : match.Value;
+            });
 
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
@@ -3568,6 +3698,19 @@ public class RunSimulator
         catch
         {
             return $"{value} Energy";
+        }
+    }
+
+    private static string FormatCountText(object value, string singular)
+    {
+        try
+        {
+            var count = Convert.ToInt32(value);
+            return $"{count} {(count == 1 ? singular : singular + "s")}";
+        }
+        catch
+        {
+            return $"{value} {singular}s";
         }
     }
 
@@ -3961,7 +4104,9 @@ public class RunSimulator
                     ["rarity"] = card?.Rarity.ToString() ?? "?",
                     ["cost"] = cardCost,
                     ["card_cost"] = cardCost,
-                    ["description"] = _loc.Bilingual("cards", entry + ".description"),
+                    ["description"] = card != null
+                        ? CardDescription(card, stats)
+                        : _loc.Bilingual("cards", entry + ".description"),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["keywords"] = shopkws?.Count > 0 ? shopkws : null,
                     ["after_upgrade"] = card != null ? GetUpgradedInfo(card, _runState?.Players[0]) : null,
@@ -4955,7 +5100,7 @@ public class RunSimulator
             {
                 ["cost"] = GetEnergyCostDisplay(clone),
                 ["stats"] = stats.Count > 0 ? stats : null,
-                ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+                ["description"] = CardDescription(clone, stats),
                 ["added_keywords"] = addedKws.Count > 0 ? addedKws : null,
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
@@ -5119,7 +5264,7 @@ public class RunSimulator
                     ["cost"] = GetEnergyCostDisplay(c),
                     ["type"] = c.Type.ToString(),
                     ["upgraded"] = c.IsUpgraded,
-                    ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
+                    ["description"] = CardDescription(c, dstats),
                     ["stats"] = dstats.Count > 0 ? dstats : null,
                     ["keywords"] = dkws?.Count > 0 ? dkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(c, player),

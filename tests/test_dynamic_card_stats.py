@@ -367,6 +367,19 @@ class TestDynamicCardStats:
         assert "{Amount:plural" not in power["description"]
         assert "Exhaust the top card" in power["description"]
 
+    def test_card_descriptions_resolve_conditional_upgrade_formatters(self, game):
+        state = game.start(seed="card-description-ifupgraded")
+        state = game.skip_neow(state)
+        state = game.set_player(deck=["CASCADE", "PRIMAL_FORCE", "CRUELTY"])
+
+        deck = {card["name"]: card for card in state["player"]["deck"]}
+        assert deck["Cascade"]["description"] == "Play the top X cards of your Draw Pile."
+        assert deck["Cascade"]["after_upgrade"]["description"] == "Play the top X+1 cards of your Draw Pile."
+        assert deck["Primal Force"]["description"] == "Transform all Attacks in your Hand into Giant Rock."
+        assert deck["Primal Force"]["after_upgrade"]["description"] == "Transform all Attacks in your Hand into Giant Rock+."
+        assert deck["Cruelty"]["description"] == "Vulnerable enemies take an additional 25% damage."
+        assert deck["Cruelty"]["after_upgrade"]["description"] == "Vulnerable enemies take an additional 50% damage."
+
     def test_block_stats_include_player_frail(self, game):
         state = game.start(seed="codex-frail-block")
         game.skip_neow(state)
