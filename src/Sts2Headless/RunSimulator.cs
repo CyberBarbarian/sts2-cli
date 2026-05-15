@@ -2273,7 +2273,7 @@ public class RunSimulator
                 ["index"] = i,
                 ["id"] = c.Id.ToString(),
                 ["name"] = _loc.Card(c.Id.Entry),
-                ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
+                ["cost"] = GetCombatEnergyCost(c),
                 ["type"] = c.Type.ToString(),
                 ["rarity"] = c.Rarity.ToString(),
                 ["can_play"] = c.CanPlay(out _, out _),
@@ -3747,6 +3747,20 @@ public class RunSimulator
             stats["repeat"] = Math.Max(0, xValue);
         }
         catch { }
+    }
+
+    private static int GetCombatEnergyCost(CardModel card)
+    {
+        try
+        {
+            if (card.EnergyCost?.CostsX == true)
+                return Math.Max(0, card.EnergyCost.GetAmountToSpend());
+            return card.EnergyCost?.GetResolved() ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static Dictionary<string, int>? TryGetCardPreviewStats(

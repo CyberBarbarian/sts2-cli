@@ -187,6 +187,7 @@ class TestDynamicCardStats:
         state = game.enter_room("combat", encounter="SLIMES_WEAK")
 
         whirlwind = next(c for c in state["hand"] if c["name"] == "Whirlwind")
+        assert whirlwind["cost"] == state["energy"]
         target_stats = whirlwind["stats"]["damage_by_target"]
         assert len(target_stats) >= 2
         target = next(
