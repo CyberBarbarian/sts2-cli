@@ -574,3 +574,29 @@ class TestCombatEdgeCases:
         state = game.act("end_turn")
         assert state["decision"] == "combat_play"
         assert state["player"]["hp"] > 0
+
+    def test_decimillipede_all_segments_defeated_resolves_rewards(self, game):
+        state = game.start(seed="decimillipede-empty-after-whirlwind")
+        game.skip_neow(state)
+        game.set_player(
+            hp=9999,
+            max_hp=9999,
+            deck=[
+                "BLOODLETTING",
+                "BLOODLETTING",
+                "BLOODLETTING",
+                "BLOODLETTING",
+                "WHIRLWIND",
+            ],
+        )
+        state = game.enter_room("combat", encounter="DECIMILLIPEDE_ELITE")
+
+        while any(card["name"] == "Bloodletting" for card in state["hand"]):
+            bloodletting = next(card for card in state["hand"] if card["name"] == "Bloodletting")
+            state = game.act("play_card", card_index=bloodletting["index"])
+
+        whirlwind = next(card for card in state["hand"] if card["name"] == "Whirlwind")
+        state = game.act("play_card", card_index=whirlwind["index"])
+
+        assert state["decision"] == "combat_reward"
+        assert state.get("rewards")

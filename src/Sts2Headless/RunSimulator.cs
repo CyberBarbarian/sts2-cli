@@ -2148,6 +2148,14 @@ public class RunSimulator
                 goto checkCardSelect;  // Jump back to card_select handling
             }
 
+            if (CombatManager.Instance.IsInProgress
+                && CombatManager.Instance.IsPlayPhase
+                && !CombatHasAliveEnemies())
+            {
+                if (TryResolveCombatWithNoAliveEnemies(player))
+                    return DetectPostCombatState(player, combatRoom);
+            }
+
             if (CombatManager.Instance.IsInProgress && CombatManager.Instance.IsPlayPhase)
             {
                 return CombatPlayState(player);
@@ -2487,6 +2495,54 @@ public class RunSimulator
         }
 
         return result;
+    }
+
+    private static bool CombatHasAliveEnemies()
+    {
+        try
+        {
+            return CombatManager.Instance.DebugOnlyGetState()?.Enemies?
+                .Any(enemy => enemy != null && enemy.IsAlive) == true;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private bool TryResolveCombatWithNoAliveEnemies(Player player)
+    {
+        if (!CombatManager.Instance.IsInProgress || !CombatManager.Instance.IsPlayPhase)
+            return false;
+
+        Log("Combat has no alive enemies during play phase; resolving engine combat cleanup");
+        _turnStarted.Reset();
+        _combatEnded.Reset();
+        YieldPatches.SuppressYield = true;
+        try
+        {
+            PlayerCmd.EndTurn(player, canBackOut: false);
+            for (int i = 0; i < 100; i++)
+            {
+                _syncCtx.Pump();
+                WaitForActionExecutor();
+                if (!CombatManager.Instance.IsInProgress || _combatEnded.IsSet)
+                    break;
+                Thread.Sleep(5);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Resolve no-enemy combat cleanup failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            YieldPatches.SuppressYield = false;
+        }
+
+        _syncCtx.Pump();
+        WaitForActionExecutor();
+        return !CombatManager.Instance.IsInProgress;
     }
 
     private Dictionary<string, object?> DetectPostCombatState(Player player, CombatRoom combatRoom)
