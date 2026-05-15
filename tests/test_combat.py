@@ -497,6 +497,37 @@ class TestCombatEdgeCases:
         assert result["rolled_back_room_type"] == "CombatRoom"
         assert save_path.exists()
 
+    def test_play_card_is_rejected_without_mutation_during_card_selection(self, game):
+        state = game.start(seed="pending-selection-play-card-guard")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "BLOODLETTING",
+                "BASH",
+                "HEADBUTT",
+                "TWIN_STRIKE",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        bloodletting = next(card for card in state["hand"] if card["name"] == "Bloodletting")
+        state = game.act("play_card", card_index=bloodletting["index"])
+        bash = next(card for card in state["hand"] if card["name"] == "Bash")
+        state = game.act("play_card", card_index=bash["index"], target_index=0)
+        headbutt = next(card for card in state["hand"] if card["name"] == "Headbutt")
+        state = game.act("play_card", card_index=headbutt["index"], target_index=0)
+
+        assert state["decision"] == "card_select"
+        invalid = game.act("play_card", card_index=0, target_index=0)
+        assert invalid["type"] == "error"
+        assert "card selection" in invalid["message"].lower()
+
+        state = game.act("select_cards", indices="0")
+        hand_names = [card["name"] for card in state["hand"]]
+        assert "Twin Strike" in hand_names
+
     def test_vantom_dismember_headless_vfx_does_not_force_game_over(self, game):
         state = game.start(seed="vantom-dismember-headless")
         game.skip_neow(state)

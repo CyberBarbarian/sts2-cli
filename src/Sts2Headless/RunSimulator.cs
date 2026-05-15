@@ -967,6 +967,9 @@ public class RunSimulator
                 return Error("No run in progress");
 
             var player = _runState.Players[0];
+            var pendingActionError = PendingDecisionActionError(action);
+            if (pendingActionError != null)
+                return Error(pendingActionError);
 
             switch (action)
             {
@@ -1022,6 +1025,41 @@ public class RunSimulator
         {
             return ErrorWithTrace($"Action '{action}' failed", ex);
         }
+    }
+
+    private string? PendingDecisionActionError(string action)
+    {
+        if (_cardSelector.HasPending
+            && action != "select_cards"
+            && action != "skip_select"
+            && action != "end_turn")
+        {
+            return "Cannot execute action while card selection is pending; use select_cards, skip_select, or end_turn";
+        }
+
+        if (_cardSelector.HasPendingReward
+            && action != "select_card_reward"
+            && action != "skip_card_reward"
+            && action != "end_turn")
+        {
+            return "Cannot execute action while card reward selection is pending; use select_card_reward, skip_card_reward, or end_turn";
+        }
+
+        if (_pendingBundleTcs != null
+            && !_pendingBundleTcs.Task.IsCompleted
+            && action != "select_bundle"
+            && action != "end_turn")
+        {
+            return "Cannot execute action while bundle selection is pending; use select_bundle or end_turn";
+        }
+
+        if (YieldPatches.ActiveCrystalSphereMinigame != null
+            && !action.StartsWith("crystal_sphere_", StringComparison.Ordinal))
+        {
+            return "Cannot execute action while crystal sphere selection is pending; use crystal_sphere_* actions";
+        }
+
+        return null;
     }
 
     #region Actions
