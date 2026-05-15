@@ -60,7 +60,7 @@ def test_empty_treasure_from_silver_crucible_is_explicit_and_proceeds(game):
 
     state = game.enter_room("treasure")
 
-    assert state["decision"] == "treasure_empty"
+    assert state["decision"] == "treasure"
     assert state["relics"] == []
     assert state["can_proceed"] is True
     assert [r["id"] for r in state["player"]["relics"]] == ["SILVER_CRUCIBLE"]

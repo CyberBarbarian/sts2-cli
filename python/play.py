@@ -1069,6 +1069,45 @@ def show_event(state):
 
 # ─── Input handling ───
 
+def show_crystal_sphere(state):
+    print(f"\n{'-' * 60}")
+    ctx = state.get("context", {})
+    if ctx:
+        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','Floor')} {ctx.get('floor','?')}")
+    print(f"  {c(t('Crystal Sphere', 'Crystal Sphere'), 'bold')}")
+    show_player(state.get("player", {}))
+    print()
+
+    width = state.get("grid_width", 0) or 0
+    height = state.get("grid_height", 0) or 0
+    cells = {(cell.get("x"), cell.get("y")): cell for cell in state.get("cells", [])}
+    if width and height:
+        print("     " + " ".join(f"{x:2d}" for x in range(width)))
+        for y in range(height):
+            row = []
+            for x in range(width):
+                cell = cells.get((x, y), {})
+                if cell.get("is_hidden"):
+                    mark = "?"
+                elif cell.get("item_type"):
+                    mark = "G" if cell.get("is_good") else "B"
+                else:
+                    mark = "."
+                row.append(f" {mark}")
+            print(f"  {y:2d} " + " ".join(row))
+
+    print()
+    print(f"  {t('Tool','Tool')}: {state.get('tool', '?')}  "
+          f"{t('Divinations','Divinations')}: {state.get('divinations_remaining', '?')}")
+    if state.get("revealed_items"):
+        print(f"  {t('Revealed','Revealed')}:")
+        for item in state.get("revealed_items", []):
+            kind = "good" if item.get("is_good") else "bad"
+            print(f"    - {item.get('item_type', '?')} ({kind}) "
+                  f"at {item.get('x')},{item.get('y')} "
+                  f"{item.get('width')}x{item.get('height')}")
+    print(f"  {c('? hidden, . empty, G good item, B bad item', 'dim')}")
+
 def _render_map(map_data, choice_set=None, choice_indices=None):
     """Render map as a grid with connection lines between rows."""
     if choice_set is None:
@@ -1808,6 +1847,17 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 show_player(state.get("player", {}))
                 print()
                 relics = state.get("relics", [])
+                if not relics and state.get("can_proceed"):
+                    print(f"  {c(t('Empty treasure chest', 'Empty treasure chest'), 'yellow')}")
+                    msg = state.get("message")
+                    if msg:
+                        print(f"      {msg}")
+                    if auto:
+                        state = send({"cmd": "action", "action": "proceed"})
+                    else:
+                        get_input(t("Press Enter to proceed", "Press Enter to proceed"), {""}, state=state)
+                        state = send({"cmd": "action", "action": "proceed"})
+                    continue
                 for r in relics:
                     print(f"  [{r['index']}] {c(n(r.get('name','?')), 'yellow')}")
                     desc = n(r.get("description", ""))
@@ -1975,6 +2025,44 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                              "args": {"option_index": int(choice)}})
                 if state and state.get("type") == "error":
                     state = send({"cmd": "action", "action": "leave_room"})
+
+            elif dec == "crystal_sphere":
+                show_crystal_sphere(state)
+                if state.get("can_proceed"):
+                    if auto:
+                        state = send({"cmd": "action", "action": "crystal_sphere_proceed"})
+                    else:
+                        choice = get_input(
+                            t("Press Enter to proceed", "Press Enter to proceed"),
+                            {"", "proceed", "p"},
+                            state=state,
+                        )
+                        state = send({"cmd": "action", "action": "crystal_sphere_proceed"})
+                    continue
+
+                clickable = state.get("clickable_cells", [])
+                valid = {f"{cell['x']},{cell['y']}" for cell in clickable}
+                valid.update({"big", "small"})
+                if auto:
+                    if clickable:
+                        cell = clickable[0]
+                        state = send({"cmd": "action", "action": "crystal_sphere_click_cell",
+                                      "args": {"x": cell["x"], "y": cell["y"]}})
+                    else:
+                        state = send({"cmd": "action", "action": "crystal_sphere_proceed"})
+                else:
+                    choice = get_input(
+                        t("Choose cell x,y or tool (big/small)", "Choose cell x,y or tool (big/small)"),
+                        valid,
+                        state=state,
+                    )
+                    if choice in {"big", "small"}:
+                        state = send({"cmd": "action", "action": "crystal_sphere_set_tool",
+                                      "args": {"tool": choice}})
+                    else:
+                        x_str, y_str = choice.split(",", 1)
+                        state = send({"cmd": "action", "action": "crystal_sphere_click_cell",
+                                      "args": {"x": int(x_str), "y": int(y_str)}})
 
             elif dec == "event_choice":
                 show_event(state)

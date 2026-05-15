@@ -476,7 +476,7 @@ class TestCombatEdgeCases:
         assert state["decision"] == "combat_play"
         assert state["player"]["hp"] > 0
 
-    def test_act_three_queen_win_exports_victory_instead_of_empty_map(self, tmp_path):
+    def test_act_three_queen_win_enters_architect_victory_room_first(self, tmp_path):
         game = Game()
         try:
             state = game.start(seed="queen-final-victory")
@@ -515,6 +515,18 @@ class TestCombatEdgeCases:
                 assert enemies
                 target = min(enemies, key=lambda enemy: enemy.get("hp", 0))
                 state = game.act("play_card", card_index=card["index"], target_index=target["index"])
+
+            assert state["decision"] == "event_choice"
+            assert state["event_name"] == "The Architect"
+
+            first_option = next(o for o in state["options"] if not o.get("is_locked"))
+            assert first_option["text_key"] == "THE_ARCHITECT.dialogue.0"
+            state = game.act("choose_option", option_index=first_option["index"])
+
+            assert state["decision"] == "event_choice"
+            assert state["event_name"] == "The Architect"
+            proceed = next(o for o in state["options"] if o["text_key"] == "PROCEED")
+            state = game.act("choose_option", option_index=proceed["index"])
 
             assert state["decision"] == "game_over"
             assert state["victory"] is True

@@ -173,6 +173,53 @@ class TestAmalgamator:
         assert any(card["name"] == "Ultimate Defend" for card in state["player"]["deck"])
 
 
+class TestCrystalSphere:
+    def test_choose_option_opens_headless_crystal_sphere_state(self, game):
+        state = game.start(seed="crystal-sphere-headless")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("event", event="CRYSTAL_SPHERE")
+
+        option = next(o for o in state["options"] if o["title"] == "Uncover Future")
+        state = game.act("choose_option", option_index=option["index"])
+
+        assert state["decision"] == "crystal_sphere"
+        assert state["event_name"] == "Crystal Sphere"
+        assert state["grid_width"] == 11
+        assert state["grid_height"] == 11
+        assert state["divinations_remaining"] == 3
+        assert state["tool"] == "big"
+        assert state["clickable_cells"]
+        assert any(cell["is_hidden"] is False for cell in state["cells"])
+
+    def test_crystal_sphere_clicks_can_finish_and_proceed(self, game):
+        state = game.start(seed="crystal-sphere-clicks")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("event", event="CRYSTAL_SPHERE")
+
+        option = next(o for o in state["options"] if o["title"] == "Uncover Future")
+        state = game.act("choose_option", option_index=option["index"])
+        state = game.act("crystal_sphere_set_tool", tool="small")
+
+        for _ in range(5):
+            if state["decision"] != "crystal_sphere" or state.get("can_proceed"):
+                break
+            cell = state["clickable_cells"][0]
+            state = game.act("crystal_sphere_click_cell", x=cell["x"], y=cell["y"])
+
+        assert state["decision"] == "crystal_sphere"
+        assert state["can_proceed"] is True
+
+        state = game.act("crystal_sphere_proceed")
+
+        assert not (
+            state["decision"] == "event_choice"
+            and state.get("event_name") == "Crystal Sphere"
+            and any(o["title"] == "Uncover Future" for o in state.get("options", []))
+        )
+
+
 class TestByrdonisNest:
     def test_take_option_names_byrdonis_egg(self, game):
         state = game.start(seed="byrdonis-nest-card-var")

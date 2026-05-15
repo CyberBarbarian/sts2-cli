@@ -18,10 +18,12 @@ using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
 using MegaCrit.Sts2.Core.Entities.Merchant;
 using MegaCrit.Sts2.Core.Entities.RestSite;
+using MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent;
 using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Nodes.Events.Custom.CrystalSphere;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.TestSupport;
 using HarmonyLib;
@@ -311,6 +313,7 @@ public class RunSimulator
         {
             _loc.Lang = lang;
             _shopItemSnapshots.Clear();
+            YieldPatches.ActiveCrystalSphereMinigame = null;
             EnsureModelDbInitialized();
 
             var player = CreatePlayer(character);
@@ -987,6 +990,12 @@ public class RunSimulator
                     return DoLeaveRoom(player);
                 case "proceed":
                     return DoProceed(player);
+                case "crystal_sphere_set_tool":
+                    return DoCrystalSphereSetTool(args);
+                case "crystal_sphere_click_cell":
+                    return DoCrystalSphereClickCell(args);
+                case "crystal_sphere_proceed":
+                    return DoCrystalSphereProceed();
                 default:
                     return Error($"Unknown action: {action}");
             }
@@ -1013,6 +1022,7 @@ public class RunSimulator
         _pendingShopPurchaseTask = null;
         _pendingRewards = null;
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
+        YieldPatches.ActiveCrystalSphereMinigame = null;
 
         var col = Convert.ToInt32(args["col"]);
         var row = Convert.ToInt32(args["row"]);
@@ -1730,11 +1740,13 @@ public class RunSimulator
                 var optCountBefore = options?.Count ?? 0;
                 if (options != null && optionIndex >= 0 && optionIndex < options.Count)
                 {
+                    var selectedTextKey = options[optionIndex].TextKey;
                     var previousSuppressYield = YieldPatches.SuppressYield;
                     try
                     {
                         _eventOptionChosen = true;
                         _lastEventOptionCount = options.Count;
+                        YieldPatches.ActiveCrystalSphereMinigame = null;
                         YieldPatches.SuppressYield = true;
                         var task = Task.Run(() => options[optionIndex].Chosen());
                         _pendingEventOptionTask = task;
@@ -1743,8 +1755,14 @@ public class RunSimulator
                             _syncCtx.Pump();
                             if (_cardSelector.HasPending || _cardSelector.HasPendingReward) break;
                             if (_pendingBundles != null) break;
+                            if (YieldPatches.ActiveCrystalSphereMinigame != null) break;
                             if (task.IsCompleted) break;
                             Thread.Sleep(10);
+                        }
+                        if (YieldPatches.ActiveCrystalSphereMinigame != null)
+                        {
+                            YieldPatches.SuppressYield = previousSuppressYield;
+                            return DetectDecisionPoint();
                         }
                         if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
                         {
@@ -1759,6 +1777,10 @@ public class RunSimulator
                             if (task.IsFaulted)
                                 Log($"Event choose failed: {task.Exception?.GetBaseException().GetType().FullName}: {task.Exception?.GetBaseException().Message}");
                             _pendingEventOptionTask = null;
+                        }
+                        if (IsVictoryProceedOption(selectedTextKey))
+                        {
+                            CompleteVictoryRoomTransition();
                         }
                     }
                     catch (Exception ex) { Log($"Event choose: {ex.Message}"); }
@@ -1811,7 +1833,10 @@ public class RunSimulator
         if (room is MerchantRoom)
             return DoLeaveRoom(player);
         if (room is TreasureRoom)
+        {
+            CompleteEmptyTreasureRelicSessionIfNeeded();
             return DoLeaveRoom(player);
+        }
 
         if (room is CombatRoom combatRoom && combatRoom.RoomType == RoomType.Boss)
         {
@@ -1828,6 +1853,83 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
+    private Dictionary<string, object?> DoCrystalSphereSetTool(Dictionary<string, object?>? args)
+    {
+        var minigame = YieldPatches.ActiveCrystalSphereMinigame;
+        if (minigame == null)
+            return Error("No Crystal Sphere minigame is active");
+        if (minigame.IsFinished)
+            return CrystalSphereState(minigame);
+        if (args == null || !args.TryGetValue("tool", out var toolObj) || toolObj == null)
+            return Error("crystal_sphere_set_tool requires 'tool'");
+
+        var tool = Convert.ToString(toolObj)?.Trim().ToLowerInvariant();
+        if (tool == "big")
+            minigame.SetTool(CrystalSphereMinigame.CrystalSphereToolType.Big);
+        else if (tool == "small")
+            minigame.SetTool(CrystalSphereMinigame.CrystalSphereToolType.Small);
+        else
+            return Error("tool must be 'big' or 'small'");
+
+        return CrystalSphereState(minigame);
+    }
+
+    private Dictionary<string, object?> DoCrystalSphereClickCell(Dictionary<string, object?>? args)
+    {
+        var minigame = YieldPatches.ActiveCrystalSphereMinigame;
+        if (minigame == null)
+            return Error("No Crystal Sphere minigame is active");
+        if (minigame.IsFinished)
+            return CrystalSphereState(minigame);
+        if (args == null || !args.ContainsKey("x") || !args.ContainsKey("y"))
+            return Error("crystal_sphere_click_cell requires 'x' and 'y'");
+
+        var x = Convert.ToInt32(args["x"]);
+        var y = Convert.ToInt32(args["y"]);
+        if (x < 0 || x >= minigame.GridSize.X || y < 0 || y >= minigame.GridSize.Y)
+            return Error($"Crystal Sphere cell [{x},{y}] is outside the {minigame.GridSize.X}x{minigame.GridSize.Y} grid");
+
+        var cell = minigame.cells[x, y];
+        if (!cell.IsHidden)
+            return Error($"Crystal Sphere cell [{x},{y}] is already revealed");
+
+        minigame.CellClicked(cell).GetAwaiter().GetResult();
+        _syncCtx.Pump();
+        return CrystalSphereState(minigame);
+    }
+
+    private Dictionary<string, object?> DoCrystalSphereProceed()
+    {
+        var minigame = YieldPatches.ActiveCrystalSphereMinigame;
+        if (minigame == null)
+            return Error("No Crystal Sphere minigame is active");
+        if (!minigame.IsFinished)
+            return Error("Crystal Sphere still has divinations remaining");
+
+        var task = _pendingEventOptionTask;
+        if (task != null)
+        {
+            for (int i = 0; i < 300; i++)
+            {
+                _syncCtx.Pump();
+                WaitForActionExecutor();
+                if (task.IsCompleted || HasPendingHeadlessChoice())
+                    break;
+                Thread.Sleep(10);
+            }
+
+            if (task.IsFaulted)
+                return Error($"Crystal Sphere event failed: {task.Exception?.GetBaseException().Message}");
+            if (task.IsCompleted)
+                _pendingEventOptionTask = null;
+        }
+
+        YieldPatches.ActiveCrystalSphereMinigame = null;
+        _syncCtx.Pump();
+        WaitForActionExecutor();
+        return DetectDecisionPoint();
+    }
+
     #endregion
 
     #region Decision Point Detection
@@ -1839,10 +1941,20 @@ public class RunSimulator
 
         var player = _runState.Players[0];
 
+        if (RunManager.Instance.IsGameOver && _runState.CurrentRoom?.IsVictoryRoom == true)
+        {
+            return GameOverState(true);
+        }
+
         // Check game over (death)
         if (player.Creature != null && player.Creature.IsDead)
         {
             return GameOverState(false);
+        }
+
+        if (YieldPatches.ActiveCrystalSphereMinigame != null)
+        {
+            return CrystalSphereState(YieldPatches.ActiveCrystalSphereMinigame);
         }
 
         // Check if there's a pending bundle selection (Scroll Boxes: pick 1 of N packs)
@@ -2380,12 +2492,6 @@ public class RunSimulator
         // Boss → next act
         if (combatRoom.RoomType == RoomType.Boss)
         {
-            if (IsFinalActBossComplete())
-            {
-                Log("Final boss defeated, reporting victory");
-                return GameOverState(true);
-            }
-
             Log("Boss defeated, entering next act");
             try
             {
@@ -2400,19 +2506,6 @@ public class RunSimulator
         // Normal → go to map
         ForceToMap();
         return MapSelectState();
-    }
-
-    private bool IsFinalActBossComplete()
-    {
-        try
-        {
-            return _runState?.CurrentActIndex >= 2
-                && _runState.ActFloor >= 15;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private Dictionary<string, object?> CardRewardState(Player player, CombatRoom? combatRoom)
@@ -2484,6 +2577,14 @@ public class RunSimulator
         // If event is finished, proceed to map
         if (localEvent == null || localEvent.IsFinished)
         {
+            if (eventRoom.IsVictoryRoom)
+            {
+                CompleteVictoryRoomTransition();
+                if (RunManager.Instance.IsGameOver)
+                    return GameOverState(true);
+                return Error("Victory event finished without completing the run");
+            }
+
             Log($"Event {localEvent?.GetType().Name ?? "null"} finished, proceeding");
             try
             {
@@ -2640,6 +2741,137 @@ public class RunSimulator
             ["description"] = eventDesc,
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
+        };
+    }
+
+    private Dictionary<string, object?> CrystalSphereState(CrystalSphereMinigame minigame)
+    {
+        var width = minigame.GridSize.X;
+        var height = minigame.GridSize.Y;
+        var cells = new List<Dictionary<string, object?>>();
+        var clickableCells = new List<Dictionary<string, object?>>();
+
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var cell = minigame.cells[x, y];
+                var isClickable = cell.IsHidden && !minigame.IsFinished;
+                var exported = new Dictionary<string, object?>
+                {
+                    ["x"] = x,
+                    ["y"] = y,
+                    ["is_hidden"] = cell.IsHidden,
+                    ["is_clickable"] = isClickable,
+                    ["is_highlighted"] = cell.IsHighlighted,
+                    ["is_hovered"] = cell.IsHovered,
+                };
+                if (!cell.IsHidden && cell.Item != null)
+                {
+                    exported["item_type"] = cell.Item.GetType().Name;
+                    exported["is_good"] = cell.Item.IsGood;
+                }
+                cells.Add(exported);
+
+                if (isClickable)
+                {
+                    clickableCells.Add(new Dictionary<string, object?>
+                    {
+                        ["x"] = x,
+                        ["y"] = y,
+                    });
+                }
+            }
+        }
+
+        var revealedItems = minigame.Items
+            .Where(item => IsCrystalSphereItemRevealed(minigame, item))
+            .Select(item => new Dictionary<string, object?>
+            {
+                ["item_type"] = item.GetType().Name,
+                ["x"] = item.Position.X,
+                ["y"] = item.Position.Y,
+                ["width"] = item.Size.X,
+                ["height"] = item.Size.Y,
+                ["is_good"] = item.IsGood,
+            })
+            .ToList();
+
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "crystal_sphere",
+            ["context"] = RunContext(),
+            ["event_name"] = _loc.Event("CRYSTAL_SPHERE"),
+            ["grid_width"] = width,
+            ["grid_height"] = height,
+            ["divinations_remaining"] = minigame.DivinationCount,
+            ["tool"] = CrystalSphereToolName(minigame.CrystalSphereTool),
+            ["can_use_big_tool"] = !minigame.IsFinished,
+            ["can_use_small_tool"] = !minigame.IsFinished,
+            ["can_proceed"] = minigame.IsFinished,
+            ["cells"] = cells,
+            ["clickable_cells"] = clickableCells,
+            ["revealed_items"] = revealedItems,
+            ["player"] = PlayerSummary(_runState!.Players[0]),
+        };
+    }
+
+    private static bool IsVictoryProceedOption(string? textKey)
+    {
+        return string.Equals(textKey, "PROCEED", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void CompleteVictoryRoomTransition()
+    {
+        if (_runState?.CurrentRoom?.IsVictoryRoom != true || RunManager.Instance.IsGameOver)
+            return;
+
+        for (var i = 0; i < 30; i++)
+        {
+            _syncCtx.Pump();
+            WaitForActionExecutor();
+            if (RunManager.Instance.IsGameOver)
+                return;
+            Thread.Sleep(10);
+        }
+
+        try
+        {
+            RunManager.Instance.EnterNextAct().GetAwaiter().GetResult();
+            _syncCtx.Pump();
+            WaitForActionExecutor();
+        }
+        catch (Exception ex)
+        {
+            Log($"Victory transition failed: {ex.GetType().FullName}: {ex.Message}");
+        }
+    }
+
+    private static bool IsCrystalSphereItemRevealed(CrystalSphereMinigame minigame, CrystalSphereItem item)
+    {
+        for (var dx = 0; dx < item.Size.X; dx++)
+        {
+            for (var dy = 0; dy < item.Size.Y; dy++)
+            {
+                var x = item.Position.X + dx;
+                var y = item.Position.Y + dy;
+                if (x < 0 || x >= minigame.GridSize.X || y < 0 || y >= minigame.GridSize.Y)
+                    return false;
+                if (minigame.cells[x, y].IsHidden)
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static string CrystalSphereToolName(CrystalSphereMinigame.CrystalSphereToolType tool)
+    {
+        return tool switch
+        {
+            CrystalSphereMinigame.CrystalSphereToolType.Big => "big",
+            CrystalSphereMinigame.CrystalSphereToolType.Small => "small",
+            _ => "none",
         };
     }
 
@@ -3086,6 +3318,7 @@ public class RunSimulator
 
         if (relics.Count == 0)
         {
+            CompleteEmptyTreasureRelicSessionIfNeeded();
             return TreasureEmptyState("Treasure relic session contains no choices");
         }
 
@@ -3112,13 +3345,31 @@ public class RunSimulator
         return new Dictionary<string, object?>
         {
             ["type"] = "decision",
-            ["decision"] = "treasure_empty",
+            ["decision"] = "treasure",
             ["context"] = RunContext(),
             ["message"] = message,
             ["relics"] = new List<object?>(),
             ["can_proceed"] = true,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    private void CompleteEmptyTreasureRelicSessionIfNeeded()
+    {
+        try
+        {
+            var synchronizer = RunManager.Instance.TreasureRoomRelicSynchronizer;
+            if (synchronizer.CurrentRelics != null && synchronizer.CurrentRelics.Count == 0)
+            {
+                Log("Treasure room: completing empty relic session");
+                synchronizer.CompleteWithNoRelics();
+                _syncCtx.Pump();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Complete empty treasure relic session: {ex.Message}");
+        }
     }
 
     private Dictionary<string, object?> DoClaimTreasureRelic(Player player, Dictionary<string, object?>? args)
@@ -3847,6 +4098,7 @@ public class RunSimulator
         PatchSoulNexusPresentation();
         PatchQueenPresentation();
         PatchDecimillipedePresentation();
+        PatchCrystalSpherePresentation();
 
         // Initialize localization system (needed for events, cards, etc.)
         InitLocManager();
@@ -4189,6 +4441,30 @@ public class RunSimulator
         }
     }
 
+    private static void PatchCrystalSpherePresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.crystalsphere.presentation");
+            var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.CrystalSphereShowScreenPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var showScreen = typeof(NCrystalSphereScreen).GetMethod(nameof(NCrystalSphereScreen.ShowScreen),
+                BindingFlags.Static | BindingFlags.Public,
+                binder: null,
+                types: new[] { typeof(CrystalSphereMinigame) },
+                modifiers: null);
+            if (prefix == null || showScreen == null)
+                return;
+
+            harmony.Patch(showScreen, new HarmonyMethod(prefix));
+            Console.Error.WriteLine("[INFO] Patched Crystal Sphere screen presentation for headless control");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Crystal Sphere presentation: {ex.Message}");
+        }
+    }
+
     private static bool PatchTalkPlayMethod(Harmony harmony, MethodInfo method, MethodInfo taskPrefix, MethodInfo voidPrefix)
     {
         if (typeof(Task).IsAssignableFrom(method.ReturnType))
@@ -4390,6 +4666,7 @@ public class RunSimulator
     {
         // Only suppress Task.Yield() when this flag is set (during end_turn processing)
         public static volatile bool SuppressYield;
+        public static CrystalSphereMinigame? ActiveCrystalSphereMinigame;
 
         public static bool IsCompletedPrefix(ref bool __result)
         {
@@ -4406,6 +4683,14 @@ public class RunSimulator
         {
             __result = Task.CompletedTask;
             return false; // Skip original method
+        }
+
+        /// <summary>Harmony prefix: replace the Crystal Sphere Godot screen with CLI-controlled state.</summary>
+        public static bool CrystalSphereShowScreenPrefix(CrystalSphereMinigame grid, ref NCrystalSphereScreen? __result)
+        {
+            ActiveCrystalSphereMinigame = grid;
+            __result = null;
+            return false;
         }
 
         /// <summary>Harmony prefix: skip dialogue VFX/speech bubbles in headless mode.</summary>

@@ -212,6 +212,21 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
                 else:
                     state = send({"cmd": "action", "action": "leave_room"})
 
+            elif decision == "crystal_sphere":
+                if state.get("can_proceed"):
+                    state = send({"cmd": "action", "action": "crystal_sphere_proceed"})
+                else:
+                    clickable = state.get("clickable_cells", [])
+                    if clickable:
+                        cell = clickable[0]
+                        state = send({
+                            "cmd": "action",
+                            "action": "crystal_sphere_click_cell",
+                            "args": {"x": cell["x"], "y": cell["y"]}
+                        })
+                    else:
+                        state = send({"cmd": "action", "action": "crystal_sphere_proceed"})
+
             elif decision == "rest_site":
                 options = state.get("options", [])
                 # Prefer heal (HEAL), then smith
