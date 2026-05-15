@@ -3383,6 +3383,14 @@ public class RunSimulator
             ScaleTargetStat(stats, "calculateddamage_by_target", "calculateddamage", 3, 4);
         }
 
+        var shrink = GetPlayerPowerAmount(player, "SHRINK", "Shrink");
+        if (shrink != 0 && card.Type == CardType.Attack)
+        {
+            ScaleStat(stats, "damage", 7, 10);
+            ScaleStat(stats, "calculateddamage", 7, 10);
+            ScaleTargetStat(stats, "calculateddamage_by_target", "calculateddamage", 7, 10);
+        }
+
         var dexterity = GetPlayerPowerAmount(player, "DEXTERITY", "Dexterity");
         if (dexterity != 0)
             AddStat(stats, "block", dexterity);

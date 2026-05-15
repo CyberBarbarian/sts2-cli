@@ -133,6 +133,21 @@ class TestDynamicCardStats:
         strike = next(c for c in state["hand"] if c["name"] == "Strike")
         assert strike["stats"]["damage"] == 4
 
+    def test_attack_damage_stats_include_player_shrink(self, game):
+        state = game.start(seed="shrink-damage-stats")
+        game.skip_neow(state)
+        game.set_player(deck=["STRIKE_IRONCLAD"] * 10)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        state = game.act("end_turn")
+
+        assert any(
+            power["name"] == "Shrink"
+            for power in state["player_powers"]
+        )
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+        assert strike["stats"]["damage"] == 4
+
     def test_status_damage_stats_do_not_include_player_strength(self, game):
         state = game.start(seed="strength-status-damage-stats")
         game.skip_neow(state)
