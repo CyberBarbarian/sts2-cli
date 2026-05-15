@@ -455,3 +455,20 @@ class TestCombatEdgeCases:
 
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         assert state["decision"] == "combat_play"
+
+    def test_vantom_dismember_headless_vfx_does_not_force_game_over(self, game):
+        state = game.start(seed="vantom-dismember-headless")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999)
+        state = game.enter_room("combat", encounter="VANTOM_BOSS")
+
+        for _ in range(10):
+            if state["enemies"][0]["move_name"] == "Dismember":
+                break
+            state = game.act("end_turn")
+
+        assert state["enemies"][0]["move_name"] == "Dismember"
+
+        state = game.act("end_turn")
+        assert state["decision"] == "combat_play"
+        assert state["player"]["hp"] > 0

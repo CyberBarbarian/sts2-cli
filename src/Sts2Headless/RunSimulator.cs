@@ -4127,7 +4127,8 @@ public class RunSimulator
             || fullName.Contains("MegaCrit.Sts2.Core.Commands.CreatureCmd+<Heal", StringComparison.Ordinal)
             || fullName.Contains("RitualMove", StringComparison.Ordinal)
             || fullName.Contains("WakeMove", StringComparison.Ordinal)
-            || fullName.Contains("ScreechMove", StringComparison.Ordinal);
+            || fullName.Contains("ScreechMove", StringComparison.Ordinal)
+            || fullName.Contains("Vantom+<DismemberMove", StringComparison.Ordinal);
     }
 
     private static IEnumerable<MethodInfo> GetDeclaredMethods(Type type)
@@ -4390,6 +4391,7 @@ public class RunSimulator
                 || IsDebugAudioPlay(method)
                 || IsDebugAudioStop(method)
                 || IsScreenRumble(method)
+                || IsNGameHitStop(method)
                 || IsFullscreenHealVfxPlay(method);
         }
 
@@ -4414,6 +4416,12 @@ public class RunSimulator
         private static bool IsScreenRumble(MethodInfo method)
         {
             return method.Name == "ScreenRumble"
+                && (method.DeclaringType?.FullName ?? "").Contains("NGame", StringComparison.Ordinal);
+        }
+
+        private static bool IsNGameHitStop(MethodInfo method)
+        {
+            return method.Name == "DoHitStop"
                 && (method.DeclaringType?.FullName ?? "").Contains("NGame", StringComparison.Ordinal);
         }
 
