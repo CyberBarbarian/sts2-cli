@@ -442,6 +442,30 @@ class TestRelicTrader:
             assert trade["new"]["name"] in option["description"]
             assert trade["new"]["description"]
 
+    def test_trade_options_resolve_static_hover_tips(self, game):
+        state = game.start(seed="relic-trader-hover-tips")
+        game.skip_neow(state)
+        game.set_player(relics=[
+            "ANCHOR",
+            "BURNING_BLOOD",
+            "PETRIFIED_TOAD",
+            "HORN_CLEAT",
+            "VAMBRACE",
+            "MOLTEN_EGG",
+        ])
+        state = game.enter_room("event", event="RELIC_TRADER")
+
+        hover_tips = [
+            tip
+            for option in state["options"]
+            for tip in option["hover_tips"]
+        ]
+        block_tip = next(tip for tip in hover_tips if tip.get("title") == "Block")
+
+        assert block_tip["description"]
+        assert "BLOCK." not in block_tip["description"]
+        assert all("[" not in (tip.get("description") or "") for tip in hover_tips)
+
 
 class TestJungleMazeAdventure:
     def test_join_forces_awards_gold_and_finishes_event(self, game):

@@ -261,13 +261,13 @@ internal class LocLookup
             foreach (var tableName in _zhs.Keys)
             {
                 var zh = _zhs.GetValueOrDefault(tableName)?.GetValueOrDefault(locKey);
-                if (zh != null) return zh;
+                if (zh != null) return StripBBCode(zh);
             }
         }
         foreach (var tableName in _eng.Keys)
         {
             var en = _eng.GetValueOrDefault(tableName)?.GetValueOrDefault(locKey);
-            if (en != null) return en;
+            if (en != null) return StripBBCode(en);
         }
         return locKey;
     }
@@ -3000,8 +3000,8 @@ public class RunSimulator
             return info;
         }
 
-        var title = TryGetMember(rawTip, "Title") as string;
-        var description = TryGetMember(rawTip, "Description") as string;
+        var title = ResolveHoverTipText(rawTip, "Title");
+        var description = ResolveHoverTipText(rawTip, "Description");
         if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(description))
             return null;
 
@@ -3011,6 +3011,20 @@ public class RunSimulator
             ["title"] = string.IsNullOrWhiteSpace(title) ? null : title,
             ["description"] = string.IsNullOrWhiteSpace(description) ? null : description,
         };
+    }
+
+    private string? ResolveHoverTipText(object rawTip, string memberName)
+    {
+        var text = TryGetMember(rawTip, memberName) as string;
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var staticTip = _loc.Bilingual("static_hover_tips", text);
+        if (staticTip != text)
+            return staticTip;
+
+        var resolved = _loc.BilingualFromKey(text);
+        return string.IsNullOrWhiteSpace(resolved) ? text : resolved;
     }
 
     private Dictionary<string, object?>? BuildRelicTradePreview(
