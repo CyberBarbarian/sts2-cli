@@ -72,6 +72,40 @@ class TestShopBuy:
             assert state["player"]["gold"] < gold_before
             assert state["player"]["deck_size"] == deck_before + 1
 
+    def test_bought_card_keeps_shop_metadata(self, game):
+        state = game.start(seed="sb-card-metadata")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+
+        stocked = [c for c in state["cards"] if c.get("is_stocked")]
+        assert stocked
+        card = stocked[0]
+        state = game.act("buy_card", card_index=card["index"])
+
+        bought = state["cards"][card["index"]]
+        assert bought["is_stocked"] is False
+        assert bought["name"] == card["name"]
+        assert bought["type"] == card["type"]
+        assert bought["rarity"] == card["rarity"]
+        assert bought["description"] == card["description"]
+
+    def test_bought_relic_keeps_shop_metadata(self, game):
+        state = game.start(seed="sb-relic-metadata")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+
+        stocked = [r for r in state["relics"] if r.get("is_stocked")]
+        assert stocked
+        relic = stocked[0]
+        state = game.act("buy_relic", relic_index=relic["index"])
+
+        bought = state["relics"][relic["index"]]
+        assert bought["is_stocked"] is False
+        assert bought["name"] == relic["name"]
+        assert bought["description"] == relic["description"]
+
     def test_buy_insufficient_gold(self, game):
         state = game.start(seed="sb2")
         game.skip_neow(state)
@@ -87,6 +121,13 @@ class TestShopBuy:
         game.skip_neow(state)
         state = game.enter_room("shop")
         state = game.act("leave_room")
+        assert state["decision"] == "map_select"
+
+    def test_proceed_leaves_shop(self, game):
+        state = game.start(seed="sb4")
+        game.skip_neow(state)
+        state = game.enter_room("shop")
+        state = game.act("proceed")
         assert state["decision"] == "map_select"
 
 

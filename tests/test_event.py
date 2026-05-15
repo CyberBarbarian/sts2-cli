@@ -1,4 +1,6 @@
 """Tests for events."""
+from collections import Counter
+
 import pytest
 
 
@@ -66,6 +68,37 @@ class TestSlipperyBridge:
         assert random_card
         assert random_card != "0"
 
+    def test_slippery_bridge_random_card_matches_removed_card(self, game):
+        state = game.start(seed="bridge-removal-var")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "BASH",
+            "SETUP_STRIKE",
+            "SWORD_BOOMERANG",
+            "ARMAMENTS",
+            "POMMEL_STRIKE",
+            "BLOODLETTING",
+        ])
+        state = game.enter_room("event", event="SLIPPERY_BRIDGE")
+
+        overcome = next(o for o in state["options"] if o["title"] == "Overcome")
+        random_card = overcome["vars"]["RandomCard"]
+        before = Counter(c["name"] for c in state["player"]["deck"])
+
+        state = game.act("choose_option", option_index=overcome["index"])
+
+        after = Counter(c["name"] for c in state["player"]["deck"])
+        assert before[random_card] == after[random_card] + 1
+
     def test_slippery_bridge_hold_on_stays_in_event(self, game):
         state = game.start(seed="bridge-hold")
         game.skip_neow(state)
@@ -101,3 +134,116 @@ class TestDenseVegetation:
         assert state["player"]["hp"] == hp_before - trudge["vars"]["HpLoss"]
         assert state["player"]["gold"] == gold_before + trudge["vars"]["Gold"]
         assert state["player"]["deck_size"] == deck_size_before
+
+
+class TestByrdonisNest:
+    def test_take_option_names_byrdonis_egg(self, game):
+        state = game.start(seed="byrdonis-nest-card-var")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="BYRDONIS_NEST")
+
+        take = next(o for o in state["options"] if o["title"] == "Take the Egg")
+
+        assert take["vars"]["Card"] == "Byrdonis Egg"
+        assert "Byrdonis Egg" in take["description"]
+
+    def test_eat_option_finishes_event(self, game):
+        state = game.start(seed="byrdonis-nest-eat")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="BYRDONIS_NEST")
+        eat = next(o for o in state["options"] if o["title"] == "Eat the Egg")
+
+        state = game.act("choose_option", option_index=eat["index"])
+
+        assert state["decision"] == "map_select"
+
+
+class TestBugslayer:
+    def test_technique_options_name_reward_cards(self, game):
+        state = game.start(seed="bugslayer-card-vars")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="BUGSLAYER")
+
+        extermination = next(o for o in state["options"] if o["title"] == "Learn Extermination Technique")
+        squash = next(o for o in state["options"] if o["title"] == "Learn Squash Technique")
+
+        assert extermination["vars"]["Card1"] == "Exterminate"
+        assert "Exterminate" in extermination["description"]
+        assert squash["vars"]["Card2"] == "Squash"
+        assert "Squash" in squash["description"]
+
+
+class TestLostWisp:
+    def test_capture_option_names_curse_and_relic(self, game):
+        state = game.start(seed="lost-wisp-vars")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="LOST_WISP")
+
+        capture = next(o for o in state["options"] if o["title"] == "Capture the Wisp")
+
+        assert capture["vars"]["Curse"] == "Decay"
+        assert capture["vars"]["Relic"] == "Lost Wisp"
+        assert "Decay" in capture["description"]
+        assert "Lost Wisp" in capture["description"]
+
+
+class TestRanwidTheElder:
+    def test_give_potion_option_names_current_potion(self, game):
+        state = game.start(seed="ranwid-vars")
+        game.skip_neow(state)
+        game.set_player(potions=["BLOOD_POTION"])
+        state = game.enter_room("event", event="RANWID_THE_ELDER")
+
+        potion = next(o for o in state["options"] if o["text_key"].endswith(".POTION"))
+        gold = next(o for o in state["options"] if o["text_key"].endswith(".GOLD"))
+
+        assert potion["vars"]["Potion"] == "Blood Potion"
+        assert potion["title"] == "Give Blood Potion"
+        assert gold["title"] == "Give 100 Gold"
+
+
+class TestJungleMazeAdventure:
+    def test_join_forces_awards_gold_and_finishes_event(self, game):
+        state = game.start(seed="jungle-maze-join")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="JUNGLE_MAZE_ADVENTURE")
+        gold_before = state["player"]["gold"]
+
+        join_forces = next(o for o in state["options"] if o["title"] == "Join Forces")
+        gold_reward = join_forces["vars"]["JoinForcesGold"]
+        state = game.act("choose_option", option_index=join_forces["index"])
+
+        assert state["decision"] == "map_select"
+        assert state["player"]["gold"] == gold_before + gold_reward
+
+
+class TestSpiritGrafter:
+    def test_let_it_in_heals_adds_metamorphosis_and_finishes_event(self, game):
+        state = game.start(seed="spirit-grafter-let-in")
+        game.skip_neow(state)
+        game.set_player(hp=60, max_hp=87)
+        state = game.enter_room("event", event="SPIRIT_GRAFTER")
+
+        let_it_in = next(o for o in state["options"] if o["title"] == "Let It In")
+        heal_amount = let_it_in["vars"]["LetItInHealAmount"]
+        deck_size_before = state["player"]["deck_size"]
+
+        state = game.act("choose_option", option_index=let_it_in["index"])
+
+        assert state["decision"] == "map_select"
+        assert state["player"]["hp"] == min(87, 60 + heal_amount)
+        assert state["player"]["deck_size"] == deck_size_before + 1
+        assert any(c["name"] == "Metamorphosis" for c in state["player"]["deck"])
+
+
+class TestSapphireSeed:
+    def test_plant_option_names_sown_enchantment(self, game):
+        state = game.start(seed="sapphire-seed-enchantment-var")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="SAPPHIRE_SEED")
+
+        plant = next(o for o in state["options"] if o["title"] == "Plant and Nourish")
+
+        assert plant["vars"]["Enchantment"] == "Sown"
+        assert "Sown" in plant["description"]
+        assert "with 0" not in plant["description"]

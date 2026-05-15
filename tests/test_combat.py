@@ -32,6 +32,35 @@ class TestCombatStructure:
             assert e["max_hp"] > 0
             assert "block" in e
 
+    def test_enemy_name_interpolates_dynamic_vars(self, game):
+        state = game.start(seed="test-subject-enemy-name")
+        state = game.enter_room("combat", encounter="TEST_SUBJECT_BOSS")
+
+        assert state["decision"] == "combat_play"
+        names = [enemy["name"] for enemy in state["enemies"]]
+        assert any("Test Subject" in name for name in names)
+        assert all("{" not in name and "}" not in name for name in names)
+        assert all("#C" not in name for name in names)
+
+    def test_enemy_state_exports_next_move_name(self, game):
+        state = game.start(seed="devoted-sculptor-move-name")
+        state = game.enter_room("combat", encounter="DEVOTED_SCULPTOR_WEAK")
+
+        assert state["decision"] == "combat_play"
+        enemy = state["enemies"][0]
+        assert enemy["move_id"] == "FORBIDDEN_INCANTATION_MOVE"
+        assert enemy["move_name"] == "Forbidden Incantation"
+
+    def test_enemy_move_name_humanizes_unlocalized_move_id(self, game):
+        state = game.start(seed="slime-move-name")
+        state = game.enter_room("combat", encounter="SLIMES_WEAK")
+
+        butt_move = next(
+            enemy for enemy in state["enemies"]
+            if enemy.get("move_id") == "BUTT_MOVE"
+        )
+        assert butt_move["move_name"] == "Butt"
+
     def test_multi_hit_intent_exports_per_hit_and_total_damage(self, game):
         state = game.start(seed="multi-hit-intent")
         game.skip_neow(state)
@@ -44,6 +73,19 @@ class TestCombatStructure:
         assert intent["hits"] == 2
         assert intent["damage"] == 4
         assert intent["total_damage"] == 8
+
+    def test_bag_of_marbles_applies_vulnerable_at_combat_start(self, game):
+        state = game.start(seed="bag-of-marbles-start")
+        game.skip_neow(state)
+        game.set_player(relics=["BAG_OF_MARBLES"])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        assert state["decision"] == "combat_play"
+        enemy = state["enemies"][0]
+        powers = enemy.get("powers") or []
+        vulnerable = next((p for p in powers if p.get("name") == "Vulnerable"), None)
+        assert vulnerable is not None
+        assert vulnerable.get("amount") == 1
 
 
 class TestPlayCards:
@@ -149,6 +191,23 @@ class TestCombatEnd:
 
 
 class TestCombatEdgeCases:
+    def test_chomper_screech_talk_vfx_does_not_force_game_over_headless(self, game):
+        state = game.start(seed="chomper-screech-talk")
+        game.skip_neow(state)
+        game.set_player(
+            hp=80,
+            max_hp=80,
+            deck=["DEFEND_IRONCLAD"] * 20,
+        )
+        state = game.enter_room("combat", encounter="CHOMPERS_NORMAL")
+
+        state = game.act("end_turn")
+
+        assert state.get("type") != "error"
+        assert state.get("decision") != "game_over"
+        assert state["decision"] == "combat_play"
+        assert state["player"]["hp"] > 0
+
     def test_bygone_effigy_wake_talk_vfx_does_not_deadlock_headless(self, game):
         state = game.start(seed="effigy-wake-talk")
         game.skip_neow(state)

@@ -26,3 +26,61 @@ class TestPotionActions:
 
         assert state["player"]["hp"] == 56
         assert state["player"]["potions"] == []
+
+    def test_speed_potion_temp_power_has_readable_name(self, game):
+        state = game.start(seed="speed-power-name")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["SPEED_POTION"],
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        state = game.act("use_potion", potion_index=0)
+
+        powers = state.get("player_powers") or []
+        power_names = [power["name"] for power in powers]
+        assert "Speed Potion" in power_names
+        assert all(not name.endswith(".title") for name in power_names)
+        assert all(not power["description"].endswith(".description") for power in powers)
+
+    def test_liquid_memories_opens_discard_selection(self, game):
+        state = game.start(seed="liquid-memories-selection")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["LIQUID_MEMORIES"],
+            deck=[
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        for _ in range(2):
+            strike = next(card for card in state["hand"] if card["name"] == "Strike")
+            state = game.act("play_card", card_index=strike["index"], target_index=0)
+
+        assert state["discard_pile_count"] == 2
+
+        state = game.act("use_potion", potion_index=0)
+
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 1
+        assert state["max_select"] == 1
+        assert [card["name"] for card in state["cards"]] == ["Strike", "Strike"]
+
+        state = game.act("select_cards", indices="0")
+
+        assert state["decision"] == "combat_play"
+        assert state["player"]["potions"] == []
+        assert any(card["name"] == "Strike" and card["cost"] == 0 for card in state["hand"])
+        assert len(state["hand"]) == 4

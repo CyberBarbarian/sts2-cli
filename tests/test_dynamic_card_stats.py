@@ -113,6 +113,67 @@ class TestDynamicCardStats:
         strike = next(c for c in state["hand"] if c["name"] == "Strike")
         assert strike["stats"]["damage"] == 8
 
+    def test_attack_damage_stats_include_player_weak(self, game):
+        state = game.start(seed="weak-damage-stats")
+        game.skip_neow(state)
+        game.set_player(
+            hp=80,
+            max_hp=80,
+            deck=["STRIKE_IRONCLAD"] * 10 + ["DEFEND_IRONCLAD"] * 10,
+        )
+        state = game.enter_room("combat", encounter="THE_KIN_BOSS")
+
+        state = game.act("end_turn")
+        state = game.act("end_turn")
+
+        assert any(
+            power["name"] == "Weak"
+            for power in state["player_powers"]
+        )
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+        assert strike["stats"]["damage"] == 4
+
+    def test_status_damage_stats_do_not_include_player_strength(self, game):
+        state = game.start(seed="strength-status-damage-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "SETUP_STRIKE",
+            "INFECTION",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        setup_strike = next(c for c in state["hand"] if c["name"] == "Setup Strike")
+
+        state = game.act("play_card", card_index=setup_strike["index"], target_index=0)
+
+        infection = next(c for c in state["hand"] if c["name"] == "Infection")
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+        assert infection["stats"]["damage"] == 3
+        assert strike["stats"]["damage"] == 8
+
+    def test_card_temp_power_has_readable_name(self, game):
+        state = game.start(seed="setup-strike-power-name")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "SETUP_STRIKE",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        setup_strike = next(c for c in state["hand"] if c["name"] == "Setup Strike")
+
+        state = game.act("play_card", card_index=setup_strike["index"], target_index=0)
+
+        power_names = [power["name"] for power in state["player_powers"]]
+        power_descriptions = [power["description"] for power in state["player_powers"]]
+        assert "Setup Strike" in power_names
+        assert all(not name.endswith(".title") for name in power_names)
+        assert all(not description.endswith(".description") for description in power_descriptions)
+
     def test_block_stats_include_player_frail(self, game):
         state = game.start(seed="codex-frail-block")
         game.skip_neow(state)
@@ -124,3 +185,78 @@ class TestDynamicCardStats:
         assert any(power["name"] == "Frail" for power in state["player_powers"])
         defend = next(c for c in state["hand"] if c["name"] == "Defend")
         assert defend["stats"]["block"] == 3
+
+    def test_block_stats_include_player_dexterity(self, game):
+        state = game.start(seed="codex-dexterity-block")
+        game.skip_neow(state)
+        game.set_player(
+            deck=["DEFEND_IRONCLAD"] * 10,
+            potions=["SPEED_POTION"],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        state = game.act("use_potion", potion_index=0)
+
+        assert any(
+            power["name"] == "Dexterity" and power["amount"] == 5
+            for power in state["player_powers"]
+        )
+        defend = next(c for c in state["hand"] if c["name"] == "Defend")
+        assert defend["stats"]["block"] == 10
+
+    def test_body_slam_exports_current_block_damage(self, game):
+        state = game.start(seed="body-slam-current-block")
+        game.skip_neow(state)
+        game.set_player(
+            hp=80,
+            max_hp=80,
+            deck=[
+                "BLOOD_WALL",
+                "BODY_SLAM",
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        blood_wall = next(c for c in state["hand"] if c["name"] == "Blood Wall")
+
+        state = game.act("play_card", card_index=blood_wall["index"])
+
+        assert state["player"]["block"] == 16
+        body_slam = next(c for c in state["hand"] if c["name"] == "Body Slam")
+        assert body_slam["stats"]["calculateddamage"] == 16
+
+    def test_spite_exports_single_hit_before_hp_loss(self, game):
+        state = game.start(seed="spite-repeat-no-hp-loss")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "SPITE",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        spite = next(c for c in state["hand"] if c["name"] == "Spite")
+
+        assert spite["stats"]["repeat"] == 1
+
+    def test_spite_exports_repeat_after_hp_loss(self, game):
+        state = game.start(seed="spite-repeat-after-hp-loss")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "BLOODLETTING",
+            "SPITE",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        bloodletting = next(c for c in state["hand"] if c["name"] == "Bloodletting")
+
+        state = game.act("play_card", card_index=bloodletting["index"])
+        spite = next(c for c in state["hand"] if c["name"] == "Spite")
+
+        assert spite["stats"]["repeat"] == 2

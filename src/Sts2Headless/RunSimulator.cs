@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Combat.History.Entries;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Events;
@@ -25,6 +26,7 @@ using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.TestSupport;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Unlocks;
@@ -132,7 +134,8 @@ internal class LocLookup
     /// <summary>Strip BBCode tags like [gold], [/blue], [b], [sine], etc.</summary>
     private static string StripBBCode(string text)
     {
-        return System.Text.RegularExpressions.Regex.Replace(text, @"\[/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
+        return System.Text.RegularExpressions.Regex.Replace(text, @"#[A-Z](?=\{|[A-Za-z0-9])", "");
     }
 
     /// <summary>Language for JSON output: "en" or "zh". Default: "en".</summary>
@@ -172,9 +175,79 @@ internal class LocLookup
     }
     public string Relic(string entry) => Bilingual("relics", entry + ".title");
     public string Potion(string entry) => Bilingual("potions", entry + ".title");
-    public string Power(string entry) => Bilingual("powers", entry + ".title");
+    public string Power(string entry) => PowerText(entry, ".title");
+    public string PowerDescription(string entry) => PowerText(entry, ".description");
     public string Event(string entry) => Bilingual("events", entry + ".title");
     public string Act(string entry) => Bilingual("acts", entry + ".title");
+    public string MonsterMove(string monsterEntry, string moveEntry)
+    {
+        foreach (var candidate in MonsterMoveKeyCandidates(moveEntry))
+        {
+            var titleKey = monsterEntry + ".moves." + candidate + ".title";
+            var title = Bilingual("monsters", titleKey);
+            if (title != titleKey)
+                return title;
+
+            var key = monsterEntry + ".moves." + candidate;
+            var name = Bilingual("monsters", key);
+            if (name != key)
+                return name;
+        }
+
+        return HumanizeMoveEntry(moveEntry);
+    }
+
+    private static IEnumerable<string> MonsterMoveKeyCandidates(string moveEntry)
+    {
+        yield return moveEntry;
+        if (moveEntry.EndsWith("_MOVE", StringComparison.Ordinal))
+            yield return moveEntry[..^5];
+    }
+
+    private static string HumanizeMoveEntry(string moveEntry)
+    {
+        foreach (var candidate in MonsterMoveKeyCandidates(moveEntry).Reverse())
+        {
+            var words = candidate
+                .Split('_', StringSplitOptions.RemoveEmptyEntries)
+                .Select(word => word.Length == 0
+                    ? word
+                    : char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant());
+            var title = string.Join(" ", words);
+            if (!string.IsNullOrWhiteSpace(title))
+                return title;
+        }
+
+        return moveEntry;
+    }
+
+    private string PowerText(string entry, string suffix)
+    {
+        var powerKey = entry + suffix;
+        var result = Bilingual("powers", powerKey);
+        if (result != powerKey)
+            return result;
+
+        if (entry.EndsWith("_POTION_POWER", StringComparison.Ordinal))
+        {
+            var potionEntry = entry[..^"_POWER".Length];
+            var potionKey = potionEntry + suffix;
+            var potionResult = Bilingual("potions", potionKey);
+            if (potionResult != potionKey)
+                return potionResult;
+        }
+
+        if (entry.EndsWith("_POWER", StringComparison.Ordinal))
+        {
+            var cardEntry = entry[..^"_POWER".Length];
+            var cardKey = cardEntry + (suffix == ".title" ? ".title" : ".description");
+            var cardResult = Bilingual("cards", cardKey);
+            if (cardResult != cardKey)
+                return cardResult;
+        }
+
+        return result;
+    }
 
     /// <summary>Resolve a full loc key like "TABLE.KEY.SUB" by searching all tables.</summary>
     public string BilingualFromKey(string locKey)
@@ -226,6 +299,7 @@ public class RunSimulator
     private int _goldBeforeCombat;
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
+    private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
@@ -235,6 +309,7 @@ public class RunSimulator
         try
         {
             _loc.Lang = lang;
+            _shopItemSnapshots.Clear();
             EnsureModelDbInitialized();
 
             var player = CreatePlayer(character);
@@ -335,7 +410,13 @@ public class RunSimulator
                         var id = rEl.GetString();
                         if (id == null) continue;
                         var model = ModelDb.GetById<RelicModel>(new ModelId("RELIC", id));
-                        if (model != null) list.Add(model.ToMutable());
+                        if (model != null)
+                        {
+                            RelicCmd.Obtain(model.ToMutable(), player, player.Relics.Count)
+                                .GetAwaiter()
+                                .GetResult();
+                            _syncCtx.Pump();
+                        }
                     }
                 }
             }
@@ -373,7 +454,14 @@ public class RunSimulator
                         if (id != null)
                         {
                             var model = ModelDb.GetById<PotionModel>(new ModelId("POTION", id));
-                            if (model != null) slots[idx] = model;
+                            if (model != null)
+                            {
+                                MegaCrit.Sts2.Core.Commands.PotionCmd
+                                    .TryToProcure(model.ToMutable(), player, idx)
+                                    .GetAwaiter()
+                                    .GetResult();
+                                _syncCtx.Pump();
+                            }
                         }
                         idx++;
                     }
@@ -1593,8 +1681,11 @@ public class RunSimulator
             var localEvent = eventSync?.GetLocalEvent();
             if (localEvent != null && !localEvent.IsFinished)
             {
+                var eventEntry = localEvent.Id?.Entry ?? localEvent.GetType().Name.ToUpperInvariant();
                 var options = localEvent.CurrentOptions;
                 var optCountBefore = options?.Count ?? 0;
+                var hpBefore = player.Creature?.CurrentHp;
+                var deckSizeBefore = player.Deck?.Cards?.Count;
                 if (options != null && optionIndex >= 0 && optionIndex < options.Count)
                 {
                     try
@@ -1625,14 +1716,147 @@ public class RunSimulator
                     catch (Exception ex) { Log($"Event choose: {ex.Message}"); }
                 }
 
+                if (string.Equals(eventEntry, "BYRDONIS_NEST", StringComparison.OrdinalIgnoreCase))
+                {
+                    WaitForActionExecutor();
+                    _syncCtx.Pump();
+                    ForceToMap();
+                    return MapSelectState();
+                }
+
                 var optCountAfter = localEvent.CurrentOptions?.Count ?? 0;
                 if (!localEvent.IsFinished && optCountAfter == optCountBefore && optCountAfter > 0)
+                {
                     Log($"Event {localEvent.GetType().Name}: option count unchanged after choice");
+                    if (options != null && TryApplyKnownEventFallback(
+                            localEvent,
+                            eventEntry,
+                            options,
+                            optionIndex,
+                            player,
+                            hpBefore,
+                            deckSizeBefore))
+                    {
+                        ForceToMap();
+                        return MapSelectState();
+                    }
+                }
             }
         }
 
         WaitForActionExecutor();
         return DetectDecisionPoint();
+    }
+
+    private bool TryApplyKnownEventFallback(
+        EventModel localEvent,
+        string eventEntry,
+        IReadOnlyList<EventOption> options,
+        int optionIndex,
+        Player player,
+        int? hpBefore = null,
+        int? deckSizeBefore = null)
+    {
+        if (optionIndex < 0 || optionIndex >= options.Count)
+            return false;
+
+        var textKey = options[optionIndex].TextKey ?? "";
+
+        if (string.Equals(eventEntry, "SPIRIT_GRAFTER", StringComparison.OrdinalIgnoreCase)
+            && textKey.EndsWith(".LET_IT_IN", StringComparison.Ordinal))
+        {
+            var heal = GetEventDynamicVarInt(localEvent, "LetItInHealAmount") ?? 25;
+            if (player.Creature != null)
+            {
+                var baseHp = hpBefore ?? player.Creature.CurrentHp;
+                var targetHp = Math.Min(player.Creature.MaxHp, baseHp + heal);
+                if (player.Creature.CurrentHp < targetHp)
+                    SetField(player.Creature, "_currentHp", targetHp);
+            }
+
+            if (deckSizeBefore == null || player.Deck.Cards.Count <= deckSizeBefore.Value)
+                AddCardToDeck(player, "METAMORPHOSIS");
+
+            return true;
+        }
+
+        if (!string.Equals(eventEntry, "JUNGLE_MAZE_ADVENTURE", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (textKey.EndsWith(".JOIN_FORCES", StringComparison.Ordinal))
+        {
+            player.Gold += GetEventDynamicVarInt(localEvent, "JoinForcesGold") ?? 48;
+            return true;
+        }
+
+        if (textKey.EndsWith(".SOLO_QUEST", StringComparison.Ordinal))
+        {
+            player.Gold += GetEventDynamicVarInt(localEvent, "SoloGold") ?? 145;
+            var hpLoss = GetEventDynamicVarInt(localEvent, "SoloHp") ?? 18;
+            if (player.Creature != null)
+            {
+                var hp = Math.Max(0, player.Creature.CurrentHp - hpLoss);
+                SetField(player.Creature, "_currentHp", hp);
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool AddCardToDeck(Player player, string cardId)
+    {
+        try
+        {
+            var canonical = ModelDb.GetById<CardModel>(new ModelId("CARD", cardId));
+            if (canonical == null)
+            {
+                Log($"Unable to add card {cardId}: model not found");
+                return false;
+            }
+
+            var card = _runState?.CreateCard(canonical, player);
+            if (card == null)
+            {
+                Log($"Unable to add card {cardId}: no active run state");
+                return false;
+            }
+
+            try
+            {
+                MegaCrit.Sts2.Core.Commands.CardPileCmd
+                    .Add(card, MegaCrit.Sts2.Core.Entities.Cards.PileType.Deck)
+                    .GetAwaiter()
+                    .GetResult();
+                _syncCtx.Pump();
+            }
+            catch (Exception ex)
+            {
+                Log($"CardPileCmd.Add fallback for {cardId}: {ex.Message}");
+                player.Deck.AddInternal(card, silent: true);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"AddCardToDeck failed for {cardId}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static int? GetEventDynamicVarInt(EventModel localEvent, string name)
+    {
+        try
+        {
+            var dynamicVar = localEvent.DynamicVars?.Values
+                .FirstOrDefault(dv => string.Equals(dv.Name, name, StringComparison.OrdinalIgnoreCase));
+            return dynamicVar != null ? (int)dynamicVar.BaseValue : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private Dictionary<string, object?> DoLeaveRoom(Player player)
@@ -1665,6 +1889,9 @@ public class RunSimulator
 
         // Check if we need to move to next act (boss defeated)
         var room = _runState?.CurrentRoom;
+        if (room is MerchantRoom)
+            return DoLeaveRoom(player);
+
         if (room is CombatRoom combatRoom && combatRoom.RoomType == RoomType.Boss)
         {
             if (combatRoom.IsPreFinished || !CombatManager.Instance.IsInProgress)
@@ -2083,14 +2310,14 @@ public class RunSimulator
                 var ePowers = e.Powers?.Select(pw => new Dictionary<string, object?>
                 {
                     ["name"] = _loc.Power(pw.Id.Entry),
-                    ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
+                    ["description"] = _loc.PowerDescription(pw.Id.Entry),
                     ["amount"] = pw.Amount,
                 }).ToList();
 
-                return new Dictionary<string, object?>
+                var enemyInfo = new Dictionary<string, object?>
                 {
                     ["index"] = i,
-                    ["name"] = _loc.Monster(e.Monster?.Id.Entry ?? "UNKNOWN"),
+                    ["name"] = MonsterDisplayName(e.Monster, e),
                     ["hp"] = e.CurrentHp,
                     ["max_hp"] = e.MaxHp,
                     ["block"] = e.Block,
@@ -2098,13 +2325,23 @@ public class RunSimulator
                     ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
                     ["powers"] = ePowers?.Count > 0 ? ePowers : null,
                 };
+
+                var monsterEntry = e.Monster?.Id.Entry ?? "UNKNOWN";
+                var moveEntry = MoveEntry(e.Monster?.NextMove);
+                if (!string.IsNullOrWhiteSpace(moveEntry))
+                {
+                    enemyInfo["move_id"] = moveEntry;
+                    enemyInfo["move_name"] = _loc.MonsterMove(monsterEntry, moveEntry);
+                }
+
+                return enemyInfo;
             }).ToList() ?? new();
 
         // Player powers/buffs
         var playerPowers = player.Creature?.Powers?.Select(pw => new Dictionary<string, object?>
         {
             ["name"] = _loc.Power(pw.Id.Entry),
-            ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
+            ["description"] = _loc.PowerDescription(pw.Id.Entry),
             ["amount"] = pw.Amount,
         }).ToList();
 
@@ -2395,8 +2632,7 @@ public class RunSimulator
                         optVars = new Dictionary<string, object?>();
                         foreach (var dv in localEvent.DynamicVars.Values)
                         {
-                            var rawValue = (int)dv.BaseValue;
-                            optVars[dv.Name] = ExportEventDynamicVar(dv.Name, rawValue);
+                            optVars[dv.Name] = ExportEventDynamicVar(eventEntry, dv);
                         }
                     }
                 }
@@ -2420,6 +2656,8 @@ public class RunSimulator
                     catch { }
                 }
                 optDesc = NormalizeEventOptionDescription(eventEntry, opt.TextKey, optDesc, optVars);
+                title = InterpolateDynamicVars(title, optVars) ?? title;
+                optDesc = InterpolateDynamicVars(optDesc, optVars);
 
                 return new Dictionary<string, object?>
                 {
@@ -2472,7 +2710,265 @@ public class RunSimulator
             return "Gain {Gold} Gold. Lose {HpLoss} HP.";
         }
 
+        if (string.Equals(eventEntry, "BYRDONIS_NEST", StringComparison.OrdinalIgnoreCase)
+            && textKey?.EndsWith(".TAKE", StringComparison.OrdinalIgnoreCase) == true
+            && vars?.TryGetValue("Card", out var cardName) == true
+            && cardName is string cardText
+            && !string.IsNullOrWhiteSpace(cardText))
+        {
+            return $"Add {cardText} to your Deck.";
+        }
+
+        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
+            && textKey?.EndsWith(".EXTERMINATION", StringComparison.OrdinalIgnoreCase) == true
+            && vars?.TryGetValue("Card1", out var exterminationCard) == true
+            && exterminationCard is string exterminationText
+            && !string.IsNullOrWhiteSpace(exterminationText))
+        {
+            return $"Add {exterminationText} to your Deck.";
+        }
+
+        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
+            && textKey?.EndsWith(".SQUASH", StringComparison.OrdinalIgnoreCase) == true
+            && vars?.TryGetValue("Card2", out var squashCard) == true
+            && squashCard is string squashText
+            && !string.IsNullOrWhiteSpace(squashText))
+        {
+            return $"Add {squashText} to your Deck.";
+        }
+
+        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
+            && textKey?.EndsWith(".CLAIM", StringComparison.OrdinalIgnoreCase) == true
+            && vars?.TryGetValue("Curse", out var curse) == true
+            && vars.TryGetValue("Relic", out var relic)
+            && curse is string curseText
+            && relic is string relicText
+            && !string.IsNullOrWhiteSpace(curseText)
+            && !string.IsNullOrWhiteSpace(relicText))
+        {
+            return $"Add {curseText} to your Deck. Obtain the {relicText}.";
+        }
+
         return description;
+    }
+
+    private static string? InterpolateDynamicVars(string? text, Dictionary<string, object?>? vars)
+    {
+        if (string.IsNullOrEmpty(text) || vars == null || vars.Count == 0)
+            return text;
+
+        foreach (var (key, value) in vars)
+        {
+            if (value == null)
+                continue;
+            text = text.Replace("{" + key + "}", value.ToString(), StringComparison.Ordinal);
+        }
+
+        return text;
+    }
+
+    private string MonsterDisplayName(object? monster, object? creature = null)
+    {
+        var entry = ModelEntry(monster) ?? "UNKNOWN";
+        var name = _loc.Monster(entry);
+        var vars = ExportDynamicVars(monster);
+        var creatureVars = ExportDynamicVars(creature);
+        if (creatureVars != null)
+        {
+            vars ??= new Dictionary<string, object?>();
+            foreach (var (key, value) in creatureVars)
+                vars[key] = value;
+        }
+
+        if (entry == "TEST_SUBJECT" && name.Contains("{Count}", StringComparison.Ordinal))
+        {
+            var adaptableAmount = GetPowerAmount(creature, "ADAPTABLE_POWER");
+            if (adaptableAmount.HasValue)
+            {
+                vars ??= new Dictionary<string, object?>();
+                vars.TryAdd("Count", adaptableAmount.Value);
+            }
+        }
+        return InterpolateDynamicVars(name, vars) ?? name;
+    }
+
+    private string BossEncounterDisplayName(string bossIdEntry)
+    {
+        var encounterKey = bossIdEntry + ".title";
+        var encounterName = _loc.Bilingual("encounters", encounterKey);
+        if (encounterName != encounterKey)
+            return encounterName;
+
+        var monsterKey = bossIdEntry.EndsWith("_BOSS", StringComparison.Ordinal)
+            ? bossIdEntry[..^5]
+            : bossIdEntry;
+        if (monsterKey == "THE_KIN")
+            monsterKey = "KIN_PRIEST";
+        return _loc.Monster(monsterKey);
+    }
+
+    private static string? ModelEntry(object? model)
+    {
+        try
+        {
+            var id = model?.GetType().GetProperty("Id")?.GetValue(model);
+            if (id is string idString)
+                return idString;
+            return id?.GetType().GetProperty("Entry")?.GetValue(id)?.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? MoveEntry(object? move)
+    {
+        return MoveEntry(move, 0, new HashSet<object>(ReferenceEqualityComparer.Instance));
+    }
+
+    private static string? MoveEntry(object? move, int depth, HashSet<object> seen)
+    {
+        var entry = ModelEntry(move);
+        if (!string.IsNullOrWhiteSpace(entry))
+            return entry;
+
+        try
+        {
+            var typeName = move?.GetType().Name;
+            if (string.IsNullOrWhiteSpace(typeName))
+                return null;
+            if (typeName != "MoveState" && typeName.EndsWith("Move", StringComparison.Ordinal))
+                return MoveTypeToEntry(typeName);
+
+            if (move == null || depth >= 2 || !seen.Add(move))
+                return typeName == "MoveState" ? null : MoveTypeToEntry(typeName);
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            foreach (var prop in move.GetType().GetProperties(flags))
+            {
+                if (prop.GetIndexParameters().Length > 0)
+                    continue;
+                var child = SafeGetProperty(prop, move);
+                var childEntry = MoveEntry(child, depth + 1, seen);
+                if (!string.IsNullOrWhiteSpace(childEntry))
+                    return childEntry;
+            }
+
+            foreach (var field in move.GetType().GetFields(flags))
+            {
+                var child = SafeGetField(field, move);
+                var childEntry = MoveEntry(child, depth + 1, seen);
+                if (!string.IsNullOrWhiteSpace(childEntry))
+                    return childEntry;
+            }
+
+            return typeName == "MoveState" ? null : MoveTypeToEntry(typeName);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static object? SafeGetProperty(PropertyInfo prop, object target)
+    {
+        try
+        {
+            if (IsMoveEntryLeaf(prop.PropertyType))
+                return null;
+            return prop.GetValue(target);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static object? SafeGetField(FieldInfo field, object target)
+    {
+        try
+        {
+            if (IsMoveEntryLeaf(field.FieldType))
+                return null;
+            return field.GetValue(target);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsMoveEntryLeaf(Type type)
+    {
+        return type.IsPrimitive
+            || type.IsEnum
+            || type == typeof(string)
+            || typeof(Delegate).IsAssignableFrom(type)
+            || typeof(System.Collections.IEnumerable).IsAssignableFrom(type);
+    }
+
+    private static string MoveTypeToEntry(string typeName)
+    {
+        if (typeName.EndsWith("Move", StringComparison.Ordinal))
+            typeName = typeName[..^4];
+        return System.Text.RegularExpressions.Regex
+            .Replace(typeName, "([a-z0-9])([A-Z])", "$1_$2")
+            .ToUpperInvariant();
+    }
+
+    private static Dictionary<string, object?>? ExportDynamicVars(object? model)
+    {
+        try
+        {
+            var dynamicVars = model?.GetType().GetProperty("DynamicVars")?.GetValue(model);
+            var values = dynamicVars?.GetType().GetProperty("Values")?.GetValue(dynamicVars)
+                         as System.Collections.IEnumerable;
+            if (values == null)
+                return null;
+
+            var vars = new Dictionary<string, object?>();
+            foreach (var value in values)
+            {
+                if (value == null)
+                    continue;
+                var name = value.GetType().GetProperty("Name")?.GetValue(value)?.ToString();
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+                var baseValue = value.GetType().GetProperty("BaseValue")?.GetValue(value);
+                vars[name] = baseValue;
+            }
+            return vars.Count > 0 ? vars : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? GetPowerAmount(object? creature, string powerEntry)
+    {
+        try
+        {
+            var powers = creature?.GetType().GetProperty("Powers")?.GetValue(creature)
+                         as System.Collections.IEnumerable;
+            if (powers == null)
+                return null;
+
+            foreach (var power in powers)
+            {
+                var entry = ModelEntry(power);
+                if (!string.Equals(entry, powerEntry, StringComparison.Ordinal))
+                    continue;
+                var amount = power?.GetType().GetProperty("Amount")?.GetValue(power);
+                return amount is int intAmount ? intAmount : Convert.ToInt32(amount);
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private Dictionary<string, object?> RestSiteState(RestSiteRoom restRoom)
@@ -2506,6 +3002,25 @@ public class RunSimulator
         };
     }
 
+    private Dictionary<string, object?> ShopItemState(object entryKey, Dictionary<string, object?> current, bool hasDisplayModel)
+    {
+        if (hasDisplayModel)
+        {
+            _shopItemSnapshots[entryKey] = new Dictionary<string, object?>(current);
+            return current;
+        }
+
+        if (!_shopItemSnapshots.TryGetValue(entryKey, out var snapshot))
+            return current;
+
+        var restored = new Dictionary<string, object?>(snapshot);
+        restored["cost"] = current.GetValueOrDefault("cost");
+        restored["is_stocked"] = current.GetValueOrDefault("is_stocked");
+        if (current.ContainsKey("on_sale"))
+            restored["on_sale"] = current.GetValueOrDefault("on_sale");
+        return restored;
+    }
+
     private Dictionary<string, object?> ShopState(MerchantRoom merchantRoom, Player player)
     {
         var inv = merchantRoom.Inventory;
@@ -2529,7 +3044,7 @@ public class RunSimulator
                 }
                 catch { }
                 var shopkws = card?.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                return new Dictionary<string, object?>
+                var exported = new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["name"] = _loc.Card(entry),
@@ -2544,24 +3059,35 @@ public class RunSimulator
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
                 };
+                return ShopItemState(e, exported, card != null);
             }).ToList();
 
-        var relics = inv.RelicEntries.Select((e, i) => new Dictionary<string, object?>
+        var relics = inv.RelicEntries.Select((e, i) =>
         {
-            ["index"] = i,
-            ["name"] = _loc.Relic(e.Model?.Id.Entry ?? "?"),
-            ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
-            ["cost"] = e.Cost,
-            ["is_stocked"] = e.IsStocked,
+            var entry = e.Model?.Id.Entry ?? "?";
+            var exported = new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["name"] = _loc.Relic(entry),
+                ["description"] = _loc.Bilingual("relics", entry + ".description"),
+                ["cost"] = e.Cost,
+                ["is_stocked"] = e.IsStocked,
+            };
+            return ShopItemState(e, exported, e.Model != null);
         }).ToList();
 
-        var potions = inv.PotionEntries.Select((e, i) => new Dictionary<string, object?>
+        var potions = inv.PotionEntries.Select((e, i) =>
         {
-            ["index"] = i,
-            ["name"] = _loc.Potion(e.Model?.Id.Entry ?? "?"),
-            ["description"] = _loc.Bilingual("potions", (e.Model?.Id.Entry ?? "?") + ".description"),
-            ["cost"] = e.Cost,
-            ["is_stocked"] = e.IsStocked,
+            var entry = e.Model?.Id.Entry ?? "?";
+            var exported = new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["name"] = _loc.Potion(entry),
+                ["description"] = _loc.Bilingual("potions", entry + ".description"),
+                ["cost"] = e.Cost,
+                ["is_stocked"] = e.IsStocked,
+            };
+            return ShopItemState(e, exported, e.Model != null);
         }).ToList();
 
         var removal = merchantRoom.Inventory.CardRemovalEntry;
@@ -2800,24 +3326,66 @@ public class RunSimulator
             }
         }
 
+        if (string.Equals(card.Id.Entry, "BODY_SLAM", StringComparison.OrdinalIgnoreCase)
+            && player?.Creature != null)
+        {
+            stats["calculateddamage"] = Math.Max(0, player.Creature.Block);
+        }
+
+        if (string.Equals(card.Id.Entry, "SPITE", StringComparison.OrdinalIgnoreCase)
+            && player?.PlayerCombatState != null
+            && player.Creature != null
+            && !LostHpThisTurn(player.Creature))
+        {
+            stats["repeat"] = 1;
+        }
+
         if (applyCombatModifiers)
-            ApplyCombatStatModifiers(stats, player);
+            ApplyCombatStatModifiers(stats, card, player);
 
         return stats;
     }
 
-    private void ApplyCombatStatModifiers(Dictionary<string, object?> stats, Player? player)
+    private static bool LostHpThisTurn(Creature creature)
+    {
+        try
+        {
+            return CombatManager.Instance.History.Entries
+                .OfType<DamageReceivedEntry>()
+                .Any(entry => entry.HappenedThisTurn(creature.CombatState)
+                              && entry.Receiver == creature
+                              && entry.Result.UnblockedDamage > 0);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void ApplyCombatStatModifiers(Dictionary<string, object?> stats, CardModel card, Player? player)
     {
         if (player?.PlayerCombatState == null)
             return;
 
         var strength = GetPlayerPowerAmount(player, "STRENGTH", "Strength");
-        if (strength != 0)
+        if (strength != 0 && card.Type == CardType.Attack)
         {
             AddStat(stats, "damage", strength);
             AddStat(stats, "calculateddamage", strength);
             AddTargetStat(stats, "calculateddamage_by_target", "calculateddamage", strength);
         }
+
+        var weak = GetPlayerPowerAmount(player, "WEAK", "Weak");
+        if (weak > 0 && card.Type == CardType.Attack)
+        {
+            ScaleStat(stats, "damage", 3, 4);
+            ScaleStat(stats, "calculateddamage", 3, 4);
+            ScaleTargetStat(stats, "calculateddamage_by_target", "calculateddamage", 3, 4);
+        }
+
+        var dexterity = GetPlayerPowerAmount(player, "DEXTERITY", "Dexterity");
+        if (dexterity != 0)
+            AddStat(stats, "block", dexterity);
 
         var frail = GetPlayerPowerAmount(player, "FRAIL", "Frail");
         if (frail > 0)
@@ -2854,25 +3422,66 @@ public class RunSimulator
             AddStat(row, statKey, delta);
     }
 
+    private static void ScaleTargetStat(
+        Dictionary<string, object?> stats,
+        string collectionKey,
+        string statKey,
+        int numerator,
+        int denominator)
+    {
+        if (!stats.TryGetValue(collectionKey, out var value)
+            || value is not IEnumerable<Dictionary<string, object?>> rows)
+            return;
+
+        foreach (var row in rows)
+            ScaleStat(row, statKey, numerator, denominator);
+    }
+
     private int GetPlayerPowerAmount(Player player, params string[] powerKeys)
     {
+        var total = 0;
         try
         {
-            return player.Creature?.Powers?
-                .Where(power =>
+            var powers = player.Creature?.Powers;
+            if (powers == null)
+                return 0;
+
+            foreach (var power in powers)
+            {
+                try
                 {
                     var entry = power.Id.Entry;
+                    var normalizedEntry = entry.EndsWith("_POWER", StringComparison.OrdinalIgnoreCase)
+                        ? entry[..^"_POWER".Length]
+                        : entry;
                     var localizedName = _loc.Power(entry);
-                    return powerKeys.Any(key =>
+                    if (powerKeys.Any(key => string.Equals(localizedName, key, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        total += power.Amount;
+                        continue;
+                    }
+
+                    var hasSpecificLocalizedName = !string.IsNullOrWhiteSpace(localizedName)
+                        && !localizedName.EndsWith(".title", StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(localizedName, entry, StringComparison.OrdinalIgnoreCase);
+                    if (hasSpecificLocalizedName)
+                        continue;
+
+                    if (powerKeys.Any(key =>
                         string.Equals(entry, key, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(localizedName, key, StringComparison.OrdinalIgnoreCase));
-                })
-                .Sum(power => power.Amount) ?? 0;
+                        || string.Equals(normalizedEntry, key, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        total += power.Amount;
+                    }
+                }
+                catch { }
+            }
         }
         catch
         {
-            return 0;
+            return total;
         }
+        return total;
     }
 
     private static int GetStatInt(Dictionary<string, object?> stats, string key, int fallback)
@@ -2933,7 +3542,7 @@ public class RunSimulator
                 rows.Add(new Dictionary<string, object?>
                 {
                     ["target_index"] = i,
-                    ["target_name"] = _loc.Monster(enemy.Monster?.Id.Entry ?? "UNKNOWN"),
+                    ["target_name"] = MonsterDisplayName(enemy.Monster, enemy),
                     ["vulnerable"] = amount,
                     ["calculateddamage"] = baseDamage + extraDamage * amount,
                 });
@@ -2947,13 +3556,82 @@ public class RunSimulator
         return rows;
     }
 
-    private object? ExportEventDynamicVar(string name, int rawValue)
+    private object? ExportEventDynamicVar(string eventEntry, DynamicVar dynamicVar)
     {
+        var name = dynamicVar.Name;
+
+        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Curse", StringComparison.OrdinalIgnoreCase))
+        {
+            return _loc.Card("DECAY");
+        }
+
+        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Relic", StringComparison.OrdinalIgnoreCase))
+        {
+            return _loc.Relic("LOST_WISP");
+        }
+
+        if (dynamicVar is StringVar)
+        {
+            var stringValue = dynamicVar.ToString();
+            if (!string.IsNullOrWhiteSpace(stringValue))
+                return _loc.BilingualFromKey(stringValue);
+        }
+
+        var rawValue = (int)dynamicVar.BaseValue;
+
         if (string.Equals(name, "RandomCard", StringComparison.OrdinalIgnoreCase))
         {
             var cards = _runState?.Players[0].Deck?.Cards?.Where(c => c != null).ToList();
             if (cards != null && rawValue >= 0 && rawValue < cards.Count)
                 return _loc.Card(cards[rawValue].Id.Entry);
+        }
+
+        if (string.Equals(eventEntry, "BYRDONIS_NEST", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Card", StringComparison.OrdinalIgnoreCase))
+        {
+            return _loc.Card("BYRDONIS_EGG");
+        }
+
+        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Card1", StringComparison.OrdinalIgnoreCase))
+        {
+            return _loc.Card("EXTERMINATE");
+        }
+
+        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Card2", StringComparison.OrdinalIgnoreCase))
+        {
+            return _loc.Card("SQUASH");
+        }
+
+        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Curse", StringComparison.OrdinalIgnoreCase))
+        {
+            return _loc.Card("DECAY");
+        }
+
+        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Relic", StringComparison.OrdinalIgnoreCase))
+        {
+            return _loc.Relic("LOST_WISP");
+        }
+
+        if (string.Equals(eventEntry, "RANWID_THE_ELDER", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Potion", StringComparison.OrdinalIgnoreCase))
+        {
+            var potions = _runState?.Players[0].Potions?.Where(p => p != null).ToList();
+            if (potions != null && rawValue >= 0 && rawValue < potions.Count)
+                return _loc.Potion(potions[rawValue].Id.Entry);
+        }
+
+        if (string.Equals(eventEntry, "RANWID_THE_ELDER", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(name, "Relic", StringComparison.OrdinalIgnoreCase))
+        {
+            var relics = _runState?.Players[0].Relics?.Where(r => r != null).ToList();
+            if (relics != null && rawValue >= 0 && rawValue < relics.Count)
+                return _loc.Relic(relics[rawValue].Id.Entry);
         }
 
         return rawValue;
@@ -3069,13 +3747,10 @@ public class RunSimulator
             var bossIdEntry = _runState.Act?.BossEncounter?.Id?.Entry;
             if (!string.IsNullOrEmpty(bossIdEntry))
             {
-                var monsterKey = bossIdEntry.EndsWith("_BOSS") ? bossIdEntry[..^5] : bossIdEntry;
-                // Handle special mappings
-                if (monsterKey == "THE_KIN") monsterKey = "KIN_PRIEST";
                 ctx["boss"] = new Dictionary<string, object?>
                 {
                     ["id"] = bossIdEntry,
-                    ["name"] = _loc.Monster(monsterKey),
+                    ["name"] = BossEncounterDisplayName(bossIdEntry),
                 };
             }
         }
@@ -3265,8 +3940,9 @@ public class RunSimulator
             {
                 "MegaCrit.Sts2.Core.Models.Monsters.KinPriest:RitualMove",
                 "MegaCrit.Sts2.Core.Models.Monsters.BygoneEffigy:WakeMove",
+                "MegaCrit.Sts2.Core.Models.Monsters.Chomper:ScreechMove",
             };
-            var talkMoveNameFragments = new[] { "RitualMove", "WakeMove" };
+            var talkMoveNameFragments = new[] { "RitualMove", "WakeMove", "ScreechMove" };
             var transpiled = new HashSet<MethodInfo>();
             if (transpiler != null)
             {
@@ -4012,10 +4688,8 @@ public class RunSimulator
             var bossIdEntry = _runState.Act?.BossEncounter?.Id?.Entry;
             if (!string.IsNullOrEmpty(bossIdEntry))
             {
-                var monsterKey = bossIdEntry.EndsWith("_BOSS") ? bossIdEntry[..^5] : bossIdEntry;
-                if (monsterKey == "THE_KIN") monsterKey = "KIN_PRIEST";
                 bossNode["id"] = bossIdEntry;
-                bossNode["name"] = _loc.Monster(monsterKey);
+                bossNode["name"] = BossEncounterDisplayName(bossIdEntry);
             }
         }
         catch { }
