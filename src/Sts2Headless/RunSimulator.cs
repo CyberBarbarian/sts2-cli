@@ -3393,6 +3393,21 @@ public class RunSimulator
         if (string.IsNullOrEmpty(text) || vars == null || vars.Count == 0)
             return text;
 
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:plural\:(?<singular>[^|{}]*)\|(?<plural>(?:\{\}|[^{}])*)\}",
+            match =>
+            {
+                var key = match.Groups["key"].Value;
+                if (!vars.TryGetValue(key, out var value) || value == null)
+                    return match.Value;
+
+                var choice = IsSingularValue(value)
+                    ? match.Groups["singular"].Value
+                    : match.Groups["plural"].Value;
+                return choice.Replace("{}", value.ToString(), StringComparison.Ordinal);
+            });
+
         foreach (var (key, value) in vars)
         {
             if (value == null)
@@ -3401,6 +3416,18 @@ public class RunSimulator
         }
 
         return text;
+    }
+
+    private static bool IsSingularValue(object value)
+    {
+        try
+        {
+            return Convert.ToDecimal(value) == 1m;
+        }
+        catch
+        {
+            return string.Equals(value.ToString(), "1", StringComparison.Ordinal);
+        }
     }
 
     private string MonsterDisplayName(object? monster, object? creature = null)
@@ -3620,12 +3647,29 @@ public class RunSimulator
             return MapSelectState();
         }
 
-        var optionList = options.Select((opt, i) => new Dictionary<string, object?>
+        var optionList = options.Select((opt, i) =>
         {
-            ["index"] = i,
-            ["option_id"] = opt.OptionId,
-            ["name"] = opt.GetType().Name,
-            ["is_enabled"] = opt.IsEnabled,
+            var vars = ExportLocStringVariables(opt.Title);
+            var descriptionVars = ExportLocStringVariables(opt.Description);
+            if (descriptionVars != null)
+            {
+                vars ??= new Dictionary<string, object?>();
+                foreach (var (key, value) in descriptionVars)
+                    vars[key] = value;
+            }
+
+            var title = ResolveLocString(opt.Title, vars) ?? opt.OptionId;
+            var description = ResolveLocString(opt.Description, vars);
+            return new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["option_id"] = opt.OptionId,
+                ["name"] = opt.GetType().Name,
+                ["title"] = title,
+                ["description"] = description,
+                ["is_enabled"] = opt.IsEnabled,
+                ["vars"] = vars?.Count > 0 ? vars : null,
+            };
         }).ToList();
 
         return new Dictionary<string, object?>
@@ -3636,6 +3680,60 @@ public class RunSimulator
             ["options"] = optionList,
             ["player"] = PlayerSummary(player),
         };
+    }
+
+    private string? ResolveLocString(LocString? locString, Dictionary<string, object?>? vars = null)
+    {
+        if (locString == null || string.IsNullOrWhiteSpace(locString.LocEntryKey))
+            return null;
+
+        var text = _loc.Bilingual(locString.LocTable, locString.LocEntryKey);
+        if (text == locString.LocEntryKey)
+            return null;
+        return InterpolateDynamicVars(text, vars);
+    }
+
+    private static Dictionary<string, object?>? ExportLocStringVariables(LocString? locString)
+    {
+        try
+        {
+            var variables = locString?.Variables;
+            if (variables == null || variables.Count == 0)
+                return null;
+
+            var exported = new Dictionary<string, object?>();
+            foreach (var (key, value) in variables)
+                exported[key] = ExportLocStringVariableValue(value);
+            return exported.Count > 0 ? exported : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static object? ExportLocStringVariableValue(object? value)
+    {
+        if (value == null)
+            return null;
+        if (value is string or bool or int or long or short or byte or float or double or decimal)
+            return value;
+        if (value is DynamicVar dynamicVar)
+        {
+            if (dynamicVar is StringVar)
+                return dynamicVar.ToString();
+            return (int)dynamicVar.BaseValue;
+        }
+
+        var baseValue = value.GetType().GetProperty("BaseValue")?.GetValue(value);
+        if (baseValue is string or bool or int or long or short or byte or float or double or decimal)
+            return baseValue;
+
+        var amount = value.GetType().GetProperty("Amount")?.GetValue(value);
+        if (amount is string or bool or int or long or short or byte or float or double or decimal)
+            return amount;
+
+        return value.ToString();
     }
 
     private Dictionary<string, object?> ShopItemState(object entryKey, Dictionary<string, object?> current, bool hasDisplayModel)

@@ -21,6 +21,22 @@ class TestRestSiteStructure:
         assert "HEAL" in ids
         assert "SMITH" in ids
 
+    def test_rest_site_options_include_readable_title_and_description(self, game):
+        state = game.start(seed="rs-readable-options")
+        game.skip_neow(state)
+        state = game.enter_room("rest_site")
+
+        heal = next(o for o in state["options"] if o["option_id"] == "HEAL")
+        smith = next(o for o in state["options"] if o["option_id"] == "SMITH")
+
+        assert heal["title"] == "Rest"
+        assert "Heal" in heal["description"]
+        assert heal["vars"]["Heal"] > 0
+        assert smith["title"] == "Smith"
+        assert "Upgrade" in smith["description"]
+        assert "{Count:plural" not in smith["description"]
+        assert smith["vars"]["Count"] >= 1
+
 
 class TestRestSiteActions:
     def test_heal_restores_hp(self, game):
