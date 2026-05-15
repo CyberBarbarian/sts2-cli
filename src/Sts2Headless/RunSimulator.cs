@@ -2380,6 +2380,12 @@ public class RunSimulator
         // Boss → next act
         if (combatRoom.RoomType == RoomType.Boss)
         {
+            if (IsFinalActBossComplete())
+            {
+                Log("Final boss defeated, reporting victory");
+                return GameOverState(true);
+            }
+
             Log("Boss defeated, entering next act");
             try
             {
@@ -2394,6 +2400,19 @@ public class RunSimulator
         // Normal → go to map
         ForceToMap();
         return MapSelectState();
+    }
+
+    private bool IsFinalActBossComplete()
+    {
+        try
+        {
+            return _runState?.CurrentActIndex >= 2
+                && _runState.ActFloor >= 15;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private Dictionary<string, object?> CardRewardState(Player player, CombatRoom? combatRoom)
@@ -3826,6 +3845,8 @@ public class RunSimulator
         PatchCardPileAddVisuals();
         PatchTalkCmdPlay();
         PatchSoulNexusPresentation();
+        PatchQueenPresentation();
+        PatchDecimillipedePresentation();
 
         // Initialize localization system (needed for events, cards, etc.)
         InitLocManager();
@@ -4093,6 +4114,78 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch SoulNexus presentation cleanup: {ex.Message}");
+        }
+    }
+
+    private static void PatchQueenPresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.queen.presentation");
+            var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.StripQueenHeadlessPresentationCalls),
+                BindingFlags.Static | BindingFlags.Public);
+            var skipPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var queenType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Monsters.Queen");
+            if (queenType == null)
+                return;
+
+            var patched = 0;
+            var afterDeath = queenType.GetMethod("AfterDeath",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: new[] { typeof(PlayerChoiceContext), typeof(Creature), typeof(bool), typeof(float) },
+                modifiers: null);
+            if (afterDeath != null && transpiler != null)
+            {
+                harmony.Patch(afterDeath, transpiler: new HarmonyMethod(transpiler));
+                patched++;
+            }
+
+            var beforeRemoved = queenType.GetMethod("BeforeRemovedFromRoom",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
+            if (beforeRemoved != null && skipPrefix != null)
+            {
+                harmony.Patch(beforeRemoved, new HarmonyMethod(skipPrefix));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched Queen presentation cleanup ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Queen presentation cleanup: {ex.Message}");
+        }
+    }
+
+    private static void PatchDecimillipedePresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.decimillipede.presentation");
+            var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var segmentType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment");
+            if (prefix == null || segmentType == null)
+                return;
+
+            var patched = 0;
+            foreach (var method in segmentType
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(method => method.Name == "ChangePhobiaModeTexture" && method.ReturnType == typeof(void)))
+            {
+                harmony.Patch(method, new HarmonyMethod(prefix));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched Decimillipede presentation texture changes ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Decimillipede presentation texture changes: {ex.Message}");
         }
     }
 
@@ -4385,6 +4478,38 @@ public class RunSimulator
             }
         }
 
+        public static IEnumerable<CodeInstruction> StripQueenHeadlessPresentationCalls(IEnumerable<CodeInstruction> instructions)
+        {
+            foreach (var instruction in instructions)
+            {
+                if (instruction.operand is MethodInfo method && IsCombatRoomGetCreatureNode(method))
+                {
+                    var argCount = method.GetParameters().Length + (method.IsStatic ? 0 : 1);
+                    var replacement = new List<CodeInstruction>();
+                    for (var i = 0; i < argCount; i++)
+                        replacement.Add(new CodeInstruction(OpCodes.Pop));
+
+                    if (!method.ReturnType.IsValueType)
+                    {
+                        replacement.Add(new CodeInstruction(OpCodes.Ldnull));
+                    }
+                    else
+                    {
+                        yield return instruction;
+                        continue;
+                    }
+
+                    replacement[0].labels.AddRange(instruction.labels);
+                    replacement[0].blocks.AddRange(instruction.blocks);
+                    foreach (var replacementInstruction in replacement)
+                        yield return replacementInstruction;
+                    continue;
+                }
+
+                yield return instruction;
+            }
+        }
+
         private static bool IsHeadlessPresentationCall(MethodInfo method)
         {
             return IsTalkCmdPlay(method)
@@ -4436,6 +4561,12 @@ public class RunSimulator
         {
             return method.Name == "Play"
                 && (method.DeclaringType?.FullName ?? "").Contains("PlayerFullscreenHealVfx", StringComparison.Ordinal);
+        }
+
+        private static bool IsCombatRoomGetCreatureNode(MethodInfo method)
+        {
+            return method.Name == "GetCreatureNode"
+                && (method.DeclaringType?.FullName ?? "").Contains("NCombatRoom", StringComparison.Ordinal);
         }
     }
 

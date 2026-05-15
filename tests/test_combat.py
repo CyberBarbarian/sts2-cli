@@ -1,5 +1,8 @@
 """Tests for combat scenarios."""
+import json
+
 import pytest
+from conftest import Game
 
 
 class TestCombatStructure:
@@ -468,6 +471,73 @@ class TestCombatEdgeCases:
             state = game.act("end_turn")
 
         assert state["enemies"][0]["move_name"] == "Dismember"
+
+        state = game.act("end_turn")
+        assert state["decision"] == "combat_play"
+        assert state["player"]["hp"] > 0
+
+    def test_act_three_queen_win_exports_victory_instead_of_empty_map(self, tmp_path):
+        game = Game()
+        try:
+            state = game.start(seed="queen-final-victory")
+            state = game.skip_neow(state)
+
+            save_path = tmp_path / "act_three.save"
+            save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+            assert save_result["success"] is True
+        finally:
+            game.close()
+
+        save_data = json.loads(save_path.read_text())
+        save_data["current_act_index"] = 2
+        save_data["visited_map_coords"] = [{"col": 3, "row": row} for row in range(15)]
+        save_path.write_text(json.dumps(save_data))
+
+        game = Game()
+        state = game.send({"cmd": "load_save", "path": str(save_path)})
+        assert state["context"]["act"] == 3
+
+        try:
+            game.set_player(hp=9999, max_hp=9999, deck=["BLUDGEON"] * 50)
+            state = game.enter_room("combat", encounter="QUEEN_BOSS")
+
+            for _ in range(200):
+                if state.get("decision") != "combat_play":
+                    break
+
+                playable = [card for card in state["hand"] if card.get("can_play")]
+                if not playable:
+                    state = game.act("end_turn")
+                    continue
+
+                card = playable[0]
+                enemies = [enemy for enemy in state["enemies"] if enemy.get("hp", 0) > 0]
+                assert enemies
+                target = min(enemies, key=lambda enemy: enemy.get("hp", 0))
+                state = game.act("play_card", card_index=card["index"], target_index=target["index"])
+
+            assert state["decision"] == "game_over"
+            assert state["victory"] is True
+        finally:
+            game.close()
+
+    def test_decimillipede_reattach_headless_texture_does_not_force_game_over(self, game):
+        state = game.start(seed="decimillipede-reattach-headless")
+        game.skip_neow(state)
+        game.set_player(
+            hp=9999,
+            max_hp=9999,
+            deck=["BLUDGEON"] * 10,
+            relics=["BAG_OF_MARBLES"],
+        )
+        state = game.enter_room("combat", encounter="DECIMILLIPEDE_ELITE")
+
+        state = game.act("play_card", card_index=0, target_index=0)
+        assert state["decision"] == "combat_play"
+        assert len(state["enemies"]) == 2
+
+        state = game.act("end_turn")
+        assert state["decision"] == "combat_play"
 
         state = game.act("end_turn")
         assert state["decision"] == "combat_play"
