@@ -291,6 +291,7 @@ public class RunSimulator
     private bool _eventOptionChosen;
     private int _lastEventOptionCount;
     private Task? _pendingEventOptionTask;
+    private Task? _pendingShopPurchaseTask;
 
     // Pending rewards for card selection (populated after combat, before proceeding)
     private List<Reward>? _pendingRewards;
@@ -1009,6 +1010,7 @@ public class RunSimulator
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
         _pendingEventOptionTask = null;
+        _pendingShopPurchaseTask = null;
         _pendingRewards = null;
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
 
@@ -1389,8 +1391,25 @@ public class RunSimulator
 
         try
         {
-            entry.OnTryPurchaseWrapper(merchantRoom.Inventory).GetAwaiter().GetResult();
+            var task = Task.Run(() => entry.OnTryPurchaseWrapper(merchantRoom.Inventory));
+            _pendingShopPurchaseTask = task;
+            for (int i = 0; i < 100; i++)
+            {
+                _syncCtx.Pump();
+                if (HasPendingHeadlessChoice()) break;
+                if (task.IsCompleted) break;
+                Thread.Sleep(10);
+            }
+            if (HasPendingHeadlessChoice())
+            {
+                WaitForActionExecutor();
+                return DetectDecisionPoint();
+            }
+            if (!task.IsCompleted) task.Wait(2000);
             _syncCtx.Pump();
+            if (task.IsFaulted)
+                return Error($"Buy relic failed: {task.Exception?.GetBaseException().Message}");
+            _pendingShopPurchaseTask = null;
             Log($"Bought relic: {entry.Model?.GetType().Name ?? "unknown"} for {entry.Cost}g");
         }
         catch (Exception ex) { return Error($"Buy relic failed: {ex.Message}"); }
@@ -1521,9 +1540,30 @@ public class RunSimulator
         // Extra wait for shop card removal: the purchase task needs to finish
         if (_runState?.CurrentRoom is MerchantRoom)
         {
-            Thread.Sleep(200);
-            _syncCtx.Pump();
-            WaitForActionExecutor();
+            var shopTask = _pendingShopPurchaseTask;
+            if (shopTask != null)
+            {
+                for (int i = 0; i < 300; i++)
+                {
+                    _syncCtx.Pump();
+                    WaitForActionExecutor();
+                    if (shopTask.IsCompleted) break;
+                    if (HasPendingHeadlessChoice()) break;
+                    Thread.Sleep(10);
+                }
+                if (shopTask.IsCompleted)
+                {
+                    if (shopTask.IsFaulted)
+                        Log($"Shop purchase task failed: {shopTask.Exception?.GetBaseException().Message}");
+                    _pendingShopPurchaseTask = null;
+                }
+            }
+            else
+            {
+                Thread.Sleep(200);
+                _syncCtx.Pump();
+                WaitForActionExecutor();
+            }
             Log("Card selection in shop (card removal), refreshing shop state");
         }
 

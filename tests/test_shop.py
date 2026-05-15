@@ -1,5 +1,29 @@
 """Tests for shop scenarios."""
+import json
+import queue
+import threading
+
 import pytest
+
+
+def send_with_timeout(game, cmd, timeout=5):
+    out = queue.Queue()
+
+    def worker():
+        try:
+            out.put(game.send(cmd))
+        except Exception as exc:
+            out.put(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    try:
+        response = out.get(timeout=timeout)
+    except queue.Empty:
+        pytest.fail(f"Timed out waiting for response to {json.dumps(cmd)}")
+    if isinstance(response, Exception):
+        raise response
+    return response
 
 
 class TestShopStructure:
@@ -105,6 +129,28 @@ class TestShopBuy:
         assert bought["is_stocked"] is False
         assert bought["name"] == relic["name"]
         assert bought["description"] == relic["description"]
+
+    def test_buy_relic_returns_pickup_card_selection(self, game):
+        state = game.start(seed="kifuda-shop-4")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+
+        relic = next(relic for relic in state["relics"] if relic["id"] == "KIFUDA")
+        state = send_with_timeout(
+            game,
+            {"cmd": "action", "action": "buy_relic", "args": {"relic_index": relic["index"]}},
+        )
+
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 0
+        assert state["max_select"] == 3
+        assert state["cards"]
+
+        state = game.act("select_cards", indices="0,1,2")
+        assert state["decision"] == "shop"
+        assert any(relic["id"] == "KIFUDA" for relic in state["player"]["relics"])
+        assert state["player"]["deck"][0].get("enchantment") == "Adroit"
 
     def test_buy_insufficient_gold(self, game):
         state = game.start(seed="sb2")
