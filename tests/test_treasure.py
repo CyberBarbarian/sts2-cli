@@ -52,3 +52,20 @@ def test_treasure_relic_exports_effect_vars_and_resolved_description(game):
 
     assert owned["vars"]["ThornsPower"] == 3
     assert "{ThornsPower}" not in owned["description"]
+
+
+def test_empty_treasure_from_silver_crucible_is_explicit_and_proceeds(game):
+    game.start(seed="silver-crucible-empty-chest")
+    game.set_player(relics=["SILVER_CRUCIBLE"])
+
+    state = game.enter_room("treasure")
+
+    assert state["decision"] == "treasure_empty"
+    assert state["relics"] == []
+    assert state["can_proceed"] is True
+    assert [r["id"] for r in state["player"]["relics"]] == ["SILVER_CRUCIBLE"]
+
+    state = game.act("proceed")
+
+    assert state["decision"] == "map_select"
+    assert [r["id"] for r in state["player"]["relics"]] == ["SILVER_CRUCIBLE"]

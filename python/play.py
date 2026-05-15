@@ -1822,6 +1822,23 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 state = send({"cmd": "action", "action": "claim_relic",
                              "args": {"relic_index": int(choice)}})
 
+            elif dec == "treasure_empty":
+                print(f"\n{'─' * 60}")
+                ctx = state.get("context", {})
+                if ctx:
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+                print(f"  {c(t('Empty treasure chest','空宝箱'), 'yellow')}")
+                msg = state.get("message")
+                if msg:
+                    print(f"      {msg}")
+                show_player(state.get("player", {}))
+
+                if auto:
+                    state = send({"cmd": "action", "action": "proceed"})
+                else:
+                    get_input(t("Press Enter to proceed", "回车继续"), {""}, state=state)
+                    state = send({"cmd": "action", "action": "proceed"})
+
             elif dec == "bundle_select":
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})

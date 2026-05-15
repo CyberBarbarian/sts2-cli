@@ -1749,6 +1749,8 @@ public class RunSimulator
         var room = _runState?.CurrentRoom;
         if (room is MerchantRoom)
             return DoLeaveRoom(player);
+        if (room is TreasureRoom)
+            return DoLeaveRoom(player);
 
         if (room is CombatRoom combatRoom && combatRoom.RoomType == RoomType.Boss)
         {
@@ -2999,23 +3001,12 @@ public class RunSimulator
         var relics = synchronizer?.CurrentRelics;
         if (relics == null)
         {
-            return new Dictionary<string, object?>
-            {
-                ["type"] = "decision",
-                ["decision"] = "treasure_blocked",
-                ["context"] = RunContext(),
-                ["message"] = "Treasure room did not expose relic choices and was not advanced automatically",
-                ["player"] = PlayerSummary(_runState!.Players[0]),
-            };
+            return TreasureEmptyState("Treasure room produced no relic choices after engine rewards resolved");
         }
 
         if (relics.Count == 0)
         {
-            Log("Treasure room: completing empty relic session");
-            synchronizer!.CompleteWithNoRelics();
-            _syncCtx.Pump();
-            ForceToMap();
-            return MapSelectState();
+            return TreasureEmptyState("Treasure relic session contains no choices");
         }
 
         var exportedRelics = relics.Select((relic, i) =>
@@ -3031,6 +3022,21 @@ public class RunSimulator
             ["decision"] = "treasure",
             ["context"] = RunContext(),
             ["relics"] = exportedRelics,
+            ["player"] = PlayerSummary(_runState!.Players[0]),
+        };
+    }
+
+    private Dictionary<string, object?> TreasureEmptyState(string message)
+    {
+        Log($"Treasure room empty: {message}");
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "treasure_empty",
+            ["context"] = RunContext(),
+            ["message"] = message,
+            ["relics"] = new List<object?>(),
+            ["can_proceed"] = true,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
     }
