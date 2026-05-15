@@ -35,7 +35,7 @@ class TestDynamicCardStats:
 
         assert card["stats"]["calculateddamage"] == 16
 
-    def test_perfected_strike_after_upgrade_exports_dynamic_calculated_damage(self, game):
+    def test_perfected_strike_after_upgrade_uses_engine_noncombat_preview(self, game):
         state = game.start(seed="perfected-upgrade-preview")
         game.skip_neow(state)
         state = game.set_player(deck=[
@@ -49,11 +49,10 @@ class TestDynamicCardStats:
         card = next(c for c in state["player"]["deck"] if c["name"] == "Perfected Strike")
         upgraded_stats = card["after_upgrade"]["stats"]
 
-        assert upgraded_stats["calculateddamage"] == (
-            upgraded_stats["calculationbase"] + upgraded_stats["extradamage"] * 5
-        )
+        assert upgraded_stats["extradamage"] == 3
+        assert upgraded_stats["calculateddamage"] == upgraded_stats["calculationbase"]
 
-    def test_bully_exports_damage_from_enemy_vulnerable(self, game):
+    def test_bully_exports_vulnerable_damage_by_target(self, game):
         state = game.start(seed="bully-stats")
         game.skip_neow(state)
         game.set_player(deck=[
@@ -70,8 +69,13 @@ class TestDynamicCardStats:
 
         bully = next(c for c in state["hand"] if c["name"] == "Bully")
         stats = bully["stats"]
-        assert stats["calculateddamage"] > stats["calculationbase"]
-        assert stats["calculateddamage"] == 8
+        target_stats = stats["calculateddamage_by_target"][0]
+        assert stats["calculateddamage"] == stats["calculationbase"]
+        assert target_stats["calculateddamage"] > stats["calculationbase"]
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=bully["index"], target_index=0)
+        assert hp_before - state["enemies"][0]["hp"] == target_stats["calculateddamage"]
 
     def test_bully_exports_target_specific_vulnerable_damage(self, game):
         state = game.start(seed="bully-target-stats")

@@ -1673,26 +1673,25 @@ public class RunSimulator
                 return MapSelectState();
             }
         }
-        // For events — use EventSynchronizer
-        // Run Chosen() on a background thread so card selections can pause
+        // For events, run the original EventOption.Chosen() task directly so
+        // headless can wait for selections and completion without reimplementing
+        // event effects.
         else if (_runState?.CurrentRoom is EventRoom)
         {
             var eventSync = RunManager.Instance.EventSynchronizer;
             var localEvent = eventSync?.GetLocalEvent();
             if (localEvent != null && !localEvent.IsFinished)
             {
-                var eventEntry = localEvent.Id?.Entry ?? localEvent.GetType().Name.ToUpperInvariant();
                 var options = localEvent.CurrentOptions;
                 var optCountBefore = options?.Count ?? 0;
-                var hpBefore = player.Creature?.CurrentHp;
-                var deckSizeBefore = player.Deck?.Cards?.Count;
                 if (options != null && optionIndex >= 0 && optionIndex < options.Count)
                 {
+                    var previousSuppressYield = YieldPatches.SuppressYield;
                     try
                     {
                         _eventOptionChosen = true;
                         _lastEventOptionCount = options.Count;
-                        // Run on thread pool so GetSelectedCards/GetSelectedCardReward can block
+                        YieldPatches.SuppressYield = true;
                         var task = Task.Run(() => options[optionIndex].Chosen());
                         _pendingEventOptionTask = task;
                         for (int i = 0; i < 100; i++)
@@ -1705,158 +1704,34 @@ public class RunSimulator
                         }
                         if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
                         {
+                            YieldPatches.SuppressYield = previousSuppressYield;
                             WaitForActionExecutor();
                             return DetectDecisionPoint();
                         }
                         if (!task.IsCompleted) task.Wait(2000);
                         _syncCtx.Pump();
                         if (task.IsCompleted)
+                        {
+                            if (task.IsFaulted)
+                                Log($"Event choose failed: {task.Exception?.GetBaseException().GetType().FullName}: {task.Exception?.GetBaseException().Message}");
                             _pendingEventOptionTask = null;
+                        }
                     }
                     catch (Exception ex) { Log($"Event choose: {ex.Message}"); }
-                }
-
-                if (string.Equals(eventEntry, "BYRDONIS_NEST", StringComparison.OrdinalIgnoreCase))
-                {
-                    WaitForActionExecutor();
-                    _syncCtx.Pump();
-                    ForceToMap();
-                    return MapSelectState();
+                    finally
+                    {
+                        YieldPatches.SuppressYield = previousSuppressYield;
+                    }
                 }
 
                 var optCountAfter = localEvent.CurrentOptions?.Count ?? 0;
                 if (!localEvent.IsFinished && optCountAfter == optCountBefore && optCountAfter > 0)
-                {
                     Log($"Event {localEvent.GetType().Name}: option count unchanged after choice");
-                    if (options != null && TryApplyKnownEventFallback(
-                            localEvent,
-                            eventEntry,
-                            options,
-                            optionIndex,
-                            player,
-                            hpBefore,
-                            deckSizeBefore))
-                    {
-                        ForceToMap();
-                        return MapSelectState();
-                    }
-                }
             }
         }
 
         WaitForActionExecutor();
         return DetectDecisionPoint();
-    }
-
-    private bool TryApplyKnownEventFallback(
-        EventModel localEvent,
-        string eventEntry,
-        IReadOnlyList<EventOption> options,
-        int optionIndex,
-        Player player,
-        int? hpBefore = null,
-        int? deckSizeBefore = null)
-    {
-        if (optionIndex < 0 || optionIndex >= options.Count)
-            return false;
-
-        var textKey = options[optionIndex].TextKey ?? "";
-
-        if (string.Equals(eventEntry, "SPIRIT_GRAFTER", StringComparison.OrdinalIgnoreCase)
-            && textKey.EndsWith(".LET_IT_IN", StringComparison.Ordinal))
-        {
-            var heal = GetEventDynamicVarInt(localEvent, "LetItInHealAmount") ?? 25;
-            if (player.Creature != null)
-            {
-                var baseHp = hpBefore ?? player.Creature.CurrentHp;
-                var targetHp = Math.Min(player.Creature.MaxHp, baseHp + heal);
-                if (player.Creature.CurrentHp < targetHp)
-                    SetField(player.Creature, "_currentHp", targetHp);
-            }
-
-            if (deckSizeBefore == null || player.Deck.Cards.Count <= deckSizeBefore.Value)
-                AddCardToDeck(player, "METAMORPHOSIS");
-
-            return true;
-        }
-
-        if (!string.Equals(eventEntry, "JUNGLE_MAZE_ADVENTURE", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (textKey.EndsWith(".JOIN_FORCES", StringComparison.Ordinal))
-        {
-            player.Gold += GetEventDynamicVarInt(localEvent, "JoinForcesGold") ?? 48;
-            return true;
-        }
-
-        if (textKey.EndsWith(".SOLO_QUEST", StringComparison.Ordinal))
-        {
-            player.Gold += GetEventDynamicVarInt(localEvent, "SoloGold") ?? 145;
-            var hpLoss = GetEventDynamicVarInt(localEvent, "SoloHp") ?? 18;
-            if (player.Creature != null)
-            {
-                var hp = Math.Max(0, player.Creature.CurrentHp - hpLoss);
-                SetField(player.Creature, "_currentHp", hp);
-            }
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool AddCardToDeck(Player player, string cardId)
-    {
-        try
-        {
-            var canonical = ModelDb.GetById<CardModel>(new ModelId("CARD", cardId));
-            if (canonical == null)
-            {
-                Log($"Unable to add card {cardId}: model not found");
-                return false;
-            }
-
-            var card = _runState?.CreateCard(canonical, player);
-            if (card == null)
-            {
-                Log($"Unable to add card {cardId}: no active run state");
-                return false;
-            }
-
-            try
-            {
-                MegaCrit.Sts2.Core.Commands.CardPileCmd
-                    .Add(card, MegaCrit.Sts2.Core.Entities.Cards.PileType.Deck)
-                    .GetAwaiter()
-                    .GetResult();
-                _syncCtx.Pump();
-            }
-            catch (Exception ex)
-            {
-                Log($"CardPileCmd.Add fallback for {cardId}: {ex.Message}");
-                player.Deck.AddInternal(card, silent: true);
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Log($"AddCardToDeck failed for {cardId}: {ex.Message}");
-            return false;
-        }
-    }
-
-    private static int? GetEventDynamicVarInt(EventModel localEvent, string name)
-    {
-        try
-        {
-            var dynamicVar = localEvent.DynamicVars?.Values
-                .FirstOrDefault(dv => string.Equals(dv.Name, name, StringComparison.OrdinalIgnoreCase));
-            return dynamicVar != null ? (int)dynamicVar.BaseValue : null;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private Dictionary<string, object?> DoLeaveRoom(Player player)
@@ -3300,39 +3175,6 @@ public class RunSimulator
         }
         catch { }
 
-        if (string.Equals(card.Id.Entry, "PERFECTED_STRIKE", StringComparison.OrdinalIgnoreCase))
-        {
-            var baseDamage = GetStatInt(stats, "calculationbase", 6);
-            var extraDamage = GetStatInt(stats, "extradamage", 2);
-            var strikeCount = CountStrikeNameCards(player, countAsCard ?? card);
-            stats["calculateddamage"] = baseDamage + extraDamage * strikeCount;
-        }
-
-        if (string.Equals(card.Id.Entry, "BULLY", StringComparison.OrdinalIgnoreCase))
-        {
-            var baseDamage = GetStatInt(stats, "calculationbase", 4);
-            var extraDamage = GetStatInt(stats, "extradamage", 2);
-            var targetDamage = GetAliveEnemyPowerScaledDamage("VULNERABLE", baseDamage, extraDamage);
-            if (targetDamage.Count > 0)
-            {
-                stats["calculateddamage_by_target"] = targetDamage;
-                stats["calculateddamage"] = targetDamage
-                    .Select(row => Convert.ToInt32(row["calculateddamage"]))
-                    .DefaultIfEmpty(baseDamage)
-                    .Max();
-            }
-            else
-            {
-                stats["calculateddamage"] = baseDamage;
-            }
-        }
-
-        if (string.Equals(card.Id.Entry, "BODY_SLAM", StringComparison.OrdinalIgnoreCase)
-            && player?.Creature != null)
-        {
-            stats["calculateddamage"] = Math.Max(0, player.Creature.Block);
-        }
-
         if (string.Equals(card.Id.Entry, "SPITE", StringComparison.OrdinalIgnoreCase)
             && player?.PlayerCombatState != null
             && player.Creature != null
@@ -3343,8 +3185,8 @@ public class RunSimulator
 
         if (applyCombatModifiers)
         {
-            if (!ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null))
-                ApplyCombatStatModifiers(stats, card, player);
+            ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null);
+            AddCalculatedDamageByTarget(stats, card, player);
             AddAttackDamageByTarget(stats, card, player);
         }
 
@@ -3425,44 +3267,6 @@ public class RunSimulator
         }
     }
 
-    private void ApplyCombatStatModifiers(Dictionary<string, object?> stats, CardModel card, Player? player)
-    {
-        if (player?.PlayerCombatState == null)
-            return;
-
-        var strength = GetPlayerPowerAmount(player, "STRENGTH", "Strength");
-        if (strength != 0 && card.Type == CardType.Attack)
-        {
-            AddStat(stats, "damage", strength);
-            AddStat(stats, "calculateddamage", strength);
-            AddTargetStat(stats, "calculateddamage_by_target", "calculateddamage", strength);
-        }
-
-        var weak = GetPlayerPowerAmount(player, "WEAK", "Weak");
-        if (weak > 0 && card.Type == CardType.Attack)
-        {
-            ScaleStat(stats, "damage", 3, 4);
-            ScaleStat(stats, "calculateddamage", 3, 4);
-            ScaleTargetStat(stats, "calculateddamage_by_target", "calculateddamage", 3, 4);
-        }
-
-        var shrink = GetPlayerPowerAmount(player, "SHRINK", "Shrink");
-        if (shrink != 0 && card.Type == CardType.Attack)
-        {
-            ScaleStat(stats, "damage", 7, 10);
-            ScaleStat(stats, "calculateddamage", 7, 10);
-            ScaleTargetStat(stats, "calculateddamage_by_target", "calculateddamage", 7, 10);
-        }
-
-        var dexterity = GetPlayerPowerAmount(player, "DEXTERITY", "Dexterity");
-        if (dexterity != 0)
-            AddStat(stats, "block", dexterity);
-
-        var frail = GetPlayerPowerAmount(player, "FRAIL", "Frail");
-        if (frail > 0)
-            ScaleStat(stats, "block", 3, 4);
-    }
-
     private void AddAttackDamageByTarget(Dictionary<string, object?> stats, CardModel card, Player? player)
     {
         if (card.Type != CardType.Attack
@@ -3527,104 +3331,54 @@ public class RunSimulator
             stats["damage_by_target"] = rows;
     }
 
+    private void AddCalculatedDamageByTarget(Dictionary<string, object?> stats, CardModel card, Player? player)
+    {
+        if (!HasDynamicVar(card, "CalculatedDamage"))
+            return;
+
+        var rows = new List<Dictionary<string, object?>>();
+        try
+        {
+            var combatState = CombatManager.Instance.DebugOnlyGetState();
+            var enemies = combatState?.Enemies?
+                .Where(e => e != null && e.IsAlive)
+                .ToList();
+            if (enemies == null || enemies.Count == 0)
+                return;
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                var previewStats = TryGetCardPreviewStats(card, CardPreviewMode.MultiCreatureTargeting, enemy);
+                if (previewStats == null || !previewStats.TryGetValue("calculateddamage", out var calculatedDamage))
+                    continue;
+
+                var row = new Dictionary<string, object?>
+                {
+                    ["target_index"] = i,
+                    ["target_name"] = MonsterDisplayName(enemy.Monster, enemy),
+                    ["vulnerable"] = GetCreaturePowerAmount(enemy, "VULNERABLE", "Vulnerable"),
+                    ["block"] = Math.Max(0, enemy.Block),
+                    ["calculateddamage"] = calculatedDamage,
+                };
+                rows.Add(row);
+            }
+        }
+        catch
+        {
+            return;
+        }
+
+        if (rows.Count > 0)
+            stats["calculateddamage_by_target"] = rows;
+    }
+
     private static int GetTargetAttackRepeat(CardModel card, Creature target, int baseRepeat)
     {
         var repeat = Math.Max(1, baseRepeat);
         if (card is MegaCrit.Sts2.Core.Models.Cards.Dismantle && target.HasPower<VulnerablePower>())
             repeat *= 2;
         return repeat;
-    }
-
-    private static void AddStat(Dictionary<string, object?> stats, string key, int delta)
-    {
-        if (!stats.TryGetValue(key, out var value) || value == null)
-            return;
-
-        stats[key] = Math.Max(0, Convert.ToInt32(value) + delta);
-    }
-
-    private static void ScaleStat(Dictionary<string, object?> stats, string key, int numerator, int denominator)
-    {
-        if (!stats.TryGetValue(key, out var value) || value == null)
-            return;
-
-        stats[key] = Math.Max(0, Convert.ToInt32(value) * numerator / denominator);
-    }
-
-    private static void AddTargetStat(
-        Dictionary<string, object?> stats,
-        string collectionKey,
-        string statKey,
-        int delta)
-    {
-        if (!stats.TryGetValue(collectionKey, out var value)
-            || value is not IEnumerable<Dictionary<string, object?>> rows)
-            return;
-
-        foreach (var row in rows)
-            AddStat(row, statKey, delta);
-    }
-
-    private static void ScaleTargetStat(
-        Dictionary<string, object?> stats,
-        string collectionKey,
-        string statKey,
-        int numerator,
-        int denominator)
-    {
-        if (!stats.TryGetValue(collectionKey, out var value)
-            || value is not IEnumerable<Dictionary<string, object?>> rows)
-            return;
-
-        foreach (var row in rows)
-            ScaleStat(row, statKey, numerator, denominator);
-    }
-
-    private int GetPlayerPowerAmount(Player player, params string[] powerKeys)
-    {
-        var total = 0;
-        try
-        {
-            var powers = player.Creature?.Powers;
-            if (powers == null)
-                return 0;
-
-            foreach (var power in powers)
-            {
-                try
-                {
-                    var entry = power.Id.Entry;
-                    var normalizedEntry = entry.EndsWith("_POWER", StringComparison.OrdinalIgnoreCase)
-                        ? entry[..^"_POWER".Length]
-                        : entry;
-                    var localizedName = _loc.Power(entry);
-                    if (powerKeys.Any(key => string.Equals(localizedName, key, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        total += power.Amount;
-                        continue;
-                    }
-
-                    var hasSpecificLocalizedName = !string.IsNullOrWhiteSpace(localizedName)
-                        && !localizedName.EndsWith(".title", StringComparison.OrdinalIgnoreCase)
-                        && !string.Equals(localizedName, entry, StringComparison.OrdinalIgnoreCase);
-                    if (hasSpecificLocalizedName)
-                        continue;
-
-                    if (powerKeys.Any(key =>
-                        string.Equals(entry, key, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(normalizedEntry, key, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        total += power.Amount;
-                    }
-                }
-                catch { }
-            }
-        }
-        catch
-        {
-            return total;
-        }
-        return total;
     }
 
     private int GetCreaturePowerAmount(Creature? creature, params string[] powerKeys)
@@ -3699,69 +3453,16 @@ public class RunSimulator
             : fallback;
     }
 
-    private int CountStrikeNameCards(Player? player, CardModel focalCard)
+    private static bool HasDynamicVar(CardModel card, string name)
     {
-        var cards = player?.Deck?.Cards?.Where(c => c != null).ToList() ?? new List<CardModel>();
-        var count = cards.Count(IsStrikeNameCard);
-        if (!cards.Contains(focalCard) && !IsCombatCardInstance(player, focalCard) && IsStrikeNameCard(focalCard))
-            count++;
-        return count;
-    }
-
-    private static bool IsStrikeNameCard(CardModel card)
-    {
-        return card.Id.Entry.Contains("STRIKE", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsCombatCardInstance(Player? player, CardModel focalCard)
-    {
-        var pcs = player?.PlayerCombatState;
-        if (pcs == null)
-            return false;
-
-        return (pcs.Hand?.Cards?.Contains(focalCard) ?? false)
-            || (pcs.DrawPile?.Cards?.Contains(focalCard) ?? false)
-            || (pcs.DiscardPile?.Cards?.Contains(focalCard) ?? false);
-    }
-
-    private List<Dictionary<string, object?>> GetAliveEnemyPowerScaledDamage(
-        string powerNeedle,
-        int baseDamage,
-        int extraDamage)
-    {
-        var rows = new List<Dictionary<string, object?>>();
         try
         {
-            var combatState = CombatManager.Instance.DebugOnlyGetState();
-            var enemies = combatState?.Enemies?
-                .Where(e => e != null && e.IsAlive)
-                .ToList();
-            if (enemies == null)
-                return rows;
-
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                var enemy = enemies[i];
-                var amount = enemy.Powers?
-                    .Where(p => p.Id.Entry.Contains(powerNeedle, StringComparison.OrdinalIgnoreCase))
-                    .Select(p => p.Amount)
-                    .DefaultIfEmpty(0)
-                    .Max() ?? 0;
-                rows.Add(new Dictionary<string, object?>
-                {
-                    ["target_index"] = i,
-                    ["target_name"] = MonsterDisplayName(enemy.Monster, enemy),
-                    ["vulnerable"] = amount,
-                    ["calculateddamage"] = baseDamage + extraDamage * amount,
-                });
-            }
+            return card.DynamicVars.Values.Any(dv => string.Equals(dv.Name, name, StringComparison.OrdinalIgnoreCase));
         }
         catch
         {
-            return rows;
+            return false;
         }
-
-        return rows;
     }
 
     private object? ExportEventDynamicVar(string eventEntry, DynamicVar dynamicVar)
@@ -4008,6 +3709,7 @@ public class RunSimulator
         // Vantom's Dismember move adding Wounds). In headless mode, these never complete
         // because there's no Godot scene tree, causing the ActionExecutor to deadlock.
         PatchCmdWait();
+        PatchCardPileAddVisuals();
         PatchTalkCmdPlay();
 
         // Initialize localization system (needed for events, cards, etc.)
@@ -4104,10 +3806,11 @@ public class RunSimulator
                 {
                     // Try to find any Wait method
                     var methods = cmdType.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
-                        .Where(m => m.Name == "Wait").ToList();
+                        .Where(m => m.Name == "Wait" || m.Name == "CustomScaledWait")
+                        .ToList();
                     foreach (var m in methods)
                     {
-                        Console.Error.WriteLine($"[INFO] Found Cmd.Wait({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})");
+                        Console.Error.WriteLine($"[INFO] Found Cmd.{m.Name}({string.Join(",", m.GetParameters().Select(p => p.ParameterType.Name))})");
                         var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.CmdWaitPrefix),
                             System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
                         if (prefix != null)
@@ -4144,7 +3847,7 @@ public class RunSimulator
             var exactMethod = AccessTools.Method("MegaCrit.Sts2.Core.Commands.TalkCmd:Play");
             if (exactMethod != null && PatchTalkPlayMethod(harmony, exactMethod, taskPrefix, voidPrefix))
                 patched++;
-            var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.StripTalkCmdPlayCalls),
+            var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.StripHeadlessPresentationCalls),
                 BindingFlags.Static | BindingFlags.Public);
             var talkMoveMethodNames = new[]
             {
@@ -4152,7 +3855,6 @@ public class RunSimulator
                 "MegaCrit.Sts2.Core.Models.Monsters.BygoneEffigy:WakeMove",
                 "MegaCrit.Sts2.Core.Models.Monsters.Chomper:ScreechMove",
             };
-            var talkMoveNameFragments = new[] { "RitualMove", "WakeMove", "ScreechMove" };
             var transpiled = new HashSet<MethodInfo>();
             if (transpiler != null)
             {
@@ -4177,9 +3879,8 @@ public class RunSimulator
             if (transpiler != null)
             {
                 foreach (var method in commandTypes
-                    .Where(t => talkMoveNameFragments.Any(fragment =>
-                        (t.FullName ?? "").Contains(fragment, StringComparison.Ordinal)))
-                    .SelectMany(t => t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+                    .Where(IsHeadlessPresentationPatchTarget)
+                    .SelectMany(GetDeclaredMethods)
                     .Where(m => m.Name == "MoveNext" && m.GetMethodBody() != null))
                 {
                     if (transpiled.Add(method))
@@ -4212,6 +3913,34 @@ public class RunSimulator
         }
     }
 
+    private static void PatchCardPileAddVisuals()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.cardpilevisuals");
+            var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.ForceSkipVisualsPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            if (prefix == null)
+                return;
+
+            var patched = 0;
+            foreach (var method in typeof(CardPileCmd)
+                .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Where(m => m.Name == "Add"
+                            && m.GetParameters().Any(p =>
+                                p.Name == "skipVisuals" && p.ParameterType == typeof(bool))))
+            {
+                harmony.Patch(method, new HarmonyMethod(prefix));
+                patched++;
+            }
+            Console.Error.WriteLine($"[INFO] Patched CardPileCmd.Add skipVisuals on {patched} overloads");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch CardPileCmd.Add visuals: {ex.Message}");
+        }
+    }
+
     private static bool PatchTalkPlayMethod(Harmony harmony, MethodInfo method, MethodInfo taskPrefix, MethodInfo voidPrefix)
     {
         if (typeof(Task).IsAssignableFrom(method.ReturnType))
@@ -4234,6 +3963,28 @@ public class RunSimulator
         var parameters = method.GetParameters();
         return parameters.Any(p => p.ParameterType == typeof(LocString))
             && parameters.Any(p => p.ParameterType == typeof(Creature));
+    }
+
+    private static bool IsHeadlessPresentationPatchTarget(Type type)
+    {
+        var fullName = type.FullName ?? "";
+        return fullName.Contains("MegaCrit.Sts2.Core.Models.Events.", StringComparison.Ordinal)
+            || fullName.Contains("MegaCrit.Sts2.Core.Commands.CreatureCmd+<Heal", StringComparison.Ordinal)
+            || fullName.Contains("RitualMove", StringComparison.Ordinal)
+            || fullName.Contains("WakeMove", StringComparison.Ordinal)
+            || fullName.Contains("ScreechMove", StringComparison.Ordinal);
+    }
+
+    private static IEnumerable<MethodInfo> GetDeclaredMethods(Type type)
+    {
+        try
+        {
+            return type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        }
+        catch
+        {
+            return Array.Empty<MethodInfo>();
+        }
     }
 
     private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
@@ -4425,11 +4176,17 @@ public class RunSimulator
             return false; // Skip original method
         }
 
-        public static IEnumerable<CodeInstruction> StripTalkCmdPlayCalls(IEnumerable<CodeInstruction> instructions)
+        /// <summary>Harmony prefix: disable card pile animations in headless while preserving pile logic.</summary>
+        public static void ForceSkipVisualsPrefix(ref bool skipVisuals)
+        {
+            skipVisuals = true;
+        }
+
+        public static IEnumerable<CodeInstruction> StripHeadlessPresentationCalls(IEnumerable<CodeInstruction> instructions)
         {
             foreach (var instruction in instructions)
             {
-                if (instruction.operand is MethodInfo method && IsTalkCmdPlay(method))
+                if (instruction.operand is MethodInfo method && IsHeadlessPresentationCall(method))
                 {
                     var argCount = method.GetParameters().Length + (method.IsStatic ? 0 : 1);
                     var replacement = new List<CodeInstruction>();
@@ -4441,6 +4198,10 @@ public class RunSimulator
                         var completedTaskGetter = typeof(Task).GetProperty(nameof(Task.CompletedTask))?.GetGetMethod();
                         if (completedTaskGetter != null)
                             replacement.Add(new CodeInstruction(OpCodes.Call, completedTaskGetter));
+                    }
+                    else if (method.ReturnType == typeof(int))
+                    {
+                        replacement.Add(new CodeInstruction(OpCodes.Ldc_I4_M1));
                     }
                     else if (!method.ReturnType.IsValueType)
                     {
@@ -4466,10 +4227,29 @@ public class RunSimulator
             }
         }
 
+        private static bool IsHeadlessPresentationCall(MethodInfo method)
+        {
+            return IsTalkCmdPlay(method)
+                || IsDebugAudioPlay(method)
+                || IsFullscreenHealVfxPlay(method);
+        }
+
         private static bool IsTalkCmdPlay(MethodInfo method)
         {
             return method.Name == "Play"
                 && method.DeclaringType?.Name == "TalkCmd";
+        }
+
+        private static bool IsDebugAudioPlay(MethodInfo method)
+        {
+            return method.Name == "Play"
+                && (method.DeclaringType?.FullName ?? "").Contains("NDebugAudioManager", StringComparison.Ordinal);
+        }
+
+        private static bool IsFullscreenHealVfxPlay(MethodInfo method)
+        {
+            return method.Name == "Play"
+                && (method.DeclaringType?.FullName ?? "").Contains("PlayerFullscreenHealVfx", StringComparison.Ordinal);
         }
     }
 

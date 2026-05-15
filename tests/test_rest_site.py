@@ -38,13 +38,15 @@ class TestRestSiteActions:
     def test_heal_caps_at_max(self, game):
         state = game.start(seed="rsa2")
         game.skip_neow(state)
-        game.set_player(hp=79, max_hp=80)
+        max_hp = state["player"]["max_hp"]
+        game.set_player(hp=max_hp - 1)
         state = game.enter_room("rest_site")
         heal = next((o for o in state["options"] if o["option_id"] == "HEAL" and o["is_enabled"]), None)
         if not heal:
             pytest.skip("HEAL not available at near-full HP")
         state = game.act("choose_option", option_index=heal["index"])
-        assert state.get("player", {}).get("hp", 0) <= 80
+        player = state.get("player", {})
+        assert player.get("hp", 0) <= player.get("max_hp", 0)
 
     def test_smith_triggers_card_select(self, game):
         state = game.start(seed="rsa3")
