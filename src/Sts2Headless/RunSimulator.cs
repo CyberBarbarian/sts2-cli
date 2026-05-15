@@ -3736,6 +3736,13 @@ public class RunSimulator
         try { SaveManager.Instance.InitProfileId(0); }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager.InitProfileId: {ex.Message}"); }
 
+        // Some card effects read settings/prefs during OnPlay even in headless
+        // mode. Initialize test settings so those engine paths can run normally.
+        try { SaveManager.Instance.InitSettingsDataForTest(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitSettingsDataForTest: {ex.Message}"); }
+        try { SaveManager.Instance.InitPrefsDataForTest(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitPrefsDataForTest: {ex.Message}"); }
+
         // Initialize progress data for epoch/timeline tracking
         try { SaveManager.Instance.InitProgressData(); }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitProgressData: {ex.Message}"); }

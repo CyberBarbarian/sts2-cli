@@ -101,6 +101,21 @@ class TestPlayCards:
         assert result["type"] == "error"
         assert "target_index" in result["message"]
 
+    def test_all_enemies_card_does_not_require_target_index(self, game):
+        state = game.start(seed="whirlwind-all-enemies")
+        game.skip_neow(state)
+        game.set_player(deck=["WHIRLWIND"] * 5)
+        state = game.enter_room("combat", encounter="SLIMES_WEAK")
+
+        whirlwind = next(c for c in state["hand"] if c["name"] == "Whirlwind")
+        hp_before = sum(e["hp"] for e in state["enemies"])
+
+        result = game.act("play_card", card_index=whirlwind["index"])
+
+        assert result.get("type") != "error"
+        assert whirlwind["target_type"] == "AllEnemies"
+        assert sum(e["hp"] for e in result.get("enemies", [])) < hp_before
+
     def test_play_card_costs_energy(self, game):
         state = game.start(seed="cp1")
         game.skip_neow(state)
