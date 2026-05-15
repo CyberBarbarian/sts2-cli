@@ -3021,10 +3021,10 @@ public class RunSimulator
 
         var staticTip = _loc.Bilingual("static_hover_tips", text);
         if (staticTip != text)
-            return staticTip;
+            return NormalizeInlineResourceIcons(staticTip);
 
         var resolved = _loc.BilingualFromKey(text);
-        return string.IsNullOrWhiteSpace(resolved) ? text : resolved;
+        return NormalizeInlineResourceIcons(string.IsNullOrWhiteSpace(resolved) ? text : resolved);
     }
 
     private Dictionary<string, object?>? BuildRelicTradePreview(
@@ -3569,6 +3569,20 @@ public class RunSimulator
         {
             return $"{value} Energy";
         }
+    }
+
+    private static string NormalizeInlineResourceIcons(string text)
+    {
+        return System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"(?:res://images/packed/sprite_fonts/[A-Za-z0-9_]*energy_icon\.png\s*)+",
+            match =>
+            {
+                var count = System.Text.RegularExpressions.Regex.Matches(
+                    match.Value,
+                    @"res://images/packed/sprite_fonts/[A-Za-z0-9_]*energy_icon\.png").Count;
+                return FormatEnergyText(Math.Max(1, count));
+            });
     }
 
     private static bool IsSingularValue(object value)
@@ -6280,9 +6294,33 @@ public class RunSimulator
     {
         public static bool GetRawTextPrefix(LocTable __instance, string key, ref string __result)
         {
-            // Return key as fallback "translation"
+            var tableName = GetLocTableName(__instance);
+            if (_loc.IsLoaded == true && !string.IsNullOrWhiteSpace(tableName))
+            {
+                var resolved = _loc.Bilingual(tableName, key);
+                if (resolved != key)
+                {
+                    __result = resolved;
+                    return false;
+                }
+            }
+
             __result = key;
             return false;
+        }
+
+        private static string? GetLocTableName(LocTable table)
+        {
+            try
+            {
+                var nameField = typeof(LocTable).GetField("_name",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                return nameField?.GetValue(table) as string;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public static bool GetFormattedTextPrefix(LocString __instance, ref string __result)

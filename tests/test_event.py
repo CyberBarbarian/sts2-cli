@@ -512,6 +512,9 @@ class TestSapphireSeed:
         assert plant["vars"]["Enchantment"] == "Sown"
         assert "Sown" in plant["description"]
         assert "with 0" not in plant["description"]
+        sown_tip = next(tip for tip in plant["hover_tips"] if tip["title"] == "Sown")
+        assert "{Amount:energyIcons()}" not in sown_tip["description"]
+        assert "1 Energy" in sown_tip["description"]
 
 
 class TestWoodCarvings:
