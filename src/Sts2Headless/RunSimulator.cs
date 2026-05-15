@@ -3344,7 +3344,7 @@ public class RunSimulator
         if (applyCombatModifiers)
         {
             ApplyCombatStatModifiers(stats, card, player);
-            AddAttackDamageByTarget(stats, card);
+            AddAttackDamageByTarget(stats, card, player);
         }
 
         return stats;
@@ -3404,7 +3404,7 @@ public class RunSimulator
             ScaleStat(stats, "block", 3, 4);
     }
 
-    private void AddAttackDamageByTarget(Dictionary<string, object?> stats, CardModel card)
+    private void AddAttackDamageByTarget(Dictionary<string, object?> stats, CardModel card, Player? player)
     {
         if (card.Type != CardType.Attack
             || !stats.TryGetValue("damage", out var damageObj)
@@ -3425,13 +3425,17 @@ public class RunSimulator
 
             var baseDamage = Convert.ToInt32(damageObj);
             var repeat = GetStatInt(stats, "repeat", 1);
+            var cardsPlayedThisTurn = GetCardsPlayedThisTurn(player);
             for (int i = 0; i < enemies.Count; i++)
             {
                 var enemy = enemies[i];
                 var vulnerable = GetCreaturePowerAmount(enemy, "VULNERABLE", "Vulnerable");
-                var targetDamage = vulnerable > 0
-                    ? baseDamage * 3 / 2
-                    : baseDamage;
+                var slow = GetCreaturePowerAmount(enemy, "SLOW", "Slow");
+                var targetDamage = baseDamage;
+                if (vulnerable > 0)
+                    targetDamage = targetDamage * 3 / 2;
+                if (slow > 0 && cardsPlayedThisTurn > 0)
+                    targetDamage = targetDamage * (10 + cardsPlayedThisTurn * slow) / 10;
                 var totalDamage = targetDamage * repeat;
                 var block = Math.Max(0, enemy.Block);
                 var row = new Dictionary<string, object?>
@@ -3442,6 +3446,11 @@ public class RunSimulator
                     ["block"] = block,
                     ["damage"] = targetDamage,
                 };
+                if (slow > 0)
+                {
+                    row["slow"] = slow;
+                    row["slow_cards_played"] = cardsPlayedThisTurn;
+                }
                 if (repeat > 1)
                 {
                     row["repeat"] = repeat;
@@ -3462,6 +3471,39 @@ public class RunSimulator
 
         if (rows.Count > 0)
             stats["damage_by_target"] = rows;
+    }
+
+    private static int GetCardsPlayedThisTurn(Player? player)
+    {
+        try
+        {
+            var combatState = player?.Creature?.CombatState;
+            return CombatManager.Instance.History.Entries.Count(entry =>
+                string.Equals(entry.GetType().Name, "CardPlayFinishedEntry", StringComparison.Ordinal)
+                && EntryHappenedThisTurn(entry, combatState));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static bool EntryHappenedThisTurn(object entry, object? combatState)
+    {
+        if (combatState == null)
+            return true;
+
+        try
+        {
+            var method = entry.GetType().GetMethod(
+                "HappenedThisTurn",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            return method == null || Convert.ToBoolean(method.Invoke(entry, new[] { combatState }));
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private static void AddStat(Dictionary<string, object?> stats, string key, int delta)

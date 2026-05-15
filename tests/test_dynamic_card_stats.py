@@ -119,6 +119,32 @@ class TestDynamicCardStats:
         assert target_stats[0]["vulnerable"] == 2
         assert target_stats[1]["vulnerable"] == 0
 
+    def test_attack_damage_stats_include_target_slow(self, game):
+        state = game.start(seed="attack-target-slow-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "VICIOUS",
+            "INFLAME",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "BLOOD_WALL",
+        ])
+        state = game.enter_room("combat", encounter="BYGONE_EFFIGY_ELITE")
+        vicious = next(c for c in state["hand"] if c["name"] == "Vicious")
+
+        state = game.act("play_card", card_index=vicious["index"])
+        inflame = next(c for c in state["hand"] if c["name"] == "Inflame")
+        state = game.act("play_card", card_index=inflame["index"])
+
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+        target_stats = strike["stats"]["damage_by_target"][0]
+        assert strike["stats"]["damage"] == 8
+        assert target_stats["damage"] == 9
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=strike["index"], target_index=0)
+        assert hp_before - state["enemies"][0]["hp"] == target_stats["damage"]
+
     def test_attack_damage_stats_include_player_strength(self, game):
         state = game.start(seed="strength-damage-stats")
         game.skip_neow(state)
