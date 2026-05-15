@@ -5198,6 +5198,7 @@ public class RunSimulator
         PatchSoulNexusPresentation();
         PatchQueenPresentation();
         PatchDecimillipedePresentation();
+        PatchKaiserCrabPresentation();
         PatchCrystalSpherePresentation();
 
         // Initialize localization system (needed for events, cards, etc.)
@@ -5541,6 +5542,54 @@ public class RunSimulator
         }
     }
 
+    private static void PatchKaiserCrabPresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.kaisercrab.presentation");
+            var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.StripHeadlessPresentationCalls),
+                BindingFlags.Static | BindingFlags.Public);
+            if (transpiler == null)
+                return;
+
+            var patched = 0;
+            var monsterTypeNames = new[]
+            {
+                "MegaCrit.Sts2.Core.Models.Monsters.Crusher",
+                "MegaCrit.Sts2.Core.Models.Monsters.Rocket",
+            };
+            foreach (var typeName in monsterTypeNames)
+            {
+                var monsterType = AccessTools.TypeByName(typeName);
+                if (monsterType == null)
+                    continue;
+
+                foreach (var method in GetDeclaredMethods(monsterType)
+                    .Where(m => (m.Name == "AfterCurrentHpChanged" || m.Name == "BeforeDeath")
+                                && m.GetMethodBody() != null))
+                {
+                    harmony.Patch(method, transpiler: new HarmonyMethod(transpiler));
+                    patched++;
+                }
+            }
+
+            foreach (var method in GetLoadableTypes(typeof(CardPileCmd).Assembly)
+                .Where(IsKaiserCrabPresentationStateMachine)
+                .SelectMany(GetDeclaredMethods)
+                .Where(m => m.Name == "MoveNext" && m.GetMethodBody() != null))
+            {
+                harmony.Patch(method, transpiler: new HarmonyMethod(transpiler));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched Kaiser Crab background presentation ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Kaiser Crab background presentation: {ex.Message}");
+        }
+    }
+
     private static void PatchCrystalSpherePresentation()
     {
         try
@@ -5598,6 +5647,13 @@ public class RunSimulator
             || fullName.Contains("WakeMove", StringComparison.Ordinal)
             || fullName.Contains("ScreechMove", StringComparison.Ordinal)
             || fullName.Contains("Vantom+<DismemberMove", StringComparison.Ordinal);
+    }
+
+    private static bool IsKaiserCrabPresentationStateMachine(Type type)
+    {
+        var fullName = type.FullName ?? "";
+        return fullName.Contains("MegaCrit.Sts2.Core.Models.Monsters.Crusher+<", StringComparison.Ordinal)
+            || fullName.Contains("MegaCrit.Sts2.Core.Models.Monsters.Rocket+<", StringComparison.Ordinal);
     }
 
     private static IEnumerable<MethodInfo> GetDeclaredMethods(Type type)
@@ -5903,7 +5959,8 @@ public class RunSimulator
                 || IsScreenRumble(method)
                 || IsNGameHitStop(method)
                 || IsNGameScreenShakeTrauma(method)
-                || IsFullscreenHealVfxPlay(method);
+                || IsFullscreenHealVfxPlay(method)
+                || IsKaiserCrabBackgroundPresentation(method);
         }
 
         private static bool IsTalkCmdPlay(MethodInfo method)
@@ -5946,6 +6003,17 @@ public class RunSimulator
         {
             return method.Name == "Play"
                 && (method.DeclaringType?.FullName ?? "").Contains("PlayerFullscreenHealVfx", StringComparison.Ordinal);
+        }
+
+        private static bool IsKaiserCrabBackgroundPresentation(MethodInfo method)
+        {
+            var declaringType = method.DeclaringType?.FullName ?? "";
+            if (declaringType.Contains("NKaiserCrabBossBackground", StringComparison.Ordinal))
+                return method.Name.StartsWith("Play", StringComparison.Ordinal);
+
+            return method.Name == "get_Background"
+                && (declaringType == "MegaCrit.Sts2.Core.Models.Monsters.Crusher"
+                    || declaringType == "MegaCrit.Sts2.Core.Models.Monsters.Rocket");
         }
 
         private static bool IsCombatRoomGetCreatureNode(MethodInfo method)

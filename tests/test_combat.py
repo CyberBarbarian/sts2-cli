@@ -496,6 +496,39 @@ class TestCombatEdgeCases:
         assert state["decision"] == "combat_play"
         assert state["player"]["hp"] > 0
 
+    def test_kaiser_crab_headless_background_hooks_do_not_force_game_over(self, game):
+        state = game.start(seed="kaiser-crab-headless-background")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "DISMANTLE",
+                "TWIN_STRIKE",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="KAISER_CRAB_BOSS")
+
+        assert state["decision"] == "combat_play"
+        assert [enemy["name"] for enemy in state["enemies"]] == ["Crusher", "Rocket"]
+
+        dismantle = next(card for card in state["hand"] if card["name"] == "Dismantle")
+        crusher = next(enemy for enemy in state["enemies"] if enemy["name"] == "Crusher")
+        state = game.act("play_card", card_index=dismantle["index"], target_index=crusher["index"])
+        assert state["decision"] == "combat_play"
+
+        twin_strike = next(card for card in state["hand"] if card["name"] == "Twin Strike")
+        rocket = next(enemy for enemy in state["enemies"] if enemy["name"] == "Rocket")
+        state = game.act("play_card", card_index=twin_strike["index"], target_index=rocket["index"])
+        assert state["decision"] == "combat_play"
+
+        state = game.act("end_turn")
+        assert state["decision"] == "combat_play"
+        assert state["player"]["hp"] > 0
+
     def test_act_three_queen_win_enters_architect_victory_room_first(self, tmp_path):
         game = Game()
         try:
