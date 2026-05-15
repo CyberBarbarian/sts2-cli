@@ -3,6 +3,7 @@ using System.Reflection.Emit;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Combat.History.Entries;
 using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Events;
 using MegaCrit.Sts2.Core.Entities.Cards;
@@ -281,6 +282,14 @@ internal class LocLookup
 /// </summary>
 public class RunSimulator
 {
+    private static readonly Dictionary<Type, int?> StaticAttackHitCountByCardType = new();
+    private static readonly Dictionary<short, OpCode> OpCodeByValue = typeof(OpCodes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(f => f.FieldType == typeof(OpCode))
+        .Select(f => (OpCode)f.GetValue(null)!)
+        .GroupBy(op => op.Value)
+        .ToDictionary(g => g.Key, g => g.First());
+
     private static int? _expectedSaveSchemaVersion;
     private static bool _expectedSaveSchemaVersionReady;
     private static readonly object _expectedSaveSchemaVersionLock = new();
@@ -1971,13 +1980,14 @@ public class RunSimulator
                     var cardInfo = new Dictionary<string, object?>
                     {
                         ["name"] = _loc.Card(card.Id.Entry),
-                        ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
+                        ["cost"] = GetEnergyCostDisplay(card),
                         ["type"] = card.Type.ToString(),
                         ["rarity"] = card.Rarity.ToString(),
                         ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                         ["stats"] = stats.Count > 0 ? stats : null,
                         ["keywords"] = bkws?.Count > 0 ? bkws : null,
                     };
+                    AddEnergyCostDetails(cardInfo, card);
                     AddCardEnhancements(cardInfo, card);
                     return cardInfo;
                 }).ToList(),
@@ -2006,7 +2016,7 @@ public class RunSimulator
                     ["index"] = i,
                     ["id"] = cr.Card.Id.ToString(),
                     ["name"] = _loc.Card(cr.Card.Id.Entry),
-                    ["cost"] = cr.Card.EnergyCost?.GetResolved() ?? 0,
+                    ["cost"] = GetEnergyCostDisplay(cr.Card),
                     ["type"] = cr.Card.Type.ToString(),
                     ["rarity"] = cr.Card.Rarity.ToString(),
                     ["description"] = _loc.Bilingual("cards", cr.Card.Id.Entry + ".description"),
@@ -2014,6 +2024,7 @@ public class RunSimulator
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card, player),
                 };
+                AddEnergyCostDetails(cardInfo, cr.Card);
                 AddCardEnhancements(cardInfo, cr.Card);
                 return cardInfo;
             }).ToList();
@@ -2043,7 +2054,7 @@ public class RunSimulator
                     ["index"] = i,
                     ["id"] = card.Id.ToString(),
                     ["name"] = _loc.Card(card.Id.Entry),
-                    ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
+                    ["cost"] = GetEnergyCostDisplay(card),
                     ["type"] = card.Type.ToString(),
                     ["rarity"] = card.Rarity.ToString(),
                     ["upgraded"] = card.IsUpgraded,
@@ -2052,6 +2063,7 @@ public class RunSimulator
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card, player),
                 };
+                AddEnergyCostDetails(cardInfo, card);
                 AddCardEnhancements(cardInfo, card);
                 return cardInfo;
             }).ToList();
@@ -2273,7 +2285,7 @@ public class RunSimulator
                 ["index"] = i,
                 ["id"] = c.Id.ToString(),
                 ["name"] = _loc.Card(c.Id.Entry),
-                ["cost"] = GetCombatEnergyCost(c),
+                ["cost"] = GetEnergyCostDisplay(c),
                 ["type"] = c.Type.ToString(),
                 ["rarity"] = c.Rarity.ToString(),
                 ["can_play"] = c.CanPlay(out _, out _),
@@ -2281,6 +2293,7 @@ public class RunSimulator
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
             };
+            AddEnergyCostDetails(cardInfo, c);
             if (starCost > 0)
             {
                 cardInfo["star_cost"] = starCost;
@@ -2523,7 +2536,7 @@ public class RunSimulator
                 ["index"] = i,
                 ["id"] = c.Id.ToString(),
                 ["name"] = _loc.Card(c.Id.Entry),
-                ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
+                ["cost"] = GetEnergyCostDisplay(c),
                 ["type"] = c.Type.ToString(),
                 ["rarity"] = c.Rarity.ToString(),
                 ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
@@ -2531,6 +2544,7 @@ public class RunSimulator
                 ["keywords"] = crkws?.Count > 0 ? crkws : null,
                 ["after_upgrade"] = GetUpgradedInfo(c, player),
             };
+            AddEnergyCostDetails(cardInfo, c);
             AddCardEnhancements(cardInfo, c);
             return cardInfo;
         }).ToList();
@@ -3353,12 +3367,12 @@ public class RunSimulator
                 var card = e.CreationResult?.Card;
                 var entry = card?.Id.Entry ?? "?";
                 var stats = new Dictionary<string, object?>();
-                int cardCost = 0;
+                object cardCost = 0;
                 try
                 {
                     if (card != null)
                     {
-                        cardCost = card.EnergyCost?.GetResolved() ?? 0;
+                        cardCost = GetEnergyCostDisplay(card);
                         var mutable = ModelDb.GetById<CardModel>(card.Id).ToMutable();
                         stats = ExtractCardStats(mutable, _runState?.Players[0], card);
                     }
@@ -3741,26 +3755,60 @@ public class RunSimulator
 
         try
         {
-            var xValue = card.EnergyCost.GetAmountToSpend();
-            if (card.CombatState != null)
-                xValue = Hook.ModifyXValue(card.CombatState, card, xValue);
-            stats["repeat"] = Math.Max(0, xValue);
+            stats["repeat"] = GetEnergyXValue(card);
         }
         catch { }
     }
 
-    private static int GetCombatEnergyCost(CardModel card)
+    private static object GetEnergyCostDisplay(CardModel card)
     {
         try
         {
             if (card.EnergyCost?.CostsX == true)
-                return Math.Max(0, card.EnergyCost.GetAmountToSpend());
+                return "X";
             return card.EnergyCost?.GetResolved() ?? 0;
         }
         catch
         {
             return 0;
         }
+    }
+
+    private static int GetEnergyAmountToSpend(CardModel card)
+    {
+        try
+        {
+            return Math.Max(0, card.EnergyCost?.GetAmountToSpend() ?? 0);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static int GetEnergyXValue(CardModel card)
+    {
+        var amount = GetEnergyAmountToSpend(card);
+        try
+        {
+            if (card.EnergyCost?.CostsX == true && card.CombatState != null)
+                amount = Hook.ModifyXValue(card.CombatState, card, amount);
+        }
+        catch { }
+        return Math.Max(0, amount);
+    }
+
+    private static void AddEnergyCostDetails(Dictionary<string, object?> cardInfo, CardModel card)
+    {
+        try
+        {
+            if (card.EnergyCost?.CostsX != true)
+                return;
+
+            cardInfo["energy_cost"] = GetEnergyAmountToSpend(card);
+            cardInfo["x_value"] = GetEnergyXValue(card);
+        }
+        catch { }
     }
 
     private static Dictionary<string, int>? TryGetCardPreviewStats(
@@ -3913,9 +3961,208 @@ public class RunSimulator
     private static int GetTargetAttackRepeat(CardModel card, Creature target, int baseRepeat)
     {
         var repeat = Math.Max(1, baseRepeat);
+        var staticHitCount = GetStaticAttackHitCount(card);
+        if (staticHitCount.HasValue && repeat == 1)
+            repeat = staticHitCount.Value;
         if (card is MegaCrit.Sts2.Core.Models.Cards.Dismantle && target.HasPower<VulnerablePower>())
             repeat *= 2;
         return repeat;
+    }
+
+    private static int? GetStaticAttackHitCount(CardModel card)
+    {
+        var type = card.GetType();
+        if (StaticAttackHitCountByCardType.TryGetValue(type, out var cached))
+            return cached;
+
+        var hitCount = FindStaticAttackHitCount(type);
+        StaticAttackHitCountByCardType[type] = hitCount;
+        return hitCount;
+    }
+
+    private static int? FindStaticAttackHitCount(Type cardType)
+    {
+        var withHitCount = typeof(AttackCommand).GetMethod(
+            nameof(AttackCommand.WithHitCount),
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            types: new[] { typeof(int) },
+            modifiers: null);
+        if (withHitCount == null)
+            return null;
+
+        var methods = cardType.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)
+            .Select(t => t.GetMethod("MoveNext", BindingFlags.Instance | BindingFlags.NonPublic))
+            .Where(m => m != null);
+
+        foreach (var method in methods)
+        {
+            var hitCount = FindConstantArgumentForCall(method!, withHitCount);
+            if (hitCount.HasValue && hitCount.Value > 1)
+                return hitCount.Value;
+        }
+
+        return null;
+    }
+
+    private static int? FindConstantArgumentForCall(MethodInfo method, MethodInfo target)
+    {
+        byte[]? il;
+        try
+        {
+            il = method.GetMethodBody()?.GetILAsByteArray();
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (il == null)
+            return null;
+
+        int? previousIntConstant = null;
+        OpCode? previousOpCode = null;
+        OpCode? opCodeBeforePrevious = null;
+        var module = method.Module;
+        for (var offset = 0; offset < il.Length;)
+        {
+            if (!TryReadOpCode(il, ref offset, out var opCode))
+                return null;
+
+            var operandOffset = offset;
+            var operandSize = GetOperandSize(opCode, il, operandOffset);
+            if (operandSize < 0 || operandOffset + operandSize > il.Length)
+                return null;
+
+            if ((opCode == OpCodes.Call || opCode == OpCodes.Callvirt) && operandSize == 4)
+            {
+                var token = BitConverter.ToInt32(il, operandOffset);
+                if (IsResolvedMethod(module, token, target)
+                    && previousIntConstant.HasValue
+                    && opCodeBeforePrevious.HasValue
+                    && IsLikelyAttackCommandReceiverLoad(opCodeBeforePrevious.Value))
+                {
+                    return previousIntConstant.Value;
+                }
+            }
+
+            var currentIntConstant = TryReadIntConstant(opCode, il, operandOffset, operandSize);
+            offset = operandOffset + operandSize;
+            opCodeBeforePrevious = previousOpCode;
+            previousOpCode = opCode;
+            previousIntConstant = currentIntConstant;
+        }
+
+        return null;
+    }
+
+    private static bool IsLikelyAttackCommandReceiverLoad(OpCode opCode)
+    {
+        return opCode == OpCodes.Call
+               || opCode == OpCodes.Callvirt
+               || opCode == OpCodes.Dup
+               || opCode == OpCodes.Ldloc
+               || opCode == OpCodes.Ldloc_S
+               || opCode == OpCodes.Ldloc_0
+               || opCode == OpCodes.Ldloc_1
+               || opCode == OpCodes.Ldloc_2
+               || opCode == OpCodes.Ldloc_3
+               || opCode == OpCodes.Ldarg
+               || opCode == OpCodes.Ldarg_S
+               || opCode == OpCodes.Ldarg_0
+               || opCode == OpCodes.Ldarg_1
+               || opCode == OpCodes.Ldarg_2
+               || opCode == OpCodes.Ldarg_3;
+    }
+
+    private static bool TryReadOpCode(byte[] il, ref int offset, out OpCode opCode)
+    {
+        opCode = default;
+        if (offset >= il.Length)
+            return false;
+
+        var value = il[offset++];
+        short key;
+        if (value == 0xFE)
+        {
+            if (offset >= il.Length)
+                return false;
+            key = (short)(0xFE00 | il[offset++]);
+        }
+        else
+        {
+            key = value;
+        }
+
+        return OpCodeByValue.TryGetValue(key, out opCode);
+    }
+
+    private static int GetOperandSize(OpCode opCode, byte[] il, int operandOffset)
+    {
+        return opCode.OperandType switch
+        {
+            OperandType.InlineNone => 0,
+            OperandType.ShortInlineI => 1,
+            OperandType.ShortInlineVar => 1,
+            OperandType.ShortInlineBrTarget => 1,
+            OperandType.InlineVar => 2,
+            OperandType.InlineI => 4,
+            OperandType.InlineBrTarget => 4,
+            OperandType.InlineField => 4,
+            OperandType.InlineMethod => 4,
+            OperandType.InlineSig => 4,
+            OperandType.InlineString => 4,
+            OperandType.InlineTok => 4,
+            OperandType.InlineType => 4,
+            OperandType.ShortInlineR => 4,
+            OperandType.InlineI8 => 8,
+            OperandType.InlineR => 8,
+            OperandType.InlineSwitch => GetInlineSwitchSize(il, operandOffset),
+            _ => -1,
+        };
+    }
+
+    private static int GetInlineSwitchSize(byte[] il, int operandOffset)
+    {
+        if (operandOffset + 4 > il.Length)
+            return -1;
+        var count = BitConverter.ToInt32(il, operandOffset);
+        if (count < 0)
+            return -1;
+        return 4 + count * 4;
+    }
+
+    private static int? TryReadIntConstant(OpCode opCode, byte[] il, int operandOffset, int operandSize)
+    {
+        if (opCode == OpCodes.Ldc_I4_M1) return -1;
+        if (opCode == OpCodes.Ldc_I4_0) return 0;
+        if (opCode == OpCodes.Ldc_I4_1) return 1;
+        if (opCode == OpCodes.Ldc_I4_2) return 2;
+        if (opCode == OpCodes.Ldc_I4_3) return 3;
+        if (opCode == OpCodes.Ldc_I4_4) return 4;
+        if (opCode == OpCodes.Ldc_I4_5) return 5;
+        if (opCode == OpCodes.Ldc_I4_6) return 6;
+        if (opCode == OpCodes.Ldc_I4_7) return 7;
+        if (opCode == OpCodes.Ldc_I4_8) return 8;
+        if (opCode == OpCodes.Ldc_I4_S && operandSize == 1)
+            return (sbyte)il[operandOffset];
+        if (opCode == OpCodes.Ldc_I4 && operandSize == 4)
+            return BitConverter.ToInt32(il, operandOffset);
+        return null;
+    }
+
+    private static bool IsResolvedMethod(Module module, int token, MethodInfo target)
+    {
+        try
+        {
+            return module.ResolveMethod(token) is MethodInfo method
+                   && method.Module == target.Module
+                   && method.MetadataToken == target.MetadataToken;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private int GetCreaturePowerAmount(Creature? creature, params string[] powerKeys)
@@ -4108,14 +4355,16 @@ public class RunSimulator
             var addedKws = newKws.Except(oldKws).ToList();
             var removedKws = oldKws.Except(newKws).ToList();
 
-            return new Dictionary<string, object?>
+            var info = new Dictionary<string, object?>
             {
-                ["cost"] = clone.EnergyCost?.GetResolved() ?? 0,
+                ["cost"] = GetEnergyCostDisplay(clone),
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                 ["added_keywords"] = addedKws.Count > 0 ? addedKws : null,
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
+            AddEnergyCostDetails(info, clone);
+            return info;
         }
         catch { return null; }
     }
@@ -4182,7 +4431,7 @@ public class RunSimulator
                 {
                     ["id"] = c.Id.ToString(),
                     ["name"] = _loc.Card(c.Id.Entry),
-                    ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
+                    ["cost"] = GetEnergyCostDisplay(c),
                     ["type"] = c.Type.ToString(),
                     ["upgraded"] = c.IsUpgraded,
                     ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
@@ -4190,6 +4439,7 @@ public class RunSimulator
                     ["keywords"] = dkws?.Count > 0 ? dkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(c, player),
                 };
+                AddEnergyCostDetails(cardInfo, c);
                 AddCardEnhancements(cardInfo, c);
                 return cardInfo;
             }).ToList(),

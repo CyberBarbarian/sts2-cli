@@ -187,17 +187,19 @@ class TestDynamicCardStats:
         state = game.enter_room("combat", encounter="SLIMES_WEAK")
 
         whirlwind = next(c for c in state["hand"] if c["name"] == "Whirlwind")
-        assert whirlwind["cost"] == state["energy"]
+        assert whirlwind["cost"] == "X"
+        assert whirlwind["energy_cost"] == state["energy"]
+        assert whirlwind["x_value"] == state["energy"]
         target_stats = whirlwind["stats"]["damage_by_target"]
         assert len(target_stats) >= 2
         target = next(
             t for t in target_stats
             if next(e for e in state["enemies"] if e["index"] == t["target_index"])["hp"]
-            > t["damage"] * state["energy"]
+            > t["damage"] * whirlwind["x_value"]
         )
-        assert target["repeat"] == state["energy"]
+        assert target["repeat"] == whirlwind["x_value"]
         assert target["total_damage"] == (
-            target["damage"] * state["energy"]
+            target["damage"] * whirlwind["x_value"]
         )
 
         hp_before = next(
@@ -209,6 +211,48 @@ class TestDynamicCardStats:
             0,
         )
         assert hp_before - hp_after == target["total_damage"]
+
+    def test_fixed_multi_hit_attack_exports_repeat_damage(self, game):
+        state = game.start(seed="twin-strike-repeat-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "TWIN_STRIKE",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        twin_strike = next(c for c in state["hand"] if c["name"] == "Twin Strike")
+        target_stats = twin_strike["stats"]["damage_by_target"][0]
+        assert target_stats["repeat"] == 2
+        assert target_stats["total_damage"] == target_stats["damage"] * 2
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=twin_strike["index"], target_index=0)
+        assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
+
+    def test_other_fixed_multi_hit_attack_exports_engine_repeat_damage(self, game):
+        state = game.start(seed="dagger-spray-repeat-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "DAGGER_SPRAY",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        dagger_spray = next(c for c in state["hand"] if c["name"] == "Dagger Spray")
+        target_stats = dagger_spray["stats"]["damage_by_target"][0]
+        assert target_stats["repeat"] == 2
+        assert target_stats["total_damage"] == target_stats["damage"] * 2
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=dagger_spray["index"])
+        assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
 
     def test_attack_damage_stats_include_player_strength(self, game):
         state = game.start(seed="strength-damage-stats")

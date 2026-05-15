@@ -5,6 +5,18 @@ import pytest
 from conftest import Game
 
 
+def card_energy_cost(card, default=99):
+    cost = card.get("energy_cost", card.get("cost", default))
+    if isinstance(cost, (int, float)):
+        return cost
+    if isinstance(cost, str) and cost.upper() == "X":
+        x_value = card.get("x_value", card.get("x_cost", 0))
+        if isinstance(x_value, (int, float)):
+            return x_value
+        return 0
+    return default
+
+
 class TestCombatStructure:
     def test_combat_play_fields(self, game):
         state = game.start(seed="cs1")
@@ -124,7 +136,7 @@ class TestPlayCards:
         game.skip_neow(state)
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         energy_before = state["energy"]
-        playable = [c for c in state["hand"] if c.get("can_play") and c["cost"] <= energy_before]
+        playable = [c for c in state["hand"] if c.get("can_play") and card_energy_cost(c) <= energy_before]
         assert playable
         card = playable[0]
         args = {"card_index": card["index"]}
@@ -132,7 +144,7 @@ class TestPlayCards:
             args["target_index"] = state["enemies"][0]["index"]
         state = game.act("play_card", **args)
         if state["decision"] == "combat_play":
-            assert state["energy"] == energy_before - card["cost"]
+            assert state["energy"] == energy_before - card_energy_cost(card)
 
     def test_play_attack_reduces_enemy_hp(self, game):
         state = game.start(seed="cp2")
@@ -141,7 +153,7 @@ class TestPlayCards:
         target = state["enemies"][0]
         hp_before = target["hp"]
         attacks = [c for c in state["hand"] if c.get("can_play") and c["type"] == "Attack"
-                   and c["cost"] <= state["energy"]]
+                   and card_energy_cost(c) <= state["energy"]]
         if not attacks:
             pytest.skip("No attacks in hand")
         card = attacks[0]
@@ -160,7 +172,7 @@ class TestPlayCards:
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         block_before = state["player"].get("block", 0)
         defends = [c for c in state["hand"] if c.get("can_play") and c["type"] == "Skill"
-                   and c["cost"] <= state["energy"]]
+                   and card_energy_cost(c) <= state["energy"]]
         if not defends:
             pytest.skip("No skill cards")
         state = game.act("play_card", card_index=defends[0]["index"])
@@ -254,7 +266,7 @@ class TestCombatEdgeCases:
                     card for card in state.get("hand", [])
                     if card.get("type") == "Attack"
                     and card.get("can_play")
-                    and card.get("cost", 99) <= state.get("energy", 0)
+                    and card_energy_cost(card) <= state.get("energy", 0)
                 ]
                 if not playable_attacks:
                     break
@@ -288,7 +300,7 @@ class TestCombatEdgeCases:
                     card for card in state.get("hand", [])
                     if card.get("type") == "Skill"
                     and card.get("can_play")
-                    and card.get("cost", 99) <= state.get("energy", 0)
+                    and card_energy_cost(card) <= state.get("energy", 0)
                 ]
                 if not playable_skills:
                     break
@@ -329,7 +341,7 @@ class TestCombatEdgeCases:
         for _ in range(20):
             if state.get("decision") != "combat_play":
                 break
-            playable = [c for c in state["hand"] if c.get("can_play") and c["cost"] <= state["energy"]]
+            playable = [c for c in state["hand"] if c.get("can_play") and card_energy_cost(c) <= state["energy"]]
             if not playable:
                 break
             card = playable[0]
@@ -351,7 +363,7 @@ class TestCombatEdgeCases:
             if state.get("decision") != "combat_play":
                 break
             playable = [c for c in state["hand"] if c.get("can_play")
-                        and c["cost"] <= state["energy"] and c["type"] not in ("Status", "Curse")]
+                        and card_energy_cost(c) <= state["energy"] and c["type"] not in ("Status", "Curse")]
             if not playable:
                 break
             card = playable[0]
@@ -381,7 +393,7 @@ class TestCombatEdgeCases:
                 break
             hand = state.get("hand", [])
             energy = state.get("energy", 0)
-            playable = [c for c in hand if c.get("can_play") and c["cost"] <= energy
+            playable = [c for c in hand if c.get("can_play") and card_energy_cost(c) <= energy
                         and c["type"] not in ("Status", "Curse")]
             if not playable:
                 break

@@ -24,6 +24,19 @@ from game_log import GameLogger
 
 VALID_CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
 
+
+def card_energy_cost(card, default=99):
+    cost = card.get("energy_cost", card.get("cost", default))
+    if isinstance(cost, (int, float)):
+        return cost
+    if isinstance(cost, str) and cost.upper() == "X":
+        x_value = card.get("x_value", card.get("x_cost", 0))
+        if isinstance(x_value, (int, float)):
+            return x_value
+        return 0
+    return default
+
+
 def _find_dotnet():
     for p in [os.path.expanduser("~/.dotnet-arm64/dotnet"),
               os.path.expanduser("~/.dotnet/dotnet"), "dotnet"]:
@@ -169,7 +182,7 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
 
                 # Simple strategy: play playable cards until out of energy
                 playable = [c for c in hand if c.get("can_play", False)
-                           and (c.get("cost", 0) <= energy)]
+                           and (card_energy_cost(c, 0) <= energy)]
 
                 if playable:
                     card = playable[0]

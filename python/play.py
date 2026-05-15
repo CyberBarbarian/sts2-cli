@@ -194,6 +194,18 @@ def ensure_setup():
 # Language setting (set by --lang flag)
 LANG = "zh"  # "en", "zh", or "both"
 
+
+def card_energy_cost(card, default=99):
+    cost = card.get("energy_cost", card.get("cost", default))
+    if isinstance(cost, (int, float)):
+        return cost
+    if isinstance(cost, str) and cost.upper() == "X":
+        x_value = card.get("x_value", card.get("x_cost", 0))
+        if isinstance(x_value, (int, float)):
+            return x_value
+        return 0
+    return default
+
 # ─── Native save file support ───
 
 def _find_native_save_dir():
@@ -1754,7 +1766,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
                 valid = {"e": "end_turn"}
                 for card in hand:
-                    if card.get("can_play") and card.get("cost", 99) <= energy:
+                    if card.get("can_play") and card_energy_cost(card) <= energy:
                         valid[str(card["index"])] = card
                 # Add potion shortcuts
                 for pot in state.get("player", {}).get("potions", []):
@@ -1763,7 +1775,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
                 if auto:
                     # Auto: play first playable card, or end turn
-                    playable = [c for c in hand if c.get("can_play") and c.get("cost", 99) <= energy]
+                    playable = [c for c in hand if c.get("can_play") and card_energy_cost(c) <= energy]
                     if playable:
                         card = playable[0]
                         choice = str(card["index"])

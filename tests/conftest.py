@@ -101,11 +101,23 @@ class Game:
 
     # --- Auto-play helpers ---
 
+    @staticmethod
+    def card_energy_cost(card, default=99):
+        cost = card.get("energy_cost", card.get("cost", default))
+        if isinstance(cost, (int, float)):
+            return cost
+        if isinstance(cost, str) and cost.upper() == "X":
+            x_value = card.get("x_value", card.get("x_cost", 0))
+            if isinstance(x_value, (int, float)):
+                return x_value
+            return 0
+        return default
+
     def auto_combat(self, state):
         """Play one card or end turn."""
         hand = state.get("hand", [])
         energy = state.get("energy", 0)
-        playable = [c for c in hand if c.get("can_play") and c.get("cost", 99) <= energy]
+        playable = [c for c in hand if c.get("can_play") and self.card_energy_cost(c) <= energy]
         if playable:
             card = playable[0]
             args = {"card_index": card["index"]}
