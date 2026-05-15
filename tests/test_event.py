@@ -358,6 +358,26 @@ class TestLostWisp:
         assert "Lost Wisp" in capture["description"]
 
 
+class TestColossalFlower:
+    def test_pollinous_core_option_exports_relic_hover_tip(self, game):
+        state = game.start(seed="colossal-flower-hover-tip")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="COLOSSAL_FLOWER")
+
+        state = game.act("choose_option", option_index=1)
+        state = game.act("choose_option", option_index=1)
+        center = next(o for o in state["options"] if o["title"] == "Enter the Center")
+
+        tips = center["hover_tips"]
+        relic = next(t for t in tips if t["kind"] == "relic" and t["id"] == "POLLINOUS_CORE")
+
+        assert relic["name"] == "Pollinous Core"
+        assert relic["description"]
+        assert "{" not in relic["description"]
+        assert relic["vars"]["Cards"] == 2
+        assert relic["vars"]["Turns"] == 4
+
+
 class TestRanwidTheElder:
     def test_give_potion_option_names_current_potion(self, game):
         state = game.start(seed="ranwid-vars")

@@ -2913,6 +2913,9 @@ public class RunSimulator
                 var relicTrade = BuildRelicTradePreview(eventEntry, localEvent, opt, i);
                 if (relicTrade != null)
                     exportedOption["relic_trade"] = relicTrade;
+                var hoverTips = EventOptionHoverTips(opt);
+                if (hoverTips != null)
+                    exportedOption["hover_tips"] = hoverTips;
 
                 return exportedOption;
             }).ToList();
@@ -2954,6 +2957,60 @@ public class RunSimulator
         AddEventDynamicVars(vars, eventEntry, GetPropertyValue(option, "DynamicVars"));
         AddPotionConversionOptionVars(vars, localEvent, option, optionIndex);
         return vars.Count > 0 ? vars : null;
+    }
+
+    private List<Dictionary<string, object?>>? EventOptionHoverTips(EventOption option)
+    {
+        var rawTips = TryGetMember(option, "HoverTips") as System.Collections.IEnumerable;
+        if (rawTips == null)
+            return null;
+
+        var tips = new List<Dictionary<string, object?>>();
+        foreach (var rawTip in rawTips)
+        {
+            var tip = EventOptionHoverTipInfo(rawTip);
+            if (tip != null)
+                tips.Add(tip);
+        }
+        return tips.Count > 0 ? tips : null;
+    }
+
+    private Dictionary<string, object?>? EventOptionHoverTipInfo(object? rawTip)
+    {
+        if (rawTip == null)
+            return null;
+
+        var canonicalModel = TryGetMember(rawTip, "CanonicalModel");
+        if (canonicalModel is RelicModel relic)
+        {
+            var info = RelicInfo(relic);
+            info["kind"] = "relic";
+            return info;
+        }
+        if (canonicalModel is PotionModel potion)
+        {
+            var info = PotionInfo(potion);
+            info["kind"] = "potion";
+            return info;
+        }
+        if (canonicalModel is CardModel card)
+        {
+            var info = SingleCardRewardInfo(card);
+            info["kind"] = "card";
+            return info;
+        }
+
+        var title = TryGetMember(rawTip, "Title") as string;
+        var description = TryGetMember(rawTip, "Description") as string;
+        if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(description))
+            return null;
+
+        return new Dictionary<string, object?>
+        {
+            ["kind"] = rawTip.GetType().Name,
+            ["title"] = string.IsNullOrWhiteSpace(title) ? null : title,
+            ["description"] = string.IsNullOrWhiteSpace(description) ? null : description,
+        };
     }
 
     private Dictionary<string, object?>? BuildRelicTradePreview(
