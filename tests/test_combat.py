@@ -479,6 +479,24 @@ class TestCombatEdgeCases:
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         assert state["decision"] == "combat_play"
 
+    def test_checkpoint_reports_pre_room_scope_for_pending_card_reward(self, game, tmp_path):
+        state = game.start(seed="checkpoint-pending-card-reward")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        state = game.auto_play_combat(state)
+        state = game.claim_combat_rewards(state)
+
+        assert state["decision"] == "card_reward"
+        save_path = tmp_path / "pending-card-reward.save"
+        result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+
+        assert result["type"] == "save_result"
+        assert result["success"] is True
+        assert result["checkpoint_scope"] == "pre_room"
+        assert result["rolled_back_room_type"] == "CombatRoom"
+        assert save_path.exists()
+
     def test_vantom_dismember_headless_vfx_does_not_force_game_over(self, game):
         state = game.start(seed="vantom-dismember-headless")
         game.skip_neow(state)

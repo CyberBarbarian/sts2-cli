@@ -916,6 +916,8 @@ public class RunSimulator
 
             var currentRoom = _runState.CurrentRoom;
             SerializableRun serializableRun;
+            var checkpointScope = "current_room";
+            string? rolledBackRoomType = null;
 
             if (currentRoom is MapRoom || currentRoom == null)
             {
@@ -925,6 +927,8 @@ public class RunSimulator
             else
             {
                 Log($"Saving pre-room checkpoint from {currentRoom.GetType().Name} (outputPath={outputPath})...");
+                checkpointScope = "pre_room";
+                rolledBackRoomType = currentRoom.GetType().Name;
                 serializableRun = RunManager.Instance.ToSave(new MapRoom());
                 if (!TryRollbackSerializedSaveToPreRoom(serializableRun, out var rollbackError))
                     return Error($"Cannot save checkpoint: {rollbackError}");
@@ -946,6 +950,8 @@ public class RunSimulator
                 ["path"] = outputPath,
                 ["size"] = saveJson.Length,
                 ["room_type"] = currentRoom?.GetType().Name,
+                ["checkpoint_scope"] = checkpointScope,
+                ["rolled_back_room_type"] = rolledBackRoomType,
             };
         }
         catch (Exception ex)
@@ -3535,7 +3541,7 @@ public class RunSimulator
             ResolveConditionalFormatterChoice(body, includeCombatText));
 
         text = InterpolateDynamicVars(text, vars.Count > 0 ? vars : null);
-        return NormalizeInlineResourceIcons(text);
+        return text == null ? null : NormalizeInlineResourceIcons(text);
     }
 
     private static string ReplaceFormatterBlocks(
