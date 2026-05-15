@@ -431,3 +431,27 @@ class TestCombatEdgeCases:
         assert state["min_select"] == 0
         assert state["max_select"] == 1
         assert state["cards"]
+
+    def test_soul_nexus_death_does_not_leave_combat_active(self, game):
+        state = game.start(seed="soul-nexus-death-cleanup")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12)
+        state = game.enter_room("combat", encounter="SOUL_NEXUS_ELITE")
+
+        for _ in range(80):
+            if state.get("decision") != "combat_play":
+                break
+            playable = [card for card in state["hand"] if card.get("can_play")]
+            if playable:
+                card = playable[0]
+                state = game.act("play_card", card_index=card["index"], target_index=0)
+            else:
+                state = game.act("end_turn")
+
+        assert state["decision"] == "card_reward"
+
+        state = game.act("skip_card_reward")
+        assert state["decision"] == "map_select"
+
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        assert state["decision"] == "combat_play"

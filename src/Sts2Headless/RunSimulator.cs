@@ -3785,6 +3785,7 @@ public class RunSimulator
         PatchCmdWait();
         PatchCardPileAddVisuals();
         PatchTalkCmdPlay();
+        PatchSoulNexusPresentation();
 
         // Initialize localization system (needed for events, cards, etc.)
         InitLocManager();
@@ -4012,6 +4013,46 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch CardPileCmd.Add visuals: {ex.Message}");
+        }
+    }
+
+    private static void PatchSoulNexusPresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.soulnexus.presentation");
+            var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var soulNexusType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Monsters.SoulNexus");
+            if (prefix == null || soulNexusType == null)
+                return;
+
+            var patched = 0;
+            var methods = new[]
+            {
+                soulNexusType.GetMethod("AfterDeath",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    binder: null,
+                    types: new[] { typeof(Creature) },
+                    modifiers: null),
+                soulNexusType.GetMethod("BeforeRemovedFromRoom",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                    binder: null,
+                    types: Type.EmptyTypes,
+                    modifiers: null),
+            };
+            foreach (var method in methods)
+            {
+                if (method == null)
+                    continue;
+                harmony.Patch(method, new HarmonyMethod(prefix));
+                patched++;
+            }
+            Console.Error.WriteLine($"[INFO] Patched SoulNexus presentation cleanup ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch SoulNexus presentation cleanup: {ex.Message}");
         }
     }
 
@@ -4244,6 +4285,12 @@ public class RunSimulator
         public static bool TalkCmdPlayVoidPrefix()
         {
             return false; // Skip original method
+        }
+
+        /// <summary>Harmony prefix: skip UI-only presentation hooks in headless mode.</summary>
+        public static bool SkipPresentationVoidPrefix()
+        {
+            return false;
         }
 
         /// <summary>Harmony prefix: disable card pile animations in headless while preserving pile logic.</summary>
