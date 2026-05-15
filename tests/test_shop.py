@@ -47,6 +47,20 @@ class TestShopStructure:
             assert "cost" in card
             assert "type" in card
             assert "card_cost" in card
+            assert "price" in card
+
+    def test_shop_card_cost_is_energy_and_price_is_gold(self, game):
+        state = game.start(seed="ss2-price")
+        game.skip_neow(state)
+        state = game.enter_room("shop")
+
+        stocked = [c for c in state["cards"] if c.get("is_stocked")]
+        assert stocked
+        for card in stocked:
+            assert card["cost"] == card["card_cost"]
+            assert isinstance(card["price"], int)
+            assert card["price"] > 0
+            assert card["price"] != card["cost"]
 
     def test_shop_cards_have_upgrade_preview(self, game):
         state = game.start(seed="ss3")
@@ -113,6 +127,9 @@ class TestShopBuy:
         assert bought["type"] == card["type"]
         assert bought["rarity"] == card["rarity"]
         assert bought["description"] == card["description"]
+        assert bought["cost"] == card["cost"]
+        assert bought["card_cost"] == card["card_cost"]
+        assert bought["price"] == card["price"]
 
     def test_bought_relic_keeps_shop_metadata(self, game):
         state = game.start(seed="sb-relic-metadata")

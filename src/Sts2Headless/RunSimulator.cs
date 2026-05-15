@@ -3349,7 +3349,15 @@ public class RunSimulator
             return current;
 
         var restored = new Dictionary<string, object?>(snapshot);
-        restored["cost"] = current.GetValueOrDefault("cost");
+        if (restored.ContainsKey("card_cost"))
+        {
+            restored["price"] = current.GetValueOrDefault("price");
+            restored["gold_cost"] = current.GetValueOrDefault("gold_cost");
+        }
+        else
+        {
+            restored["cost"] = current.GetValueOrDefault("cost");
+        }
         restored["is_stocked"] = current.GetValueOrDefault("is_stocked");
         if (current.ContainsKey("on_sale"))
             restored["on_sale"] = current.GetValueOrDefault("on_sale");
@@ -3385,17 +3393,22 @@ public class RunSimulator
                     ["name"] = _loc.Card(entry),
                     ["type"] = card?.Type.ToString() ?? "?",
                     ["rarity"] = card?.Rarity.ToString() ?? "?",
+                    ["cost"] = cardCost,
                     ["card_cost"] = cardCost,
                     ["description"] = _loc.Bilingual("cards", entry + ".description"),
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["keywords"] = shopkws?.Count > 0 ? shopkws : null,
                     ["after_upgrade"] = card != null ? GetUpgradedInfo(card, _runState?.Players[0]) : null,
-                    ["cost"] = e.Cost,
+                    ["price"] = e.Cost,
+                    ["gold_cost"] = e.Cost,
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
                 };
                 if (card != null)
+                {
+                    AddEnergyCostDetails(exported, card);
                     AddCardEnhancements(exported, card);
+                }
                 return ShopItemState(e, exported, card != null);
             }).ToList();
 

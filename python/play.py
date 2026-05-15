@@ -939,11 +939,11 @@ def show_shop(state):
     print(f"\n  {c(t('Cards:','卡牌:'), 'bold')}")
     for card in state.get("cards", []):
         if not card.get("is_stocked"): continue
-        cost = card.get("cost", 0)
-        affordable = c(str(cost), "green") if cost <= gold else c(str(cost), "red")
+        price = card.get("price", card.get("gold_cost", card.get("cost", 0)))
+        affordable = c(str(price), "green") if price <= gold else c(str(price), "red")
         sale = c(t(" SALE"," 打折"), "yellow") if card.get("on_sale") else ""
         ctype_zh = CARD_TYPE_ZH.get(card.get("type",""), card.get("type",""))
-        cc = card.get("card_cost", "?")
+        cc = card.get("cost", card.get("card_cost", "?"))
         _pre, suf = split_card_keywords(card.get("keywords"))
         suf_part = format_card_suffix_keywords(suf)
         print(f"  [{card['index']}] {n(card['name'])} ({cc}) {c(t(card.get('type','?'), ctype_zh), 'dim')}{suf_part} — {affordable}{t('g','金')}{sale}")
