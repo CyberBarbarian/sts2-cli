@@ -3032,11 +3032,13 @@ public class RunSimulator
             eventName = _loc.Event(eventEntry);
 
         // Resolve event description, suppress if key not found
+        var eventVars = ExportEventVars(eventEntry, localEvent);
         string? eventDesc = null;
         if (localEvent.Description != null)
         {
-            var d = ResolveLocString(localEvent.Description)
+            var d = ResolveLocString(localEvent.Description, eventVars)
                     ?? _loc.Bilingual(localEvent.Description.LocTable, localEvent.Description.LocEntryKey);
+            d = CleanResolvedEngineText(InterpolateDynamicVars(d, eventVars) ?? d);
             if (d != localEvent.Description.LocEntryKey)
                 eventDesc = d;
         }
@@ -3048,9 +3050,17 @@ public class RunSimulator
             ["context"] = RunContext(),
             ["event_name"] = eventName,
             ["description"] = eventDesc,
+            ["vars"] = eventVars?.Count > 0 ? eventVars : null,
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    private Dictionary<string, object?>? ExportEventVars(string eventEntry, object localEvent)
+    {
+        var vars = new Dictionary<string, object?>();
+        AddEventDynamicVars(vars, eventEntry, GetPropertyValue(localEvent, "DynamicVars"));
+        return vars.Count > 0 ? vars : null;
     }
 
     private Dictionary<string, object?>? ExportEventOptionVars(

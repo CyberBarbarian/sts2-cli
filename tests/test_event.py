@@ -600,3 +600,16 @@ class TestWoodCarvings:
         assert deck_card["enchantment"] == "Slither"
         assert deck_card["enchantment_id"] == "SLITHER"
         assert "randomize its cost" in deck_card["enchantment_description"]
+
+
+class TestTrial:
+    def test_trial_event_description_formats_entrant_number(self, game):
+        state = game.start(seed="trial-entrant-number")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="TRIAL")
+
+        assert state["event_name"] == "The Trial"
+        assert state["description"]
+        assert "{" not in state["description"]
+        assert "}" not in state["description"]
+        assert "Entrant " in state["description"]
