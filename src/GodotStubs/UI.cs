@@ -374,6 +374,7 @@ public class AnimationPlayer : Node
 // Particles
 public class GpuParticles2D : Node2D
 {
+    public int Amount { get; set; }
     public bool Emitting { get; set; }
     public Material? ProcessMaterial { get; set; }
 }
