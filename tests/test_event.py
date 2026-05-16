@@ -1,5 +1,6 @@
 """Tests for events."""
 from collections import Counter
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +53,15 @@ class TestEventDescriptions:
         for opt in state.get("options", []):
             d = opt.get("description") or ""
             assert "IsMultiplayer" not in d
+
+    def test_event_export_does_not_use_hardcoded_semantic_descriptions(self):
+        source = Path(__file__).resolve().parents[1] / "src" / "Sts2Headless" / "RunSimulator.cs"
+        text = source.read_text(encoding="utf-8")
+
+        assert "NormalizeEventOptionDescription" not in text
+        assert "Gain {Gold} Gold. Lose {HpLoss} HP." not in text
+        assert "Add {cardText} to your Deck." not in text
+        assert "Obtain the {relicText}" not in text
 
 
 class TestSlipperyBridge:
@@ -115,15 +125,15 @@ class TestSlipperyBridge:
 
 
 class TestDenseVegetation:
-    def test_trudge_on_description_matches_observed_effect(self, game):
+    def test_trudge_on_exports_engine_vars_and_observed_effect(self, game):
         state = game.start(seed="dense-vegetation")
         game.skip_neow(state)
         state = game.enter_room("event", event="DENSE_VEGETATION")
 
         trudge = next(o for o in state["options"] if o["title"] == "Trudge On")
 
-        assert "Gold" in trudge["description"]
-        assert "Remove a card" not in trudge["description"]
+        assert trudge["vars"]["Gold"] > 0
+        assert trudge["vars"]["HpLoss"] > 0
 
         hp_before = state["player"]["hp"]
         gold_before = state["player"]["gold"]

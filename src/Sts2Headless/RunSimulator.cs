@@ -2960,7 +2960,6 @@ public class RunSimulator
                         descriptionFromEngine = true;
                     }
                 }
-                optDesc = NormalizeEventOptionDescription(eventEntry, opt.TextKey, optDesc, optVars);
                 if (!titleFromEngine)
                     title = InterpolateDynamicVars(title, optVars) ?? title;
                 if (!descriptionFromEngine)
@@ -3509,62 +3508,6 @@ public class RunSimulator
             CrystalSphereMinigame.CrystalSphereToolType.Small => "small",
             _ => "none",
         };
-    }
-
-    private static string? NormalizeEventOptionDescription(
-        string eventEntry,
-        string? textKey,
-        string? description,
-        Dictionary<string, object?>? vars)
-    {
-        if (string.Equals(eventEntry, "DENSE_VEGETATION", StringComparison.OrdinalIgnoreCase)
-            && textKey?.EndsWith(".TRUDGE_ON", StringComparison.OrdinalIgnoreCase) == true
-            && vars?.ContainsKey("Gold") == true
-            && vars.ContainsKey("HpLoss"))
-        {
-            return "Gain {Gold} Gold. Lose {HpLoss} HP.";
-        }
-
-        if (string.Equals(eventEntry, "BYRDONIS_NEST", StringComparison.OrdinalIgnoreCase)
-            && textKey?.EndsWith(".TAKE", StringComparison.OrdinalIgnoreCase) == true
-            && vars?.TryGetValue("Card", out var cardName) == true
-            && cardName is string cardText
-            && !string.IsNullOrWhiteSpace(cardText))
-        {
-            return $"Add {cardText} to your Deck.";
-        }
-
-        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
-            && textKey?.EndsWith(".EXTERMINATION", StringComparison.OrdinalIgnoreCase) == true
-            && vars?.TryGetValue("Card1", out var exterminationCard) == true
-            && exterminationCard is string exterminationText
-            && !string.IsNullOrWhiteSpace(exterminationText))
-        {
-            return $"Add {exterminationText} to your Deck.";
-        }
-
-        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
-            && textKey?.EndsWith(".SQUASH", StringComparison.OrdinalIgnoreCase) == true
-            && vars?.TryGetValue("Card2", out var squashCard) == true
-            && squashCard is string squashText
-            && !string.IsNullOrWhiteSpace(squashText))
-        {
-            return $"Add {squashText} to your Deck.";
-        }
-
-        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
-            && textKey?.EndsWith(".CLAIM", StringComparison.OrdinalIgnoreCase) == true
-            && vars?.TryGetValue("Curse", out var curse) == true
-            && vars.TryGetValue("Relic", out var relic)
-            && curse is string curseText
-            && relic is string relicText
-            && !string.IsNullOrWhiteSpace(curseText)
-            && !string.IsNullOrWhiteSpace(relicText))
-        {
-            return $"Add {curseText} to your Deck. Obtain the {relicText}.";
-        }
-
-        return description;
     }
 
     private string CardDescription(
