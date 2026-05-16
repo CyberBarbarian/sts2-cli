@@ -1,7 +1,10 @@
 """Tests for combat scenarios."""
 import json
 import os
+import queue
 import subprocess
+import tempfile
+import threading
 
 import pytest
 from conftest import DOTNET, HEADLESS_DLL, LOCAL_DOTNET_DIR, STS2_CLI_ROOT, Game
@@ -40,6 +43,117 @@ def run_headless_jsonl(commands, timeout=90):
     )
     outputs = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
     return result, outputs
+
+
+class HeadlessSession:
+    def __init__(self):
+        env = os.environ.copy()
+        env["DOTNET_ROOT"] = str(LOCAL_DOTNET_DIR)
+        env["PATH"] = str(LOCAL_DOTNET_DIR) + os.pathsep + env.get("PATH", "")
+        env["STS2_LIB"] = str(STS2_CLI_ROOT / "lib")
+        env["STS2_GAME_DIR"] = str(STS2_CLI_ROOT / "lib")
+        self.stderr_file = tempfile.NamedTemporaryFile(
+            mode="w+",
+            encoding="utf-8",
+            errors="replace",
+            delete=False,
+        )
+        self.proc = subprocess.Popen(
+            [DOTNET, str(HEADLESS_DLL)],
+            cwd=STS2_CLI_ROOT,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self.stderr_file,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+        )
+        self.stdout_queue = queue.Queue()
+        self.reader = threading.Thread(target=self._read_stdout, daemon=True)
+        self.reader.start()
+        ready = self.read_json()
+        assert ready.get("type") == "ready"
+
+    def _read_stdout(self):
+        try:
+            for line in self.proc.stdout:
+                if line.startswith("{"):
+                    self.stdout_queue.put(json.loads(line))
+        finally:
+            self.stdout_queue.put(None)
+
+    def read_json(self, timeout=25):
+        try:
+            item = self.stdout_queue.get(timeout=timeout)
+        except queue.Empty as exc:
+            raise TimeoutError("Timed out waiting for headless JSON response") from exc
+        if item is None:
+            raise RuntimeError("EOF from headless process")
+        return item
+
+    def send(self, cmd):
+        self.proc.stdin.write(json.dumps(cmd) + "\n")
+        self.proc.stdin.flush()
+        return self.read_json()
+
+    def skip_neow(self, state):
+        for _ in range(20):
+            decision = state.get("decision")
+            if decision == "map_select":
+                return state
+            if decision == "event_choice":
+                options = [option for option in state["options"] if not option.get("is_locked")]
+                state = self.send({
+                    "cmd": "action",
+                    "action": "choose_option",
+                    "args": {"option_index": options[0]["index"]},
+                })
+            elif decision == "combat_reward":
+                rewards = state.get("rewards") or []
+                if not rewards:
+                    state = self.send({"cmd": "action", "action": "proceed"})
+                else:
+                    state = self.send({
+                        "cmd": "action",
+                        "action": "claim_reward",
+                        "args": {"reward_index": rewards[0]["index"]},
+                    })
+            elif decision == "card_reward":
+                state = self.send({"cmd": "action", "action": "skip_card_reward"})
+            elif decision == "bundle_select":
+                state = self.send({"cmd": "action", "action": "select_bundle", "args": {"bundle_index": 0}})
+            elif decision == "card_select":
+                action = "skip_select" if state.get("min_select", 0) == 0 else "select_cards"
+                args = {} if action == "skip_select" else {"indices": "0"}
+                state = self.send({"cmd": "action", "action": action, "args": args})
+            else:
+                state = self.send({"cmd": "action", "action": "proceed"})
+        return state
+
+    def close(self):
+        if self.proc.poll() is None:
+            try:
+                self.proc.stdin.write('{"cmd":"quit"}\n')
+                self.proc.stdin.flush()
+            except Exception:
+                pass
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait(timeout=5)
+        self.reader.join(timeout=1)
+        self.stderr_file.flush()
+        self.stderr_file.seek(0)
+        stderr = self.stderr_file.read()
+        path = self.stderr_file.name
+        self.stderr_file.close()
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return stderr
 
 
 class TestCombatStructure:
@@ -803,3 +917,68 @@ class TestCombatEdgeCases:
         assert outputs[-2]["type"] == "decision"
         assert "NullReferenceException" not in result.stderr
         assert "SlumberingBeetle.AfterAddedToRoom" not in result.stderr
+
+    def test_test_subject_respawn_color_presentation_does_not_log_headless_exception(self):
+        session = HeadlessSession()
+        stderr = ""
+        try:
+            state = session.send({
+                "cmd": "start_run",
+                "character": "Ironclad",
+                "seed": "test-subject-set-color-stderr",
+                "lang": "en",
+            })
+            state = session.skip_neow(state)
+            state = session.send({
+                "cmd": "set_player",
+                "hp": 999,
+                "max_hp": 999,
+                "relics": ["BURNING_BLOOD", "LANTERN"],
+                "deck": [
+                    "BLOODLETTING",
+                    "BLOODLETTING",
+                    "PERFECTED_STRIKE",
+                    "PERFECTED_STRIKE",
+                    "PERFECTED_STRIKE",
+                    *(["STRIKE_IRONCLAD"] * 30),
+                ],
+            })
+            state = session.send({"cmd": "enter_room", "type": "combat", "encounter": "TEST_SUBJECT_BOSS"})
+
+            reached_respawn = False
+            for _ in range(100):
+                if any(enemy.get("max_hp", 0) >= 300 for enemy in state.get("enemies", [])):
+                    reached_respawn = True
+                    break
+
+                if state.get("decision") != "combat_play":
+                    state = session.send({"cmd": "action", "action": "proceed"})
+                    continue
+
+                playable = [
+                    card for card in state["hand"]
+                    if card.get("can_play") and card_energy_cost(card) <= state.get("energy", 0)
+                ]
+                if not playable:
+                    state = session.send({"cmd": "action", "action": "end_turn"})
+                    continue
+
+                playable.sort(key=lambda card: (
+                    0 if card["name"] == "Bloodletting" else
+                    1 if card["name"] == "Perfected Strike" else
+                    2 if card["type"] == "Attack" else
+                    3,
+                    card_energy_cost(card),
+                ))
+                card = playable[0]
+                args = {"card_index": card["index"]}
+                if card.get("target_type") == "AnyEnemy":
+                    args["target_index"] = 0
+                state = session.send({"cmd": "action", "action": "play_card", "args": args})
+        finally:
+            stderr = session.close()
+
+        assert reached_respawn
+        assert "MissingMethodException" not in stderr
+        assert "SetSelfModulate" not in stderr
+        assert "TestSubject.SetColor" not in stderr

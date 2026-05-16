@@ -5678,6 +5678,7 @@ public class RunSimulator
         PatchQueenPresentation();
         PatchDecimillipedePresentation();
         PatchSlumberingBeetlePresentation();
+        PatchTestSubjectPresentation();
         PatchKaiserCrabPresentation();
         PatchCrystalSpherePresentation();
         PatchTrialPresentation();
@@ -6058,6 +6059,43 @@ public class RunSimulator
         }
     }
 
+    private static void PatchTestSubjectPresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.testsubject.presentation");
+            var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.StripHeadlessPresentationCalls),
+                BindingFlags.Static | BindingFlags.Public);
+            var testSubjectType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Monsters.TestSubject");
+            if (testSubjectType == null || transpiler == null)
+                return;
+
+            var patched = 0;
+            foreach (var method in GetDeclaredMethods(testSubjectType)
+                .Where(method => method.GetMethodBody() != null)
+                .Where(method => method.Name is "AfterDeath" or "AfterPowerApplied" or "AfterPowerRemoved"))
+            {
+                harmony.Patch(method, transpiler: new HarmonyMethod(transpiler));
+                patched++;
+            }
+
+            foreach (var method in testSubjectType
+                .GetNestedTypes(BindingFlags.NonPublic)
+                .SelectMany(GetDeclaredMethods)
+                .Where(method => method.Name == "MoveNext" && method.GetMethodBody() != null))
+            {
+                harmony.Patch(method, transpiler: new HarmonyMethod(transpiler));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched Test Subject presentation ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Test Subject color presentation: {ex.Message}");
+        }
+    }
+
     private static void PatchKaiserCrabPresentation()
     {
         try
@@ -6199,6 +6237,7 @@ public class RunSimulator
             || fullName.Contains("RitualMove", StringComparison.Ordinal)
             || fullName.Contains("WakeMove", StringComparison.Ordinal)
             || fullName.Contains("ScreechMove", StringComparison.Ordinal)
+            || fullName.Contains("MegaCrit.Sts2.Core.Models.Monsters.TestSubject+<", StringComparison.Ordinal)
             || fullName.Contains("Vantom+<DismemberMove", StringComparison.Ordinal);
     }
 
@@ -6568,7 +6607,14 @@ public class RunSimulator
                 || IsNGameHitStop(method)
                 || IsNGameScreenShakeTrauma(method)
                 || IsFullscreenHealVfxPlay(method)
+                || IsCreatureTriggerAnim(method)
+                || IsSfxCmdPlay(method)
+                || IsRunMusicUpdateParameter(method)
+                || IsCreatureNodeSetDefaultScale(method)
+                || IsNodeAddChildSafely(method)
+                || IsTestSubjectBurnVfxCreate(method)
                 || IsReattachFadeOut(method)
+                || IsTestSubjectColorPresentation(method)
                 || IsKaiserCrabBackgroundPresentation(method);
         }
 
@@ -6614,10 +6660,52 @@ public class RunSimulator
                 && (method.DeclaringType?.FullName ?? "").Contains("PlayerFullscreenHealVfx", StringComparison.Ordinal);
         }
 
+        private static bool IsCreatureTriggerAnim(MethodInfo method)
+        {
+            return method.Name == "TriggerAnim"
+                && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Commands.CreatureCmd";
+        }
+
+        private static bool IsSfxCmdPlay(MethodInfo method)
+        {
+            return method.Name == "Play"
+                && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Commands.SfxCmd";
+        }
+
+        private static bool IsRunMusicUpdateParameter(MethodInfo method)
+        {
+            return method.Name == "UpdateMusicParameter"
+                && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController";
+        }
+
+        private static bool IsCreatureNodeSetDefaultScale(MethodInfo method)
+        {
+            return method.Name == "SetDefaultScaleTo"
+                && (method.DeclaringType?.FullName ?? "").Contains("MegaCrit.Sts2.Core.Nodes.Combat.NCreature", StringComparison.Ordinal);
+        }
+
+        private static bool IsNodeAddChildSafely(MethodInfo method)
+        {
+            return method.Name == "AddChildSafely"
+                && method.GetParameters().Any(param => param.ParameterType.FullName == "Godot.Node");
+        }
+
+        private static bool IsTestSubjectBurnVfxCreate(MethodInfo method)
+        {
+            return method.Name == "Create"
+                && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Nodes.Vfx.NTestSubjectBurnVfx";
+        }
+
         private static bool IsReattachFadeOut(MethodInfo method)
         {
             return method.Name == "DoFadeOutOnAllSegments"
                 && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Models.Powers.ReattachPower";
+        }
+
+        private static bool IsTestSubjectColorPresentation(MethodInfo method)
+        {
+            return method.Name == "SetColor"
+                && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Models.Monsters.TestSubject";
         }
 
         private static bool IsKaiserCrabBackgroundPresentation(MethodInfo method)
