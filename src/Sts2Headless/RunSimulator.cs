@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.CardSelection;
@@ -6066,11 +6067,20 @@ public class RunSimulator
             var harmony = new Harmony("sts2headless.testsubject.presentation");
             var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.StripHeadlessPresentationCalls),
                 BindingFlags.Static | BindingFlags.Public);
+            var burningGrowlPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.TestSubjectBurningGrowlMovePrefix),
+                BindingFlags.Static | BindingFlags.Public);
             var testSubjectType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Monsters.TestSubject");
             if (testSubjectType == null || transpiler == null)
                 return;
 
             var patched = 0;
+            var burningGrowlMove = AccessTools.Method(testSubjectType, "BurningGrowlMove");
+            if (burningGrowlMove != null && burningGrowlPrefix != null)
+            {
+                harmony.Patch(burningGrowlMove, prefix: new HarmonyMethod(burningGrowlPrefix));
+                patched++;
+            }
+
             foreach (var method in GetDeclaredMethods(testSubjectType)
                 .Where(method => method.GetMethodBody() != null)
                 .Where(method => method.Name is "AfterDeath" or "AfterPowerApplied" or "AfterPowerRemoved"))
@@ -6493,6 +6503,28 @@ public class RunSimulator
             await PowerCmd.Apply<SlumberPower>(monster.Creature, 3m, monster.Creature, null);
         }
 
+        /// <summary>Harmony prefix: preserve Test Subject's growl effects while skipping room VFX/audio/animation.</summary>
+        public static bool TestSubjectBurningGrowlMovePrefix(MonsterModel __instance, IReadOnlyList<Creature> targets, ref Task __result)
+        {
+            __result = TestSubjectBurningGrowlMoveHeadless(__instance, targets);
+            return false;
+        }
+
+        private static async Task TestSubjectBurningGrowlMoveHeadless(MonsterModel monster, IReadOnlyList<Creature> targets)
+        {
+            var burnCount = GetNonPublicIntProperty(monster, "BurningGrowlBurnCount", 3);
+            var strengthGain = GetNonPublicIntProperty(monster, "BurningGrowlStrengthGain", 2);
+
+            await CardPileCmd.AddToCombatAndPreview<Burn>(targets, PileType.Discard, burnCount, addedByPlayer: false);
+            await PowerCmd.Apply<StrengthPower>(monster.Creature, strengthGain, monster.Creature, null);
+        }
+
+        private static int GetNonPublicIntProperty(object obj, string name, int fallback)
+        {
+            var prop = obj.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.NonPublic);
+            return prop?.GetValue(obj) is int value ? value : fallback;
+        }
+
         /// <summary>Harmony prefix: disable card pile animations in headless while preserving pile logic.</summary>
         public static void ForceSkipVisualsPrefix(ref bool skipVisuals)
         {
@@ -6611,8 +6643,6 @@ public class RunSimulator
                 || IsSfxCmdPlay(method)
                 || IsRunMusicUpdateParameter(method)
                 || IsCreatureNodeSetDefaultScale(method)
-                || IsNodeAddChildSafely(method)
-                || IsTestSubjectBurnVfxCreate(method)
                 || IsReattachFadeOut(method)
                 || IsTestSubjectColorPresentation(method)
                 || IsKaiserCrabBackgroundPresentation(method);
@@ -6682,18 +6712,6 @@ public class RunSimulator
         {
             return method.Name == "SetDefaultScaleTo"
                 && (method.DeclaringType?.FullName ?? "").Contains("MegaCrit.Sts2.Core.Nodes.Combat.NCreature", StringComparison.Ordinal);
-        }
-
-        private static bool IsNodeAddChildSafely(MethodInfo method)
-        {
-            return method.Name == "AddChildSafely"
-                && method.GetParameters().Any(param => param.ParameterType.FullName == "Godot.Node");
-        }
-
-        private static bool IsTestSubjectBurnVfxCreate(MethodInfo method)
-        {
-            return method.Name == "Create"
-                && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Nodes.Vfx.NTestSubjectBurnVfx";
         }
 
         private static bool IsReattachFadeOut(MethodInfo method)

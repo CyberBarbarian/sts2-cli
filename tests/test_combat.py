@@ -918,7 +918,7 @@ class TestCombatEdgeCases:
         assert "NullReferenceException" not in result.stderr
         assert "SlumberingBeetle.AfterAddedToRoom" not in result.stderr
 
-    def test_test_subject_respawn_color_presentation_does_not_log_headless_exception(self):
+    def test_test_subject_respawn_and_burning_growl_presentation_do_not_log_headless_exception(self):
         session = HeadlessSession()
         stderr = ""
         try:
@@ -946,9 +946,14 @@ class TestCombatEdgeCases:
             state = session.send({"cmd": "enter_room", "type": "combat", "encounter": "TEST_SUBJECT_BOSS"})
 
             reached_respawn = False
-            for _ in range(100):
-                if any(enemy.get("max_hp", 0) >= 300 for enemy in state.get("enemies", [])):
+            resolved_burning_growl = False
+            for _ in range(200):
+                enemies = state.get("enemies", [])
+                if any(enemy.get("max_hp", 0) >= 300 for enemy in enemies):
                     reached_respawn = True
+                if enemies and enemies[0].get("move_id") == "BURNING_GROWL_MOVE":
+                    state = session.send({"cmd": "action", "action": "end_turn"})
+                    resolved_burning_growl = True
                     break
 
                 if state.get("decision") != "combat_play":
@@ -979,6 +984,8 @@ class TestCombatEdgeCases:
             stderr = session.close()
 
         assert reached_respawn
+        assert resolved_burning_growl
         assert "MissingMethodException" not in stderr
+        assert "NullReferenceException" not in stderr
         assert "SetSelfModulate" not in stderr
         assert "TestSubject.SetColor" not in stderr
