@@ -1866,7 +1866,7 @@ public class RunSimulator
                         _eventOptionChosen = true;
                         _lastEventOptionCount = options.Count;
                         YieldPatches.ActiveCrystalSphereMinigame = null;
-                        YieldPatches.SuppressYield = true;
+                        YieldPatches.SuppressYield = previousSuppressYield;
                         var task = Task.Run(() => options[optionIndex].Chosen());
                         _pendingEventOptionTask = task;
                         for (int i = 0; i < 100; i++)
@@ -5679,6 +5679,7 @@ public class RunSimulator
         PatchDecimillipedePresentation();
         PatchKaiserCrabPresentation();
         PatchCrystalSpherePresentation();
+        PatchTrialPresentation();
 
         // Initialize localization system (needed for events, cards, etc.)
         InitLocManager();
@@ -6093,6 +6094,43 @@ public class RunSimulator
         }
     }
 
+    private static void PatchTrialPresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.trial.presentation");
+            var trialType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Events.Trial");
+            var acceptMethod = AccessTools.Method("MegaCrit.Sts2.Core.Models.Events.Trial:Accept");
+            var addVfxMethod = trialType?.GetMethod("AddVfxAnchoredToPortrait",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                types: new[] { typeof(string) },
+                modifiers: null);
+            var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.TrialAcceptHeadlessTranspiler),
+                BindingFlags.Static | BindingFlags.Public);
+            var skipPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+
+            var patched = 0;
+            if (acceptMethod != null && transpiler != null)
+            {
+                harmony.Patch(acceptMethod, transpiler: new HarmonyMethod(transpiler));
+                patched++;
+            }
+            if (addVfxMethod != null && skipPrefix != null)
+            {
+                harmony.Patch(addVfxMethod, new HarmonyMethod(skipPrefix));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched Trial headless presentation ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Trial presentation: {ex.Message}");
+        }
+    }
+
     private static bool PatchTalkPlayMethod(Harmony harmony, MethodInfo method, MethodInfo taskPrefix, MethodInfo voidPrefix)
     {
         if (typeof(Task).IsAssignableFrom(method.ReturnType))
@@ -6406,6 +6444,28 @@ public class RunSimulator
                         foreach (var replacementInstruction in replacement)
                             yield return replacementInstruction;
                     }
+                    continue;
+                }
+
+                yield return instruction;
+            }
+        }
+
+        public static IEnumerable<CodeInstruction> TrialAcceptHeadlessTranspiler(IEnumerable<CodeInstruction> instructions)
+        {
+            foreach (var instruction in instructions)
+            {
+                if (instruction.operand is MethodInfo method
+                    && method.Name == "IsMe"
+                    && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Context.LocalContext"
+                    && method.GetParameters().Length == 1)
+                {
+                    var pop = new CodeInstruction(OpCodes.Pop);
+                    var loadFalse = new CodeInstruction(OpCodes.Ldc_I4_0);
+                    pop.labels.AddRange(instruction.labels);
+                    pop.blocks.AddRange(instruction.blocks);
+                    yield return pop;
+                    yield return loadFalse;
                     continue;
                 }
 

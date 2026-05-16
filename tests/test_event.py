@@ -613,3 +613,16 @@ class TestTrial:
         assert "{" not in state["description"]
         assert "}" not in state["description"]
         assert "Entrant " in state["description"]
+
+    def test_accept_advances_from_initial_trial_page(self, game):
+        state = game.start(seed="trial-accept-advances")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="TRIAL")
+        accept = next(opt for opt in state["options"] if opt["title"] == "Accept")
+
+        state = game.act("choose_option", option_index=accept["index"])
+
+        assert state["decision"] == "event_choice"
+        assert state["event_name"] == "The Trial"
+        assert "DECIDER" not in state["description"]
+        assert any(opt["title"].startswith("DECIDE:") for opt in state["options"])
