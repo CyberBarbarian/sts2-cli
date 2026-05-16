@@ -39,6 +39,7 @@ class TestCardReward:
             assert isinstance(card["name"], str)
             assert "cost" in card
             assert "type" in card
+            assert "upgraded" in card
 
     def test_special_card_reward_exports_card_details(self, game):
         state = game.start(seed="hopper-special-reward-2")

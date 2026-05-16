@@ -424,6 +424,19 @@ class TestFutureOfPotions:
             assert "{" not in option["title"]
             assert "{" not in option["description"]
 
+    def test_upgraded_event_card_reward_exports_upgrade_flag(self, game):
+        state = game.start(seed="future-of-potions-upgraded-card")
+        game.skip_neow(state)
+        game.set_player(potions=["LIQUID_MEMORIES"])
+        state = game.enter_room("event", event="THE_FUTURE_OF_POTIONS")
+
+        rare_option = next(option for option in state["options"]
+                           if option["vars"]["Rarity"] == "Rare")
+        state = game.act("choose_option", option_index=rare_option["index"])
+
+        assert state["decision"] == "card_reward"
+        assert all(card["upgraded"] is True for card in state["cards"])
+
 
 class TestRelicTrader:
     def test_trade_options_export_owned_and_new_relic_details(self, game):
