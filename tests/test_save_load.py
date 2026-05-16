@@ -122,3 +122,29 @@ def test_load_pre_neow_save_preserves_neow_choice(tmp_path):
         assert state["decision"] == "event_choice"
     finally:
         game.close()
+
+
+def test_load_save_replaces_active_card_selector(tmp_path):
+    save_path = tmp_path / "selector_reset.save"
+
+    game = Game()
+    try:
+        state = game.start(seed="selector-reset-load")
+        state = game.skip_neow(state)
+        assert state["decision"] == "map_select"
+
+        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+        assert save_result["type"] == "save_result"
+        assert save_result["success"] is True
+
+        state = game.enter_room("event", event="AMALGAMATOR")
+        combine = next(o for o in state["options"] if o["title"] == "Combine Defends")
+        state = game.act("choose_option", option_index=combine["index"])
+        assert state["decision"] == "card_select"
+
+        state = game.send({"cmd": "load_save", "path": str(save_path)})
+
+        assert state.get("type") != "error"
+        assert state["decision"] == "map_select"
+    finally:
+        game.close()

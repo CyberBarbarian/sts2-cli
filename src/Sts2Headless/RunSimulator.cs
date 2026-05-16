@@ -322,10 +322,8 @@ public class RunSimulator
     {
         try
         {
+            PrepareForRunReplacement();
             _loc.Lang = lang;
-            _shopItemSnapshots.Clear();
-            YieldPatches.ActiveCrystalSphereMinigame = null;
-            _preCurrentRoomSaveJson = null;
             EnsureModelDbInitialized();
 
             var player = CreatePlayer(character);
@@ -592,9 +590,9 @@ public class RunSimulator
     {
         try
         {
+            PrepareForRunReplacement();
             _loc.Lang = lang;
             EnsureModelDbInitialized();
-            _preCurrentRoomSaveJson = null;
 
             Log("Loading save file...");
 
@@ -6282,6 +6280,21 @@ public class RunSimulator
             _rewardChoice = -1;
             _rewardWait?.Set();
         }
+
+        public void Reset()
+        {
+            _pendingTcs?.TrySetResult(Array.Empty<CardModel>());
+            PendingOptions = null;
+            PendingMinSelect = 0;
+            PendingMaxSelect = 0;
+            PendingPrompt = "";
+            _pendingTcs = null;
+
+            _rewardChoice = -1;
+            _rewardWait?.Set();
+            PendingRewardCards = null;
+            _rewardWait = null;
+        }
     }
 
     internal static class YieldPatches
@@ -6965,13 +6978,48 @@ public class RunSimulator
         {
             if (RunManager.Instance.IsInProgress)
                 RunManager.Instance.CleanUp(graceful: true);
-            _runState = null;
-            ResetHeadlessCommandState();
         }
         catch (Exception ex)
         {
             Log($"CleanUp exception: {ex.Message}");
         }
+        finally
+        {
+            _runState = null;
+            ResetTransientHeadlessState();
+            ResetHeadlessCommandState();
+        }
+    }
+
+    private void PrepareForRunReplacement()
+    {
+        if (_runState != null || RunManager.Instance.IsInProgress)
+        {
+            CleanUp();
+            return;
+        }
+
+        ResetTransientHeadlessState();
+        ResetHeadlessCommandState();
+    }
+
+    private void ResetTransientHeadlessState()
+    {
+        _eventOptionChosen = false;
+        _lastEventOptionCount = 0;
+        _pendingEventOptionTask = null;
+        _pendingShopPurchaseTask = null;
+        _pendingRewards = null;
+        _pendingCardReward = null;
+        _rewardsProcessed = false;
+        _goldBeforeCombat = 0;
+        _lastKnownHp = 0;
+        _shopItemSnapshots.Clear();
+        _preCurrentRoomSaveJson = null;
+        _pendingBundles = null;
+        _pendingBundleTcs = null;
+        _cardSelector.Reset();
+        YieldPatches.ActiveCrystalSphereMinigame = null;
     }
 
     internal static void ResetHeadlessCommandState()
