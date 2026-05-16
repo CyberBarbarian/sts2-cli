@@ -552,6 +552,19 @@ class TestSapphireSeed:
         assert "energy_icon.png" in cinder["after_upgrade"]["description"]
 
 
+class TestNonupeipe:
+    def test_relic_option_energy_icons_are_formatted(self, game):
+        state = game.start(seed="nonupeipe-antler-5")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="NONUPEIPE")
+
+        antler = next(o for o in state["options"] if o["title"] == "Blessed Antler")
+
+        assert "{Energy:energyIcons()}" not in antler["description"]
+        assert "energy_icon.png" in antler["description"]
+        assert "1 Energy" not in antler["description"]
+
+
 class TestWoodCarvings:
     def test_snake_enchantment_is_exported_on_deck_card(self, game):
         state = game.start(seed="wood-carvings-slither-export")

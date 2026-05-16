@@ -2988,6 +2988,19 @@ public class RunSimulator
                         descriptionFromEngine = true;
                     }
                 }
+                if (!descriptionFromEngine && opt.TextKey != null)
+                {
+                    var parts = opt.TextKey.Split('.');
+                    var optionId = parts.Length > 0 ? parts[^1] : opt.TextKey;
+                    var relicDescription = EngineLocStringText(
+                        new LocString("relics", optionId + ".description"),
+                        optVars);
+                    if (relicDescription != null)
+                    {
+                        optDesc = relicDescription;
+                        descriptionFromEngine = true;
+                    }
+                }
                 if (!titleFromEngine)
                     title = InterpolateDynamicVars(title, optVars) ?? title;
                 if (!descriptionFromEngine)
