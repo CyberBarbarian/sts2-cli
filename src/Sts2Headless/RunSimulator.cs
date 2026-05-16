@@ -4851,7 +4851,7 @@ public class RunSimulator
                 {
                     row["slow"] = slow;
                 }
-                if (targetRepeat > 1)
+                if (targetRepeat != 1)
                 {
                     row["repeat"] = targetRepeat;
                     row["total_damage"] = totalDamage;
@@ -4917,11 +4917,13 @@ public class RunSimulator
 
     private static int GetTargetAttackRepeat(CardModel card, Creature target, int baseRepeat)
     {
-        var repeat = Math.Max(1, baseRepeat);
+        var repeat = Math.Max(0, baseRepeat);
         var staticHitCount = GetStaticAttackHitCount(card);
         if (staticHitCount.HasValue && repeat == 1)
             repeat = staticHitCount.Value;
-        if (card is MegaCrit.Sts2.Core.Models.Cards.Dismantle && target.HasPower<VulnerablePower>())
+        if (repeat > 0
+            && card is MegaCrit.Sts2.Core.Models.Cards.Dismantle
+            && target.HasPower<VulnerablePower>())
             repeat *= 2;
         return repeat;
     }

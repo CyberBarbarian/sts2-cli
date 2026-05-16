@@ -212,6 +212,31 @@ class TestDynamicCardStats:
         )
         assert hp_before - hp_after == target["total_damage"]
 
+    def test_x_cost_aoe_exports_zero_repeat_damage(self, game):
+        state = game.start(seed="whirlwind-zero-repeat-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "WHIRLWIND",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.enter_room("combat", encounter="SLIMES_WEAK")
+
+        while state["energy"] > 0:
+            defend = next(c for c in state["hand"] if c["name"] == "Defend")
+            state = game.act("play_card", card_index=defend["index"])
+
+        whirlwind = next(c for c in state["hand"] if c["name"] == "Whirlwind")
+        assert whirlwind["x_value"] == 0
+        assert whirlwind["stats"]["repeat"] == 0
+        target = whirlwind["stats"]["damage_by_target"][0]
+        assert target["repeat"] == 0
+        assert target["total_damage"] == 0
+        assert target["unblocked_total_damage"] == 0
+        assert "unblocked_damage" not in target
+
     def test_fixed_multi_hit_attack_exports_repeat_damage(self, game):
         state = game.start(seed="twin-strike-repeat-stats")
         game.skip_neow(state)
