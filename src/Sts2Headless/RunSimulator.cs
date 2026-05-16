@@ -5677,6 +5677,7 @@ public class RunSimulator
         PatchSoulNexusPresentation();
         PatchQueenPresentation();
         PatchDecimillipedePresentation();
+        PatchSlumberingBeetlePresentation();
         PatchKaiserCrabPresentation();
         PatchCrystalSpherePresentation();
         PatchTrialPresentation();
@@ -6001,6 +6002,8 @@ public class RunSimulator
             var harmony = new Harmony("sts2headless.decimillipede.presentation");
             var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
                 BindingFlags.Static | BindingFlags.Public);
+            var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.StripHeadlessPresentationCalls),
+                BindingFlags.Static | BindingFlags.Public);
             var segmentType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment");
             if (prefix == null || segmentType == null)
                 return;
@@ -6013,12 +6016,45 @@ public class RunSimulator
                 harmony.Patch(method, new HarmonyMethod(prefix));
                 patched++;
             }
+            var reattachPowerType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Powers.ReattachPower");
+            if (reattachPowerType != null && transpiler != null)
+            {
+                foreach (var method in reattachPowerType
+                    .GetNestedTypes(BindingFlags.NonPublic)
+                    .Where(type => type.Name.Contains("AfterDeath", StringComparison.Ordinal))
+                    .SelectMany(GetDeclaredMethods)
+                    .Where(method => method.Name == "MoveNext" && method.GetMethodBody() != null))
+                {
+                    harmony.Patch(method, transpiler: new HarmonyMethod(transpiler));
+                    patched++;
+                }
+            }
 
             Console.Error.WriteLine($"[INFO] Patched Decimillipede presentation texture changes ({patched} methods)");
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch Decimillipede presentation texture changes: {ex.Message}");
+        }
+    }
+
+    private static void PatchSlumberingBeetlePresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.slumberingbeetle.presentation");
+            var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SlumberingBeetleAfterAddedToRoomPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var afterAdded = AccessTools.Method("MegaCrit.Sts2.Core.Models.Monsters.SlumberingBeetle:AfterAddedToRoom");
+            if (prefix == null || afterAdded == null)
+                return;
+
+            harmony.Patch(afterAdded, new HarmonyMethod(prefix));
+            Console.Error.WriteLine("[INFO] Patched Slumbering Beetle sleep presentation");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Slumbering Beetle sleep presentation: {ex.Message}");
         }
     }
 
@@ -6400,6 +6436,24 @@ public class RunSimulator
             return false;
         }
 
+        /// <summary>Harmony prefix: preserve Slumbering Beetle setup powers while skipping sleep audio/VFX nodes.</summary>
+        public static bool SlumberingBeetleAfterAddedToRoomPrefix(MonsterModel __instance, ref Task __result)
+        {
+            __result = SlumberingBeetleAfterAddedToRoomHeadless(__instance);
+            return false;
+        }
+
+        private static async Task SlumberingBeetleAfterAddedToRoomHeadless(MonsterModel monster)
+        {
+            var platingAmount = 15m;
+            var prop = monster.GetType().GetProperty("PlatingAmount", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (prop?.GetValue(monster) is int amount)
+                platingAmount = amount;
+
+            await PowerCmd.Apply<PlatingPower>(monster.Creature, platingAmount, monster.Creature, null);
+            await PowerCmd.Apply<SlumberPower>(monster.Creature, 3m, monster.Creature, null);
+        }
+
         /// <summary>Harmony prefix: disable card pile animations in headless while preserving pile logic.</summary>
         public static void ForceSkipVisualsPrefix(ref bool skipVisuals)
         {
@@ -6514,6 +6568,7 @@ public class RunSimulator
                 || IsNGameHitStop(method)
                 || IsNGameScreenShakeTrauma(method)
                 || IsFullscreenHealVfxPlay(method)
+                || IsReattachFadeOut(method)
                 || IsKaiserCrabBackgroundPresentation(method);
         }
 
@@ -6557,6 +6612,12 @@ public class RunSimulator
         {
             return method.Name == "Play"
                 && (method.DeclaringType?.FullName ?? "").Contains("PlayerFullscreenHealVfx", StringComparison.Ordinal);
+        }
+
+        private static bool IsReattachFadeOut(MethodInfo method)
+        {
+            return method.Name == "DoFadeOutOnAllSegments"
+                && method.DeclaringType?.FullName == "MegaCrit.Sts2.Core.Models.Powers.ReattachPower";
         }
 
         private static bool IsKaiserCrabBackgroundPresentation(MethodInfo method)

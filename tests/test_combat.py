@@ -1,8 +1,10 @@
 """Tests for combat scenarios."""
 import json
+import os
+import subprocess
 
 import pytest
-from conftest import Game
+from conftest import DOTNET, HEADLESS_DLL, LOCAL_DOTNET_DIR, STS2_CLI_ROOT, Game
 
 
 def card_energy_cost(card, default=99):
@@ -15,6 +17,29 @@ def card_energy_cost(card, default=99):
             return x_value
         return 0
     return default
+
+
+def run_headless_jsonl(commands, timeout=90):
+    env = os.environ.copy()
+    env["DOTNET_ROOT"] = str(LOCAL_DOTNET_DIR)
+    env["PATH"] = str(LOCAL_DOTNET_DIR) + os.pathsep + env.get("PATH", "")
+    env["STS2_LIB"] = str(STS2_CLI_ROOT / "lib")
+    env["STS2_GAME_DIR"] = str(STS2_CLI_ROOT / "lib")
+    payload = "".join(json.dumps(command) + "\n" for command in commands)
+    result = subprocess.run(
+        [DOTNET, str(HEADLESS_DLL)],
+        input=payload,
+        cwd=STS2_CLI_ROOT,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+        check=False,
+    )
+    outputs = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+    return result, outputs
 
 
 class TestCombatStructure:
@@ -742,3 +767,39 @@ class TestCombatEdgeCases:
 
         assert state["decision"] == "combat_reward"
         assert state.get("rewards")
+
+    def test_decimillipede_reattach_vfx_does_not_log_headless_exception(self):
+        result, outputs = run_headless_jsonl([
+            {"cmd": "start_run", "character": "Ironclad", "seed": "decimillipede-stderr", "lang": "en"},
+            {
+                "cmd": "set_player",
+                "hp": 9999,
+                "max_hp": 9999,
+                "deck": ["BLOODLETTING", "BLOODLETTING", "BLOODLETTING", "BLOODLETTING", "WHIRLWIND"],
+            },
+            {"cmd": "enter_room", "type": "combat", "encounter": "DECIMILLIPEDE_ELITE"},
+            {"cmd": "action", "action": "play_card", "args": {"card_index": 0}},
+            {"cmd": "action", "action": "play_card", "args": {"card_index": 0}},
+            {"cmd": "action", "action": "play_card", "args": {"card_index": 0}},
+            {"cmd": "action", "action": "play_card", "args": {"card_index": 0}},
+            {"cmd": "action", "action": "play_card", "args": {"card_index": 0}},
+            {"cmd": "quit"},
+        ])
+
+        assert result.returncode == 0
+        assert outputs[-2]["decision"] == "combat_reward"
+        assert "MissingMethodException" not in result.stderr
+        assert "DoFadeOutOnAllSegments" not in result.stderr
+
+    def test_slumbering_beetle_sleep_setup_does_not_log_headless_exception(self):
+        result, outputs = run_headless_jsonl([
+            {"cmd": "start_run", "character": "Ironclad", "seed": "slumbering-beetle-stderr", "lang": "en"},
+            {"cmd": "set_player", "hp": 9999, "max_hp": 9999},
+            {"cmd": "enter_room", "type": "combat", "encounter": "SLUMBERING_BEETLE_NORMAL"},
+            {"cmd": "quit"},
+        ])
+
+        assert result.returncode == 0
+        assert outputs[-2]["type"] == "decision"
+        assert "NullReferenceException" not in result.stderr
+        assert "SlumberingBeetle.AfterAddedToRoom" not in result.stderr
