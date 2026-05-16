@@ -372,7 +372,7 @@ class TestDynamicCardStats:
     def test_card_descriptions_resolve_conditional_upgrade_formatters(self, game):
         state = game.start(seed="card-description-ifupgraded")
         state = game.skip_neow(state)
-        state = game.set_player(deck=["CASCADE", "PRIMAL_FORCE", "CRUELTY"])
+        state = game.set_player(deck=["CASCADE", "PRIMAL_FORCE", "CRUELTY", "CINDER"])
 
         deck = {card["name"]: card for card in state["player"]["deck"]}
         assert deck["Cascade"]["description"] == "Play the top X cards of your Draw Pile."
@@ -381,6 +381,8 @@ class TestDynamicCardStats:
         assert deck["Primal Force"]["after_upgrade"]["description"] == "Transform all Attacks in your Hand into Giant Rock+."
         assert deck["Cruelty"]["description"] == "Vulnerable enemies take an additional 25% damage."
         assert deck["Cruelty"]["after_upgrade"]["description"] == "Vulnerable enemies take an additional 50% damage."
+        assert deck["Cinder"]["description"] == "Deal 18 damage.\nExhaust 1 card at random."
+        assert deck["Cinder"]["after_upgrade"]["description"] == "Deal 24 damage.\nExhaust 1 card at random."
 
     def test_block_stats_include_player_frail(self, game):
         state = game.start(seed="codex-frail-block")
@@ -471,7 +473,7 @@ class TestDynamicCardStats:
         assert target_stats.get("repeat", 1) == 1
         assert target_stats["unblocked_damage"] == target_stats["damage"]
         assert "{Cards:" not in spite["description"]
-        assert "2 cards" in spite["description"]
+        assert "hits 2 times" in spite["description"]
 
     def test_spite_exports_repeat_after_hp_loss(self, game):
         state = game.start(seed="spite-repeat-after-hp-loss")
@@ -491,4 +493,4 @@ class TestDynamicCardStats:
 
         assert spite["stats"]["repeat"] == 2
         assert "{Cards:" not in spite["description"]
-        assert "2 cards" in spite["description"]
+        assert "hits 2 times" in spite["description"]
