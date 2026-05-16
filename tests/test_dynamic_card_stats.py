@@ -448,8 +448,13 @@ class TestDynamicCardStats:
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
 
         spite = next(c for c in state["hand"] if c["name"] == "Spite")
+        target_stats = spite["stats"]["damage_by_target"][0]
 
         assert spite["stats"]["repeat"] == 1
+        assert target_stats.get("repeat", 1) == 1
+        assert target_stats["unblocked_damage"] == target_stats["damage"]
+        assert "{Cards:" not in spite["description"]
+        assert "2 cards" in spite["description"]
 
     def test_spite_exports_repeat_after_hp_loss(self, game):
         state = game.start(seed="spite-repeat-after-hp-loss")
@@ -468,3 +473,5 @@ class TestDynamicCardStats:
         spite = next(c for c in state["hand"] if c["name"] == "Spite")
 
         assert spite["stats"]["repeat"] == 2
+        assert "{Cards:" not in spite["description"]
+        assert "2 cards" in spite["description"]

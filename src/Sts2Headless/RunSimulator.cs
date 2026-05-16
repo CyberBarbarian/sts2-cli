@@ -3517,11 +3517,12 @@ public class RunSimulator
     {
         var engineDescription = EngineCardDescription(card, includeCombatText);
         if (!string.IsNullOrWhiteSpace(engineDescription))
-            return engineDescription;
+            return ResolveEngineCardDescriptionFormatters(engineDescription, card);
 
         var raw = _loc.Bilingual("cards", card.Id.Entry + ".description");
         var vars = ExportDynamicVars(card);
-        return InterpolateDynamicVars(raw, vars) ?? raw;
+        var formatted = InterpolateDynamicVars(raw, vars) ?? raw;
+        return ResolveEngineCardDescriptionFormatters(CleanEngineText(formatted) ?? formatted, card);
     }
 
     private static string? EngineCardDescription(CardModel card, bool includeCombatText)
@@ -3538,6 +3539,104 @@ public class RunSimulator
         {
             return null;
         }
+    }
+
+    private static string ResolveEngineCardDescriptionFormatters(string text, CardModel card)
+    {
+        if (!ContainsSmartFormatToken(text))
+            return text;
+
+        var vars = ExportCardDescriptionVars(card);
+        if (vars == null || vars.Count == 0)
+            return text;
+
+        AddSingleMissingDisplayAlias(text, vars, CardRawDescriptionTokenNames(card));
+        return InterpolateDynamicVars(text, vars) ?? text;
+    }
+
+    private static Dictionary<string, object?>? ExportCardDescriptionVars(CardModel card)
+    {
+        var vars = new Dictionary<string, object?>();
+        MergeVars(vars, ExportLocStringVariables(card.Description));
+        MergeVars(vars, ExportDynamicVars(card));
+        return vars.Count > 0 ? vars : null;
+    }
+
+    private static void MergeVars(
+        Dictionary<string, object?> destination,
+        Dictionary<string, object?>? source)
+    {
+        if (source == null)
+            return;
+
+        foreach (var (key, value) in source)
+            destination[key] = value;
+    }
+
+    private static bool ContainsSmartFormatToken(string text)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            text,
+            @"\{[A-Za-z][A-Za-z0-9_]*(?:[:}]|$)");
+    }
+
+    private static HashSet<string> CardRawDescriptionTokenNames(CardModel card)
+    {
+        try
+        {
+            return FormatTokenNames(card.Description.GetRawText());
+        }
+        catch
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+    }
+
+    private static HashSet<string> FormatTokenNames(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return new HashSet<string>(StringComparer.Ordinal);
+
+        return System.Text.RegularExpressions.Regex.Matches(
+                text,
+                @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)(?=[:}])")
+            .Select(match => match.Groups["key"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private static void AddSingleMissingDisplayAlias(
+        string text,
+        Dictionary<string, object?> vars,
+        HashSet<string> sourceTokenNames)
+    {
+        var usedNames = FormatTokenNames(text);
+
+        var missingNames = usedNames
+            .Where(name => !vars.ContainsKey(name))
+            .ToList();
+        if (missingNames.Count != 1)
+            return;
+
+        var referencedNames = new HashSet<string>(sourceTokenNames, StringComparer.Ordinal);
+        referencedNames.UnionWith(usedNames);
+
+        var unusedNumericVars = vars
+            .Where(pair => !referencedNames.Contains(pair.Key) && IsNumericDisplayValue(pair.Value))
+            .ToList();
+        if (unusedNumericVars.Count != 1)
+            return;
+
+        vars[missingNames[0]] = unusedNumericVars[0].Value;
+    }
+
+    private static bool IsNumericDisplayValue(object? value)
+    {
+        return value is byte or sbyte
+            or short or ushort
+            or int or uint
+            or long or ulong
+            or float or double
+            or decimal;
     }
 
     private static string? InterpolateDynamicVars(string? text, Dictionary<string, object?>? vars)
@@ -4576,6 +4675,8 @@ public class RunSimulator
                 var previewRepeat = previewStats != null && previewStats.TryGetValue("repeat", out var repeatValue)
                     ? repeatValue
                     : repeat;
+                if (HasCardSpecificOverride(stats, card, "repeat"))
+                    previewRepeat = repeat;
                 var targetRepeat = GetTargetAttackRepeat(card, enemy, previewRepeat);
                 var totalDamage = targetDamage * targetRepeat;
                 var block = Math.Max(0, enemy.Block);
