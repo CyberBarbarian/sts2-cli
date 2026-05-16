@@ -3572,6 +3572,18 @@ public class RunSimulator
     {
         try
         {
+            if (includeCombatText)
+            {
+                try
+                {
+                    card.DynamicVars.ClearPreview();
+                    card.UpdateDynamicVarPreview(CardPreviewMode.Normal, target: null, card.DynamicVars);
+                }
+                catch
+                {
+                    // Preview text is best-effort; GetDescriptionForPile still provides the engine fallback.
+                }
+            }
             var pileType = card.Pile?.Type ?? (includeCombatText ? PileType.Hand : PileType.None);
             var text = card.GetDescriptionForPile(
                 pileType,

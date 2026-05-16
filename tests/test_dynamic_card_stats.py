@@ -453,6 +453,7 @@ class TestDynamicCardStats:
         assert state["player"]["block"] == 16
         body_slam = next(c for c in state["hand"] if c["name"] == "Body Slam")
         assert body_slam["stats"]["calculateddamage"] == 16
+        assert "(Deals 16 damage)" in body_slam["description"]
 
     def test_spite_exports_single_hit_before_hp_loss(self, game):
         state = game.start(seed="spite-repeat-no-hp-loss")
