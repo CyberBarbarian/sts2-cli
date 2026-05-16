@@ -2437,12 +2437,13 @@ public class RunSimulator
                 catch { }
 
                 // Enemy powers
+                var enemyName = MonsterDisplayName(e.Monster, e);
                 var ePowers = e.Powers?.Select(pw =>
                 {
                     return new Dictionary<string, object?>
                     {
-                        ["name"] = _loc.Power(pw.Id.Entry),
-                        ["description"] = PowerDescription(pw.Id.Entry, pw, pw.Amount),
+                        ["name"] = PowerName(pw),
+                        ["description"] = PowerDescription(pw),
                         ["amount"] = pw.Amount,
                     };
                 }).ToList();
@@ -2450,7 +2451,7 @@ public class RunSimulator
                 var enemyInfo = new Dictionary<string, object?>
                 {
                     ["index"] = i,
-                    ["name"] = MonsterDisplayName(e.Monster, e),
+                    ["name"] = enemyName,
                     ["hp"] = e.CurrentHp,
                     ["max_hp"] = e.MaxHp,
                     ["block"] = e.Block,
@@ -2475,8 +2476,8 @@ public class RunSimulator
         {
             return new Dictionary<string, object?>
             {
-                ["name"] = _loc.Power(pw.Id.Entry),
-                ["description"] = PowerDescription(pw.Id.Entry, pw, pw.Amount),
+                ["name"] = PowerName(pw),
+                ["description"] = PowerDescription(pw),
                 ["amount"] = pw.Amount,
             };
         }).ToList();
@@ -2871,12 +2872,13 @@ public class RunSimulator
             .Select((opt, i) =>
             {
                 // Try to resolve title via loc tables
-                string? title = null;
+                string? title = ResolveLocString(opt.Title);
+                var titleFromEngine = title != null;
                 if (opt.Title != null)
                 {
                     var t = _loc.Bilingual(opt.Title.LocTable, opt.Title.LocEntryKey);
                     // Check if we actually found a translation (not just the key echoed back)
-                    if (t != opt.Title.LocEntryKey)
+                    if (title == null && t != opt.Title.LocEntryKey)
                         title = t;
                 }
                 // Fallback: try to extract option ID from the key and look up as relic/card/potion
@@ -2901,11 +2903,12 @@ public class RunSimulator
                 title ??= $"option_{i}";
 
                 // Description: try loc table first
-                string? optDesc = null;
+                string? optDesc = ResolveLocString(opt.Description);
+                var descriptionFromEngine = optDesc != null;
                 if (opt.Description != null && !string.IsNullOrEmpty(opt.Description.LocEntryKey))
                 {
                     var d = _loc.Bilingual(opt.Description.LocTable, opt.Description.LocEntryKey);
-                    if (d != opt.Description.LocEntryKey)
+                    if (optDesc == null && d != opt.Description.LocEntryKey)
                         optDesc = d;
                 }
                 // Fallback: try relic/card description
@@ -2938,9 +2941,30 @@ public class RunSimulator
                     }
                     catch { }
                 }
+
+                if (opt.Title != null)
+                {
+                    var formattedTitle = ResolveLocString(opt.Title, optVars);
+                    if (formattedTitle != null)
+                    {
+                        title = formattedTitle;
+                        titleFromEngine = true;
+                    }
+                }
+                if (opt.Description != null)
+                {
+                    var formattedDescription = ResolveLocString(opt.Description, optVars);
+                    if (formattedDescription != null)
+                    {
+                        optDesc = formattedDescription;
+                        descriptionFromEngine = true;
+                    }
+                }
                 optDesc = NormalizeEventOptionDescription(eventEntry, opt.TextKey, optDesc, optVars);
-                title = InterpolateDynamicVars(title, optVars) ?? title;
-                optDesc = InterpolateDynamicVars(optDesc, optVars);
+                if (!titleFromEngine)
+                    title = InterpolateDynamicVars(title, optVars) ?? title;
+                if (!descriptionFromEngine)
+                    optDesc = InterpolateDynamicVars(optDesc, optVars);
 
                 var exportedOption = new Dictionary<string, object?>
                 {
@@ -2971,7 +2995,8 @@ public class RunSimulator
         string? eventDesc = null;
         if (localEvent.Description != null)
         {
-            var d = _loc.Bilingual(localEvent.Description.LocTable, localEvent.Description.LocEntryKey);
+            var d = ResolveLocString(localEvent.Description)
+                    ?? _loc.Bilingual(localEvent.Description.LocTable, localEvent.Description.LocEntryKey);
             if (d != localEvent.Description.LocEntryKey)
                 eventDesc = d;
         }
@@ -3063,10 +3088,10 @@ public class RunSimulator
 
         var staticTip = _loc.Bilingual("static_hover_tips", text);
         if (staticTip != text)
-            return NormalizeInlineResourceIcons(staticTip);
+            return CleanEngineText(staticTip);
 
         var resolved = _loc.BilingualFromKey(text);
-        return NormalizeInlineResourceIcons(string.IsNullOrWhiteSpace(resolved) ? text : resolved);
+        return CleanEngineText(string.IsNullOrWhiteSpace(resolved) ? text : resolved);
     }
 
     private Dictionary<string, object?>? BuildRelicTradePreview(
@@ -3547,138 +3572,35 @@ public class RunSimulator
         Dictionary<string, object?>? stats = null,
         bool includeCombatText = false)
     {
+        var engineDescription = EngineCardDescription(card, includeCombatText);
+        if (!string.IsNullOrWhiteSpace(engineDescription))
+            return engineDescription;
+
         var raw = _loc.Bilingual("cards", card.Id.Entry + ".description");
-        return ResolveCardDescription(raw, card, stats, includeCombatText) ?? raw;
+        var vars = ExportDynamicVars(card);
+        return InterpolateDynamicVars(raw, vars) ?? raw;
     }
 
-    private static string? ResolveCardDescription(
-        string? text,
-        CardModel card,
-        Dictionary<string, object?>? stats,
-        bool includeCombatText)
+    private static string? EngineCardDescription(CardModel card, bool includeCombatText)
     {
-        if (string.IsNullOrEmpty(text))
-            return text;
-
-        var vars = ExportDynamicVars(card) ?? new Dictionary<string, object?>();
-        if (stats != null)
+        try
         {
-            foreach (var (key, value) in stats)
-            {
-                if (value == null)
-                    continue;
-                vars.TryAdd(key, value);
-            }
+            var pileType = card.Pile?.Type ?? (includeCombatText ? PileType.Hand : PileType.None);
+            var text = card.GetDescriptionForPile(
+                pileType,
+                includeCombatText ? card.CurrentTarget : null);
+            return CleanEngineText(text);
         }
-
-        text = ReplaceFormatterBlocks(text, "IfUpgraded:show:", body =>
-            ResolveConditionalFormatterChoice(body, card.IsUpgraded));
-        text = ReplaceFormatterBlocks(text, "InCombat:", body =>
-            ResolveConditionalFormatterChoice(body, includeCombatText));
-
-        text = InterpolateDynamicVars(text, vars.Count > 0 ? vars : null);
-        return text == null ? null : NormalizeInlineResourceIcons(text);
-    }
-
-    private static string ReplaceFormatterBlocks(
-        string text,
-        string formatterPrefix,
-        Func<string, string> resolve)
-    {
-        var tokenPrefix = "{" + formatterPrefix;
-        var guard = 0;
-        while (guard++ < 100)
+        catch
         {
-            var start = text.IndexOf(tokenPrefix, StringComparison.Ordinal);
-            if (start < 0)
-                return text;
-
-            var end = FindMatchingBrace(text, start);
-            if (end < 0)
-                return text;
-
-            var bodyStart = start + tokenPrefix.Length;
-            var body = text.Substring(bodyStart, end - bodyStart);
-            var replacement = resolve(body);
-            text = text[..start] + replacement + text[(end + 1)..];
+            return null;
         }
-
-        return text;
-    }
-
-    private static int FindMatchingBrace(string text, int start)
-    {
-        var depth = 0;
-        for (var i = start; i < text.Length; i++)
-        {
-            if (text[i] == '{')
-                depth++;
-            else if (text[i] == '}')
-            {
-                depth--;
-                if (depth == 0)
-                    return i;
-            }
-        }
-        return -1;
-    }
-
-    private static string ResolveConditionalFormatterChoice(string body, bool condition)
-    {
-        var separator = FindTopLevelSeparator(body, '|');
-        if (separator >= 0)
-            return condition ? body[..separator] : body[(separator + 1)..];
-
-        return condition ? body : "";
-    }
-
-    private static int FindTopLevelSeparator(string text, char separator)
-    {
-        var depth = 0;
-        for (var i = 0; i < text.Length; i++)
-        {
-            if (text[i] == '{')
-                depth++;
-            else if (text[i] == '}')
-                depth--;
-            else if (text[i] == separator && depth == 0)
-                return i;
-        }
-        return -1;
     }
 
     private static string? InterpolateDynamicVars(string? text, Dictionary<string, object?>? vars)
     {
         if (string.IsNullOrEmpty(text))
             return text;
-
-        text = System.Text.RegularExpressions.Regex.Replace(
-            text,
-            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:energyIcons\((?<arg>[^)]*)\)\}",
-            match =>
-            {
-                var key = match.Groups["key"].Value;
-                object? value = null;
-                if (vars != null)
-                    vars.TryGetValue(key, out value);
-
-                value ??= ParseEnergyIconArgument(match.Groups["arg"].Value);
-                return value == null ? match.Value : FormatEnergyText(value);
-            });
-
-        text = System.Text.RegularExpressions.Regex.Replace(
-            text,
-            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:starIcons\((?<arg>[^)]*)\)\}",
-            match =>
-            {
-                var key = match.Groups["key"].Value;
-                object? value = null;
-                if (vars != null)
-                    vars.TryGetValue(key, out value);
-
-                value ??= ParseEnergyIconArgument(match.Groups["arg"].Value);
-                return value == null ? match.Value : FormatCountText(value, "Star");
-            });
 
         if (vars == null || vars.Count == 0)
             return text;
@@ -3717,57 +3639,6 @@ public class RunSimulator
         }
 
         return text;
-    }
-
-    private static int? ParseEnergyIconArgument(string arg)
-    {
-        if (string.IsNullOrWhiteSpace(arg))
-            return null;
-
-        var match = System.Text.RegularExpressions.Regex.Match(arg, @"-?\d+");
-        if (!match.Success)
-            return null;
-
-        return int.TryParse(match.Value, out var value) ? value : null;
-    }
-
-    private static string FormatEnergyText(object value)
-    {
-        try
-        {
-            return $"{Convert.ToInt32(value)} Energy";
-        }
-        catch
-        {
-            return $"{value} Energy";
-        }
-    }
-
-    private static string FormatCountText(object value, string singular)
-    {
-        try
-        {
-            var count = Convert.ToInt32(value);
-            return $"{count} {(count == 1 ? singular : singular + "s")}";
-        }
-        catch
-        {
-            return $"{value} {singular}s";
-        }
-    }
-
-    private static string NormalizeInlineResourceIcons(string text)
-    {
-        return System.Text.RegularExpressions.Regex.Replace(
-            text,
-            @"(?:res://images/packed/sprite_fonts/[A-Za-z0-9_]*energy_icon\.png\s*)+",
-            match =>
-            {
-                var count = System.Text.RegularExpressions.Regex.Matches(
-                    match.Value,
-                    @"res://images/packed/sprite_fonts/[A-Za-z0-9_]*energy_icon\.png").Count;
-                return FormatEnergyText(Math.Max(1, count));
-            });
     }
 
     private static bool IsSingularValue(object value)
@@ -3822,41 +3693,63 @@ public class RunSimulator
         return _loc.Monster(monsterKey);
     }
 
-    private string PowerDescription(string entry, object power, int amount)
+    private string PowerName(PowerModel power)
     {
-        var vars = PowerDescriptionVars(entry, power, amount);
-        return InterpolateDynamicVars(_loc.PowerDescription(entry), vars) ?? _loc.PowerDescription(entry);
+        var entry = power.Id.Entry;
+        return PowerHoverTipTitle(power)
+               ?? EngineLocStringText(power.Title)
+               ?? _loc.Power(entry);
     }
 
-    private static Dictionary<string, object?> PowerDescriptionVars(string entry, object power, int amount)
+    private string PowerDescription(PowerModel power)
     {
-        var vars = new Dictionary<string, object?>();
+        var entry = power.Id.Entry;
+        var description = PowerHoverTipDescription(power)
+                          ?? EngineLocStringText(power.HasSmartDescription
+                              ? power.SmartDescription
+                              : power.Description);
+        if (!string.IsNullOrWhiteSpace(description))
+            return description;
 
-        if (entry.EndsWith("_POWER", StringComparison.Ordinal))
+        var raw = _loc.PowerDescription(entry);
+        var vars = ExportDynamicVars(power);
+        return InterpolateDynamicVars(raw, vars) ?? raw;
+    }
+
+    private static string? PowerHoverTipTitle(PowerModel power)
+    {
+        try
         {
-            var cardEntry = entry[..^"_POWER".Length];
-            try
+            foreach (var tip in power.HoverTips)
             {
-                var card = ModelDb.GetById<CardModel>(new ModelId("CARD", cardEntry));
-                var cardVars = ExportDynamicVars(card);
-                if (cardVars != null)
-                {
-                    foreach (var (key, value) in cardVars)
-                        vars[key] = value;
-                }
+                var title = CleanResolvedEngineText(TryGetMember(tip, "Title") as string);
+                if (!string.IsNullOrWhiteSpace(title))
+                    return title;
             }
-            catch { }
+            return CleanResolvedEngineText(power.DumbHoverTip.Title);
         }
-
-        var powerVars = ExportDynamicVars(power);
-        if (powerVars != null)
+        catch
         {
-            foreach (var (key, value) in powerVars)
-                vars[key] = value;
+            return null;
         }
+    }
 
-        vars["Amount"] = amount;
-        return vars;
+    private static string? PowerHoverTipDescription(PowerModel power)
+    {
+        try
+        {
+            foreach (var tip in power.HoverTips)
+            {
+                var description = CleanResolvedEngineText(TryGetMember(tip, "Description") as string);
+                if (!string.IsNullOrWhiteSpace(description))
+                    return description;
+            }
+            return CleanResolvedEngineText(power.DumbHoverTip.Description);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? ModelEntry(object? model)
@@ -4076,10 +3969,72 @@ public class RunSimulator
         if (locString == null || string.IsNullOrWhiteSpace(locString.LocEntryKey))
             return null;
 
+        var engineText = EngineLocStringText(locString, vars);
+        if (!string.IsNullOrWhiteSpace(engineText))
+            return engineText;
+
         var text = _loc.Bilingual(locString.LocTable, locString.LocEntryKey);
         if (text == locString.LocEntryKey)
             return null;
         return InterpolateDynamicVars(text, vars);
+    }
+
+    private static string? EngineLocStringText(LocString? locString, Dictionary<string, object?>? vars = null)
+    {
+        try
+        {
+            if (locString == null)
+                return null;
+
+            var formattedLocString = locString;
+            if (vars != null && vars.Count > 0)
+            {
+                formattedLocString = new LocString(locString.LocTable, locString.LocEntryKey);
+                formattedLocString.AddVariablesFrom(locString);
+                foreach (var (key, value) in vars)
+                {
+                    if (value != null)
+                        formattedLocString.AddObj(key, value);
+                }
+            }
+
+            var text = CleanResolvedEngineText(formattedLocString.GetFormattedText());
+            if (text == locString.LocEntryKey)
+                return null;
+            return text;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? CleanEngineText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"#[A-Z](?=\{|[A-Za-z0-9])", "");
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static string? CleanResolvedEngineText(string? text)
+    {
+        var cleaned = CleanEngineText(text);
+        return LooksLikeUnresolvedLocKey(cleaned) ? null : cleaned;
+    }
+
+    private static bool LooksLikeUnresolvedLocKey(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Any(char.IsWhiteSpace))
+            return false;
+
+        return text.EndsWith(".title", StringComparison.Ordinal)
+               || text.EndsWith(".description", StringComparison.Ordinal)
+               || text.EndsWith(".smartDescription", StringComparison.Ordinal)
+               || text.EndsWith(".remoteDescription", StringComparison.Ordinal)
+               || text.EndsWith(".selectionScreenPrompt", StringComparison.Ordinal);
     }
 
     private static Dictionary<string, object?>? ExportLocStringVariables(LocString? locString)
@@ -5005,11 +4960,13 @@ public class RunSimulator
         if (card.Enchantment != null)
         {
             var entry = card.Enchantment.Id.Entry;
-            cardInfo["enchantment"] = _loc.Bilingual("enchantments", entry + ".title");
+            cardInfo["enchantment"] =
+                EngineLocStringText(card.Enchantment.Title) ?? _loc.Bilingual("enchantments", entry + ".title");
             cardInfo["enchantment_id"] = entry;
             var vars = ExportEnhancementVars(card.Enchantment);
             cardInfo["enchantment_description"] =
-                InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
+                EngineLocStringText(card.Enchantment.DynamicDescription)
+                ?? InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
             cardInfo["enchantment_vars"] = vars;
             try
             {
@@ -5022,11 +4979,13 @@ public class RunSimulator
         if (card.Affliction != null)
         {
             var entry = card.Affliction.Id.Entry;
-            cardInfo["affliction"] = _loc.Bilingual("afflictions", entry + ".title");
+            cardInfo["affliction"] =
+                EngineLocStringText(card.Affliction.Title) ?? _loc.Bilingual("afflictions", entry + ".title");
             cardInfo["affliction_id"] = entry;
             var vars = ExportEnhancementVars(card.Affliction);
             cardInfo["affliction_description"] =
-                InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
+                EngineLocStringText(card.Affliction.DynamicDescription)
+                ?? InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
             cardInfo["affliction_vars"] = vars;
             try
             {
@@ -5203,10 +5162,13 @@ public class RunSimulator
         var info = new Dictionary<string, object?>
         {
             ["id"] = potion.Id.Entry,
-            ["name"] = _loc.Potion(entry),
-            ["description"] = InterpolateDynamicVars(
-                _loc.Bilingual("potions", entry + ".description"),
-                vars.Count > 0 ? vars : null),
+            ["name"] = EngineLocStringText(potion.Title) ?? _loc.Potion(entry),
+            ["description"] =
+                CleanResolvedEngineText(potion.HoverTip.Description)
+                ?? EngineLocStringText(potion.DynamicDescription)
+                ?? InterpolateDynamicVars(
+                    _loc.Bilingual("potions", entry + ".description"),
+                    vars.Count > 0 ? vars : null),
             ["vars"] = vars.Count > 0 ? vars : null,
             ["target_type"] = potion.TargetType.ToString(),
         };
@@ -5295,8 +5257,11 @@ public class RunSimulator
         var info = new Dictionary<string, object?>
         {
             ["id"] = entry,
-            ["name"] = _loc.Relic(entry),
-            ["description"] = InterpolateDynamicVars(_loc.Bilingual("relics", entry + ".description"), varsOrNull),
+            ["name"] = EngineLocStringText(relic.Title) ?? _loc.Relic(entry),
+            ["description"] =
+                CleanResolvedEngineText(relic.HoverTip.Description)
+                ?? EngineLocStringText(relic.DynamicDescription)
+                ?? InterpolateDynamicVars(_loc.Bilingual("relics", entry + ".description"), varsOrNull),
             ["vars"] = varsOrNull,
         };
         if (index.HasValue)
@@ -6355,9 +6320,12 @@ public class RunSimulator
                         var bestCtor = ctors.OrderBy(c => c.GetParameters().Length).First();
                         var args2 = bestCtor.GetParameters().Select(p =>
                             p.HasDefaultValue ? p.DefaultValue :
-                            p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null
+                            p.ParameterType.FullName == "SmartFormat.Core.Settings.SmartSettings"
+                                ? Activator.CreateInstance(p.ParameterType)
+                                : p.ParameterType.IsValueType ? Activator.CreateInstance(p.ParameterType) : null
                         ).ToArray();
                         var sf = bestCtor.Invoke(args2);
+                        sfField.SetValue(null, sf);
                         // Register extensions using the game's own LoadLocFormatters logic
                         // Call it via reflection on LocManager instance
                         try
@@ -6371,13 +6339,11 @@ public class RunSimulator
                             }
                             else
                             {
-                                sfField.SetValue(null, sf);
                                 Console.Error.WriteLine("[INFO] SmartFormatter set (no LoadLocFormatters found)");
                             }
                         }
                         catch (Exception lfEx)
                         {
-                            sfField.SetValue(null, sf);
                             Console.Error.WriteLine($"[WARN] LoadLocFormatters failed: {lfEx.InnerException?.Message ?? lfEx.Message}");
                         }
                     }

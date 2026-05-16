@@ -99,6 +99,27 @@ class TestPotionActions:
         assert all(not name.endswith(".title") for name in power_names)
         assert all(not power["description"].endswith(".description") for power in powers)
 
+    def test_enemy_power_descriptions_after_potion_use_resolve_amount(self, game):
+        state = game.start(seed="potion-enemy-power-description")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["POWDERED_DEMISE"],
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        state = game.act("use_potion", potion_index=0, target_index=0)
+
+        demise = next(power for power in state["enemies"][0]["powers"] if power["name"] == "Demise")
+        assert "9" in demise["description"]
+        assert " X " not in demise["description"]
+
     def test_liquid_memories_opens_discard_selection(self, game):
         state = game.start(seed="liquid-memories-selection")
         game.skip_neow(state)
