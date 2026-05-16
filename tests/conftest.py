@@ -67,6 +67,15 @@ class Game:
         return self.send({"cmd": "start_run", "character": character,
                           "seed": seed, "ascension": ascension, "lang": lang})
 
+    def reset(self):
+        try:
+            result = self.send({"cmd": "reset"})
+            if result != {"type": "reset_result", "success": True}:
+                raise RuntimeError(f"Reset failed: {result}")
+        except Exception:
+            self.close()
+            self.__init__()
+
     def act(self, action, **args):
         cmd = {"cmd": "action", "action": action}
         if args:
@@ -172,9 +181,17 @@ class Game:
         return state
 
 
-@pytest.fixture
-def game():
-    """Each test gets an independent game process."""
+@pytest.fixture(scope="session")
+def shared_game():
+    """Reuse one headless process across tests; reset engine state per test."""
     g = Game()
     yield g
     g.close()
+
+
+@pytest.fixture
+def game(shared_game):
+    """Each test gets an isolated run state without restarting the process."""
+    shared_game.reset()
+    yield shared_game
+    shared_game.reset()

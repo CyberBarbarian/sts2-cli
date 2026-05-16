@@ -92,9 +92,10 @@ python3 python/play.py --no-log    # disable logging
 
 ## Testing
 
-Use focused pytest selections while iterating on headless CLI bugs. The complete
-suite starts many real headless game processes and can exceed five minutes on
-Windows, so it is better suited for nightly or release validation.
+Use focused pytest selections while iterating on headless CLI bugs. The pytest
+fixture reuses one headless process and calls the JSON `reset` command between
+tests, so broad non-slow coverage is practical for local validation. The slow
+end-to-end run tests are still better suited for nightly or release validation.
 
 Typical focused commands:
 
@@ -108,6 +109,12 @@ The `slow` marker is reserved for long end-to-end run coverage. Use
 `python -m pytest -m "not slow" -q` when you need broad local coverage without
 the slowest full-run tests, and use plain `python -m pytest -q` for a full
 pre-release or overnight pass.
+
+If test isolation regresses, run:
+
+```bash
+python -m pytest tests/test_process_reuse.py -q
+```
 
 ## Supported Characters
 

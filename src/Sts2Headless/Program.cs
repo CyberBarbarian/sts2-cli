@@ -85,7 +85,7 @@ class Program
             try
             {
                 var cmd = JsonSerializer.Deserialize<JsonElement>(line);
-                result = HandleCommand(sim, cmd);
+                result = HandleCommand(ref sim, cmd);
             }
             catch (JsonException ex)
             {
@@ -108,11 +108,16 @@ class Program
         }
     }
 
-    static Dictionary<string, object?>? HandleCommand(RunSimulator sim, JsonElement cmd)
+    static Dictionary<string, object?>? HandleCommand(ref RunSimulator sim, JsonElement cmd)
     {
         var cmdType = cmd.GetProperty("cmd").GetString() ?? "";
         switch (cmdType)
         {
+            case "reset":
+                sim.CleanUp();
+                sim = new RunSimulator();
+                return new Dictionary<string, object?> { ["type"] = "reset_result", ["success"] = true };
+
             case "start_run":
                 return sim.StartRun(
                     cmd.TryGetProperty("character", out var ch) ? ch.GetString() ?? "Ironclad" : "Ironclad",

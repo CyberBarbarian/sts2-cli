@@ -6646,10 +6646,75 @@ public class RunSimulator
             if (RunManager.Instance.IsInProgress)
                 RunManager.Instance.CleanUp(graceful: true);
             _runState = null;
+            ResetHeadlessCommandState();
         }
         catch (Exception ex)
         {
             Log($"CleanUp exception: {ex.Message}");
+        }
+    }
+
+    internal static void ResetHeadlessCommandState()
+    {
+        LocPatches._bundleSimRef = null;
+        YieldPatches.ActiveCrystalSphereMinigame = null;
+        ResetCardSelectCmdSelector();
+    }
+
+    private static void ResetCardSelectCmdSelector()
+    {
+        var resetMethod = typeof(CardSelectCmd).GetMethod(
+            "Reset",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            types: Type.EmptyTypes,
+            modifiers: null)
+            ?? typeof(CardSelectCmd).GetMethod(
+                "ResetForTests",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: Type.EmptyTypes,
+                modifiers: null);
+        if (resetMethod != null)
+        {
+            resetMethod.Invoke(null, null);
+        }
+
+        var selectorType = typeof(MegaCrit.Sts2.Core.TestSupport.ICardSelector);
+        foreach (var property in typeof(CardSelectCmd).GetProperties(
+                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (property.SetMethod == null)
+                continue;
+            if (property.PropertyType.IsAssignableFrom(selectorType) ||
+                selectorType.IsAssignableFrom(property.PropertyType) ||
+                property.PropertyType.Name.Contains("ICardSelector", StringComparison.Ordinal))
+            {
+                property.SetValue(null, null);
+            }
+        }
+        foreach (var field in typeof(CardSelectCmd).GetFields(
+                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (field.IsLiteral)
+                continue;
+            var fieldValue = field.GetValue(null);
+            if (fieldValue != null &&
+                field.FieldType.IsGenericType &&
+                field.FieldType.GetGenericTypeDefinition() == typeof(Stack<>) &&
+                selectorType.IsAssignableFrom(field.FieldType.GetGenericArguments()[0]))
+            {
+                field.FieldType.GetMethod("Clear")?.Invoke(fieldValue, null);
+                continue;
+            }
+            if (field.IsInitOnly)
+                continue;
+            if (field.FieldType.IsAssignableFrom(selectorType) ||
+                selectorType.IsAssignableFrom(field.FieldType) ||
+                field.FieldType.Name.Contains("ICardSelector", StringComparison.Ordinal))
+            {
+                field.SetValue(null, null);
+            }
         }
     }
 
