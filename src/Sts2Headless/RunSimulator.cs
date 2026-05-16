@@ -3746,16 +3746,89 @@ public class RunSimulator
     private string PowerDescription(PowerModel power)
     {
         var entry = power.Id.Entry;
-        var description = PowerHoverTipDescription(power)
-                          ?? EngineLocStringText(power.HasSmartDescription
-                              ? power.SmartDescription
-                              : power.Description);
+        var description = EnginePowerDescription(power)
+                          ?? LocalPowerDescription(power)
+                          ?? PowerHoverTipDescription(power);
         if (!string.IsNullOrWhiteSpace(description))
             return description;
 
         var raw = _loc.PowerDescription(entry);
         var vars = ExportDynamicVars(power);
         return InterpolateDynamicVars(raw, vars) ?? raw;
+    }
+
+    private string? LocalPowerDescription(PowerModel power)
+    {
+        var entry = power.Id.Entry;
+        var vars = PowerDescriptionVars(power);
+        var smartKey = entry + ".smartDescription";
+        var text = _loc.Bilingual("powers", smartKey);
+        if (text == smartKey)
+        {
+            var descriptionKey = entry + ".description";
+            text = _loc.Bilingual("powers", descriptionKey);
+            if (text == descriptionKey)
+                return null;
+        }
+
+        return InterpolateDynamicVars(text, vars) ?? text;
+    }
+
+    private static string? EnginePowerDescription(PowerModel power)
+    {
+        try
+        {
+            var description = power.HasSmartDescription
+                ? power.SmartDescription
+                : power.Description;
+            if (power.Applier != null
+                && !LocalContext.IsMe(power.Applier)
+                && power.HasRemoteDescription)
+            {
+                description = power.RemoteDescription;
+            }
+
+            return EngineLocStringText(description, PowerDescriptionVars(power));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Dictionary<string, object?> PowerDescriptionVars(PowerModel power)
+    {
+        var vars = ExportDynamicVars(power) ?? new Dictionary<string, object?>();
+        try
+        {
+            var owner = power.Owner;
+            var playerCount = owner?.CombatState?.Players?.Count ?? 1;
+            vars["Amount"] = power.Amount;
+            vars["OnPlayer"] = owner?.IsPlayer ?? false;
+            vars["IsMultiplayer"] = playerCount > 1;
+            vars["PlayerCount"] = playerCount;
+            vars["OwnerName"] = CreatureTitle(owner);
+            if (power.Applier != null)
+                vars["ApplierName"] = CreatureTitle(power.Applier);
+            if (power.Target != null)
+                vars["TargetName"] = CreatureTitle(power.Target);
+        }
+        catch { }
+        return vars;
+    }
+
+    private static string CreatureTitle(Creature? creature)
+    {
+        if (creature == null)
+            return "";
+        if (creature.IsPlayer)
+        {
+            var character = creature.Player?.Character;
+            return EngineLocStringText(character?.Title) ?? character?.Id.Entry ?? "Player";
+        }
+
+        var monster = creature.Monster;
+        return EngineLocStringText(monster?.Title) ?? monster?.Id.Entry ?? "Enemy";
     }
 
     private static string? PowerHoverTipTitle(PowerModel power)

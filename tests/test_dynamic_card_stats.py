@@ -390,7 +390,9 @@ class TestDynamicCardStats:
 
         state = game.act("end_turn")
 
-        assert any(power["name"] == "Frail" for power in state["player_powers"])
+        frail = next(power for power in state["player_powers"] if power["name"] == "Frail")
+        assert "less Block" in frail["description"]
+        assert "prevents damage" not in frail["description"]
         defend = next(c for c in state["hand"] if c["name"] == "Defend")
         assert defend["stats"]["block"] == 3
 
