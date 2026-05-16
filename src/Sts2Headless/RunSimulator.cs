@@ -3753,8 +3753,9 @@ public class RunSimulator
     private string MonsterDisplayName(object? monster, object? creature = null)
     {
         var entry = ModelEntry(monster) ?? "UNKNOWN";
-        var name = _loc.Monster(entry);
         var vars = ExportDynamicVars(monster);
+        if (monster is MonsterModel monsterModel)
+            MergeVars(vars ??= new Dictionary<string, object?>(), ExportLocStringVariables(monsterModel.Title));
         var creatureVars = ExportDynamicVars(creature);
         if (creatureVars != null)
         {
@@ -3762,6 +3763,15 @@ public class RunSimulator
             foreach (var (key, value) in creatureVars)
                 vars[key] = value;
         }
+
+        if (monster is MonsterModel model)
+        {
+            var engineName = EngineLocStringText(model.Title, vars);
+            if (!string.IsNullOrWhiteSpace(engineName))
+                return engineName;
+        }
+
+        var name = _loc.Monster(entry);
 
         if (entry == "TEST_SUBJECT" && name.Contains("{Count}", StringComparison.Ordinal))
         {

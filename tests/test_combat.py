@@ -57,6 +57,64 @@ class TestCombatStructure:
         assert all("{" not in name and "}" not in name for name in names)
         assert all("#C" not in name for name in names)
 
+    def test_enemy_name_interpolates_after_test_subject_adaptation(self):
+        game = Game()
+        try:
+            self._assert_test_subject_adaptation_names_are_resolved(game)
+        finally:
+            game.close()
+
+    def _assert_test_subject_adaptation_names_are_resolved(self, game):
+        state = game.start(seed="test-subject-phase-name")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            relics=["BURNING_BLOOD", "LANTERN"],
+            deck=[
+                "BLOODLETTING",
+                "BLOODLETTING",
+                "PERFECTED_STRIKE",
+                "PERFECTED_STRIKE",
+                "PERFECTED_STRIKE",
+                *(["STRIKE_IRONCLAD"] * 30),
+            ],
+        )
+        state = game.enter_room("combat", encounter="TEST_SUBJECT_BOSS")
+
+        for _ in range(80):
+            names = [enemy["name"] for enemy in state.get("enemies", [])]
+            assert all("{" not in name and "}" not in name for name in names)
+            if any(enemy.get("max_hp", 0) >= 300 for enemy in state.get("enemies", [])):
+                return
+
+            if state.get("decision") != "combat_play":
+                state = game.act("proceed")
+                continue
+
+            playable = [
+                card for card in state["hand"]
+                if card.get("can_play") and card_energy_cost(card) <= state.get("energy", 0)
+            ]
+            if not playable:
+                state = game.act("end_turn")
+                continue
+
+            playable.sort(key=lambda card: (
+                0 if card["name"] == "Bloodletting" else
+                1 if card["name"] == "Perfected Strike" else
+                2 if card["type"] == "Attack" else
+                3,
+                card_energy_cost(card),
+            ))
+            card = playable[0]
+            args = {"card_index": card["index"]}
+            if card.get("target_type") == "AnyEnemy":
+                args["target_index"] = 0
+            state = game.act("play_card", **args)
+
+        pytest.fail("Test Subject did not reach the 300 HP adaptation phase")
+
     def test_enemy_state_exports_next_move_name(self, game):
         state = game.start(seed="devoted-sculptor-move-name")
         state = game.enter_room("combat", encounter="DEVOTED_SCULPTOR_WEAK")
