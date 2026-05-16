@@ -3738,7 +3738,7 @@ public class RunSimulator
     private string PowerName(PowerModel power)
     {
         var entry = power.Id.Entry;
-        return PowerHoverTipTitle(power)
+        return PowerOwnHoverTipTitle(power)
                ?? EngineLocStringText(power.Title)
                ?? _loc.Power(entry);
     }
@@ -3748,7 +3748,7 @@ public class RunSimulator
         var entry = power.Id.Entry;
         var description = EnginePowerDescription(power)
                           ?? LocalPowerDescription(power)
-                          ?? PowerHoverTipDescription(power);
+                          ?? PowerOwnHoverTipDescription(power);
         if (!string.IsNullOrWhiteSpace(description))
             return description;
 
@@ -3771,7 +3771,7 @@ public class RunSimulator
                 return null;
         }
 
-        return InterpolateDynamicVars(text, vars) ?? text;
+        return CleanResolvedEngineText(InterpolateDynamicVars(text, vars) ?? text);
     }
 
     private static string? EnginePowerDescription(PowerModel power)
@@ -3831,40 +3831,61 @@ public class RunSimulator
         return EngineLocStringText(monster?.Title) ?? monster?.Id.Entry ?? "Enemy";
     }
 
-    private static string? PowerHoverTipTitle(PowerModel power)
+    private static string? PowerOwnHoverTipTitle(PowerModel power)
     {
-        try
-        {
-            foreach (var tip in power.HoverTips)
-            {
-                var title = CleanResolvedEngineText(TryGetMember(tip, "Title") as string);
-                if (!string.IsNullOrWhiteSpace(title))
-                    return title;
-            }
-            return CleanResolvedEngineText(power.DumbHoverTip.Title);
-        }
-        catch
-        {
-            return null;
-        }
+        return PowerOwnHoverTipText(power, "Title");
     }
 
-    private static string? PowerHoverTipDescription(PowerModel power)
+    private static string? PowerOwnHoverTipDescription(PowerModel power)
+    {
+        return PowerOwnHoverTipText(power, "Description");
+    }
+
+    private static string? PowerOwnHoverTipText(PowerModel power, string memberName)
     {
         try
         {
             foreach (var tip in power.HoverTips)
             {
-                var description = CleanResolvedEngineText(TryGetMember(tip, "Description") as string);
-                if (!string.IsNullOrWhiteSpace(description))
-                    return description;
+                if (!HoverTipMatchesPower(tip, power))
+                    continue;
+
+                var text = CleanResolvedEngineText(TryGetMember(tip, memberName) as string);
+                if (!string.IsNullOrWhiteSpace(text))
+                    return text;
             }
-            return CleanResolvedEngineText(power.DumbHoverTip.Description);
+
+            var dumbHoverTip = power.DumbHoverTip;
+            if (HoverTipMatchesPower(dumbHoverTip, power))
+                return CleanResolvedEngineText(TryGetMember(dumbHoverTip, memberName) as string);
         }
         catch
         {
-            return null;
         }
+
+        return null;
+    }
+
+    private static bool HoverTipMatchesPower(object? tip, PowerModel power)
+    {
+        if (tip == null)
+            return false;
+
+        var powerEntry = power.Id.Entry;
+        var powerId = power.Id.ToString();
+        var tipId = TryGetMember(tip, "Id")?.ToString();
+        if (string.Equals(tipId, powerEntry, StringComparison.Ordinal)
+            || string.Equals(tipId, powerId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var canonicalModel = TryGetMember(tip, "CanonicalModel");
+        if (ReferenceEquals(canonicalModel, power))
+            return true;
+
+        var canonicalEntry = ModelEntry(canonicalModel);
+        return string.Equals(canonicalEntry, powerEntry, StringComparison.Ordinal);
     }
 
     private static string? ModelEntry(object? model)
@@ -4137,7 +4158,9 @@ public class RunSimulator
     private static string? CleanResolvedEngineText(string? text)
     {
         var cleaned = CleanEngineText(text);
-        return LooksLikeUnresolvedLocKey(cleaned) ? null : cleaned;
+        return LooksLikeUnresolvedLocKey(cleaned) || LooksLikeUnresolvedFormatterToken(cleaned)
+            ? null
+            : cleaned;
     }
 
     private static bool LooksLikeUnresolvedLocKey(string? text)
@@ -4150,6 +4173,14 @@ public class RunSimulator
                || text.EndsWith(".smartDescription", StringComparison.Ordinal)
                || text.EndsWith(".remoteDescription", StringComparison.Ordinal)
                || text.EndsWith(".selectionScreenPrompt", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeUnresolvedFormatterToken(string? text)
+    {
+        return !string.IsNullOrWhiteSpace(text)
+               && System.Text.RegularExpressions.Regex.IsMatch(
+                   text,
+                   @"\{[A-Za-z_][A-Za-z0-9_]*(?::[^{}]*)?\}");
     }
 
     private static Dictionary<string, object?>? ExportLocStringVariables(LocString? locString)

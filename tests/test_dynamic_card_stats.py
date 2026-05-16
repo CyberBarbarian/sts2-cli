@@ -396,6 +396,21 @@ class TestDynamicCardStats:
         defend = next(c for c in state["hand"] if c["name"] == "Defend")
         assert defend["stats"]["block"] == 3
 
+    def test_player_vulnerable_power_description_resolves_percent_formatter(self, game):
+        state = game.start(seed="codex-player-vulnerable-description")
+        game.skip_neow(state)
+        game.set_player(hp=300, max_hp=300, deck=["DEFEND_IRONCLAD"] * 10)
+        state = game.enter_room("combat", encounter="OVICOPTER_NORMAL")
+
+        state = game.act("end_turn")
+        state = game.act("end_turn")
+        state = game.act("end_turn")
+
+        vulnerable = next(power for power in state["player_powers"] if power["name"] == "Vulnerable")
+
+        assert "{" not in vulnerable["description"]
+        assert "50% more damage" in vulnerable["description"]
+
     def test_block_stats_include_player_dexterity(self, game):
         state = game.start(seed="codex-dexterity-block")
         game.skip_neow(state)
