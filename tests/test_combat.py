@@ -288,6 +288,8 @@ class TestCombatEnd:
                 assert "name" in pw
                 assert "amount" in pw
                 assert "description" in pw
+                assert "{" not in pw["description"]
+                assert "}" not in pw["description"]
 
 
 class TestCombatEdgeCases:

@@ -4243,7 +4243,7 @@ public class RunSimulator
         return !string.IsNullOrWhiteSpace(text)
                && System.Text.RegularExpressions.Regex.IsMatch(
                    text,
-                   @"\{[A-Za-z_][A-Za-z0-9_]*(?::[^{}]*)?\}");
+                   @"\{[^}]*\}");
     }
 
     private static Dictionary<string, object?>? ExportLocStringVariables(LocString? locString)
