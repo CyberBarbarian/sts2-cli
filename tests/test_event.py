@@ -527,6 +527,30 @@ class TestSapphireSeed:
         assert "energy_icon.png" in sown_tip["description"]
         assert "1 Energy" not in sown_tip["description"]
 
+    def test_sown_card_upgrade_preview_preserves_enchantment_text(self, game):
+        state = game.start(seed="sapphire-seed-upgrade-preview")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "CINDER",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "BASH",
+        ])
+        state = game.enter_room("event", event="SAPPHIRE_SEED")
+
+        plant = next(o for o in state["options"] if o["title"] == "Plant and Nourish")
+        state = game.act("choose_option", option_index=plant["index"])
+        cinder = next(c for c in state["cards"] if c["name"] == "Cinder")
+        state = game.act("select_cards", indices=str(cinder["index"]))
+        state = game.enter_room("rest_site")
+        smith = next(o for o in state["options"] if o["title"] == "Smith")
+        state = game.act("choose_option", option_index=smith["index"])
+
+        cinder = next(c for c in state["cards"] if c["name"] == "Cinder")
+        assert "energy_icon.png" in cinder["description"]
+        assert "energy_icon.png" in cinder["after_upgrade"]["description"]
+
 
 class TestWoodCarvings:
     def test_snake_enchantment_is_exported_on_deck_card(self, game):

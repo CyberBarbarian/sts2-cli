@@ -5081,14 +5081,62 @@ public class RunSimulator
             {
                 ["cost"] = GetEnergyCostDisplay(clone),
                 ["stats"] = stats.Count > 0 ? stats : null,
-                ["description"] = CardDescription(clone, stats),
+                ["description"] = CardDescriptionWithSourceEnhancements(clone, card, stats),
                 ["added_keywords"] = addedKws.Count > 0 ? addedKws : null,
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
             AddEnergyCostDetails(info, clone);
+            AddCardEnhancements(info, card);
             return info;
         }
         catch { return null; }
+    }
+
+    private string CardDescriptionWithSourceEnhancements(
+        CardModel upgradedCard,
+        CardModel sourceCard,
+        Dictionary<string, object?>? stats = null)
+    {
+        var description = CardDescription(upgradedCard, stats);
+        return AppendSourceEnhancementDescriptions(description, sourceCard);
+    }
+
+    private string AppendSourceEnhancementDescriptions(string description, CardModel sourceCard)
+    {
+        foreach (var enhancementText in SourceEnhancementDescriptions(sourceCard))
+        {
+            if (string.IsNullOrWhiteSpace(enhancementText))
+                continue;
+            if (description.Contains(enhancementText, StringComparison.Ordinal))
+                continue;
+            description = string.IsNullOrWhiteSpace(description)
+                ? enhancementText
+                : description + "\n" + enhancementText;
+        }
+        return description;
+    }
+
+    private IEnumerable<string> SourceEnhancementDescriptions(CardModel sourceCard)
+    {
+        if (sourceCard.Enchantment != null)
+        {
+            var entry = sourceCard.Enchantment.Id.Entry;
+            var vars = ExportEnhancementVars(sourceCard.Enchantment);
+            var text = EngineLocStringText(sourceCard.Enchantment.DynamicDescription)
+                       ?? InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
+            if (!string.IsNullOrWhiteSpace(text))
+                yield return text;
+        }
+
+        if (sourceCard.Affliction != null)
+        {
+            var entry = sourceCard.Affliction.Id.Entry;
+            var vars = ExportEnhancementVars(sourceCard.Affliction);
+            var text = EngineLocStringText(sourceCard.Affliction.DynamicDescription)
+                       ?? InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
+            if (!string.IsNullOrWhiteSpace(text))
+                yield return text;
+        }
     }
 
     private Dictionary<string, object?> PotionInfo(PotionModel potion, int? index = null)
