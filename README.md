@@ -90,6 +90,25 @@ python3 python/play.py --no-log    # disable logging
 
 **When filing a bug report, please attach the relevant log file from `logs/`** — it contains the full step-by-step game state needed to reproduce the issue.
 
+## Testing
+
+Use focused pytest selections while iterating on headless CLI bugs. The complete
+suite starts many real headless game processes and can exceed five minutes on
+Windows, so it is better suited for nightly or release validation.
+
+Typical focused commands:
+
+```bash
+python -m pytest tests/test_event.py -q
+python -m pytest tests/test_dynamic_card_stats.py tests/test_combat.py -q
+python -m pytest tests/test_treasure.py tests/test_shop.py tests/test_potions.py -q
+```
+
+The `slow` marker is reserved for long end-to-end run coverage. Use
+`python -m pytest -m "not slow" -q` when you need broad local coverage without
+the slowest full-run tests, and use plain `python -m pytest -q` for a full
+pre-release or overnight pass.
+
 ## Supported Characters
 
 | Character | Status |
