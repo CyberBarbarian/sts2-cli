@@ -313,6 +313,7 @@ public class RunSimulator
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
     private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
+    private string? _preCurrentRoomSaveJson;
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
@@ -324,6 +325,7 @@ public class RunSimulator
             _loc.Lang = lang;
             _shopItemSnapshots.Clear();
             YieldPatches.ActiveCrystalSphereMinigame = null;
+            _preCurrentRoomSaveJson = null;
             EnsureModelDbInitialized();
 
             var player = CreatePlayer(character);
@@ -592,6 +594,7 @@ public class RunSimulator
         {
             _loc.Lang = lang;
             EnsureModelDbInitialized();
+            _preCurrentRoomSaveJson = null;
 
             Log("Loading save file...");
 
@@ -918,11 +921,20 @@ public class RunSimulator
             SerializableRun serializableRun;
             var checkpointScope = "current_room";
             string? rolledBackRoomType = null;
+            string saveJson;
 
             if (currentRoom is MapRoom || currentRoom == null)
             {
                 Log($"Saving map checkpoint (room={currentRoom?.GetType().Name ?? "null"}, outputPath={outputPath})...");
                 serializableRun = RunManager.Instance.ToSave(currentRoom);
+                saveJson = SaveManager.ToJson(serializableRun);
+            }
+            else if (_preCurrentRoomSaveJson != null)
+            {
+                Log($"Saving pre-room checkpoint snapshot from {currentRoom.GetType().Name} (outputPath={outputPath})...");
+                checkpointScope = "pre_room";
+                rolledBackRoomType = currentRoom.GetType().Name;
+                saveJson = _preCurrentRoomSaveJson;
             }
             else
             {
@@ -932,9 +944,9 @@ public class RunSimulator
                 serializableRun = RunManager.Instance.ToSave(new MapRoom());
                 if (!TryRollbackSerializedSaveToPreRoom(serializableRun, out var rollbackError))
                     return Error($"Cannot save checkpoint: {rollbackError}");
+                saveJson = SaveManager.ToJson(serializableRun);
             }
 
-            var saveJson = SaveManager.ToJson(serializableRun);
             Log($"Serialized save: {saveJson.Length} chars");
 
             var dir = System.IO.Path.GetDirectoryName(outputPath);
@@ -1089,6 +1101,7 @@ public class RunSimulator
         // BUG-013: Wait for any pending actions (relic sessions, etc.) to complete before entering new room
         WaitForActionExecutor();
         _syncCtx.Pump();
+        _preCurrentRoomSaveJson = CapturePreRoomCheckpoint();
 
         // Call EnterMapCoord directly (same as what MoveToMapCoordAction does in TestMode)
         // This avoids the action executor which can swallow errors silently.
@@ -1097,6 +1110,21 @@ public class RunSimulator
         WaitForActionExecutor();
 
         return DetectDecisionPoint();
+    }
+
+    private string? CapturePreRoomCheckpoint()
+    {
+        try
+        {
+            if (_runState?.CurrentRoom is not MapRoom mapRoom)
+                return null;
+            return SaveManager.ToJson(RunManager.Instance.ToSave(mapRoom));
+        }
+        catch (Exception ex)
+        {
+            Log($"CapturePreRoomCheckpoint failed: {ex.Message}");
+            return null;
+        }
     }
 
     private Dictionary<string, object?> DoPlayCard(Player player, Dictionary<string, object?>? args)
