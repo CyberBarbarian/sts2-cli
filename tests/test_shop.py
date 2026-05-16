@@ -169,6 +169,28 @@ class TestShopBuy:
         assert any(relic["id"] == "KIFUDA" for relic in state["player"]["relics"])
         assert state["player"]["deck"][0].get("enchantment") == "Adroit"
 
+    def test_skip_optional_shop_relic_selection_refreshes_stock(self, game):
+        state = game.start(seed="kifuda-shop-4")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+
+        relic = next(relic for relic in state["relics"] if relic["id"] == "KIFUDA")
+        state = send_with_timeout(
+            game,
+            {"cmd": "action", "action": "buy_relic", "args": {"relic_index": relic["index"]}},
+        )
+
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 0
+
+        state = game.act("skip_select")
+
+        assert state["decision"] == "shop"
+        assert any(relic["id"] == "KIFUDA" for relic in state["player"]["relics"])
+        bought = next(relic for relic in state["relics"] if relic["id"] == "KIFUDA")
+        assert bought["is_stocked"] is False
+
     def test_buy_insufficient_gold(self, game):
         state = game.start(seed="sb2")
         game.skip_neow(state)

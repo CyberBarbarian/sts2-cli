@@ -1663,33 +1663,7 @@ public class RunSimulator
 
         // Extra wait for shop card removal: the purchase task needs to finish
         if (_runState?.CurrentRoom is MerchantRoom)
-        {
-            var shopTask = _pendingShopPurchaseTask;
-            if (shopTask != null)
-            {
-                for (int i = 0; i < 300; i++)
-                {
-                    _syncCtx.Pump();
-                    WaitForActionExecutor();
-                    if (shopTask.IsCompleted) break;
-                    if (HasPendingHeadlessChoice()) break;
-                    Thread.Sleep(10);
-                }
-                if (shopTask.IsCompleted)
-                {
-                    if (shopTask.IsFaulted)
-                        Log($"Shop purchase task failed: {shopTask.Exception?.GetBaseException().Message}");
-                    _pendingShopPurchaseTask = null;
-                }
-            }
-            else
-            {
-                Thread.Sleep(200);
-                _syncCtx.Pump();
-                WaitForActionExecutor();
-            }
-            Log("Card selection in shop (card removal), refreshing shop state");
-        }
+            WaitForPendingShopPurchaseTask();
 
         return DetectDecisionPoint();
     }
@@ -1702,8 +1676,39 @@ public class RunSimulator
             _cardSelector.CancelPending();
             _syncCtx.Pump();
             WaitForActionExecutor();
+            if (_runState?.CurrentRoom is MerchantRoom)
+                WaitForPendingShopPurchaseTask();
         }
         return DetectDecisionPoint();
+    }
+
+    private void WaitForPendingShopPurchaseTask()
+    {
+        var shopTask = _pendingShopPurchaseTask;
+        if (shopTask != null)
+        {
+            for (int i = 0; i < 300; i++)
+            {
+                _syncCtx.Pump();
+                WaitForActionExecutor();
+                if (shopTask.IsCompleted) break;
+                if (HasPendingHeadlessChoice()) break;
+                Thread.Sleep(10);
+            }
+            if (shopTask.IsCompleted)
+            {
+                if (shopTask.IsFaulted)
+                    Log($"Shop purchase task failed: {shopTask.Exception?.GetBaseException().Message}");
+                _pendingShopPurchaseTask = null;
+            }
+        }
+        else
+        {
+            Thread.Sleep(200);
+            _syncCtx.Pump();
+            WaitForActionExecutor();
+        }
+        Log("Card selection in shop, refreshing shop state");
     }
 
     private Dictionary<string, object?> DoUsePotion(Player player, Dictionary<string, object?>? args)
