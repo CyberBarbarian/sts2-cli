@@ -813,6 +813,28 @@ class TestCombatEdgeCases:
         hand_names = [card["name"] for card in state["hand"]]
         assert "Twin Strike" in hand_names
 
+    def test_card_select_exports_selection_prompt_from_played_card(self, game):
+        state = game.start(character="Regent", seed="thinking-ahead-selection-prompt")
+        game.skip_neow(state)
+        game.set_player(
+            deck=[
+                "THINKING_AHEAD",
+                "STRIKE_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "KINGLY_PUNCH",
+                "ORBIT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        thinking_ahead = next(card for card in state["hand"] if card["name"] == "Thinking Ahead")
+        state = game.act("play_card", card_index=thinking_ahead["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == "Choose a card to put on top of your Draw Pile."
+
     def test_uninitialized_event_card_is_not_exported_as_playable(self, game):
         state = game.start(seed="mad-science-uninitialized")
         game.skip_neow(state)

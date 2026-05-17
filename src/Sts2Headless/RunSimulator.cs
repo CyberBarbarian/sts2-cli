@@ -313,6 +313,7 @@ public class RunSimulator
     private int _goldBeforeCombat;
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
+    private CardModel? _pendingCardSelectionSourceCard;
     private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
     private string? _preCurrentRoomSaveJson;
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
@@ -1181,6 +1182,7 @@ public class RunSimulator
         var playAction = new PlayCardAction(card, target);
         RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
         WaitForActionExecutor();
+        _pendingCardSelectionSourceCard = _cardSelector.HasPending ? card : null;
 
         // Some engine effects return the played card to hand. The CLI should
         // not treat hand removal as the success signal, but a completed play
@@ -1693,6 +1695,7 @@ public class RunSimulator
 
         Log($"Card selection: indices [{string.Join(",", indices)}]");
         _cardSelector.ResolvePendingByIndices(indices);
+        _pendingCardSelectionSourceCard = null;
         _syncCtx.Pump();
         WaitForPendingEventOptionTask();
         WaitForActionExecutor();
@@ -1723,6 +1726,7 @@ public class RunSimulator
         {
             Log("Skipping card selection");
             _cardSelector.CancelPending();
+            _pendingCardSelectionSourceCard = null;
             _syncCtx.Pump();
             WaitForActionExecutor();
             if (_runState?.CurrentRoom is MerchantRoom)
@@ -2222,7 +2226,8 @@ public class RunSimulator
                 return cardInfo;
             }).ToList();
 
-            return new Dictionary<string, object?>
+            var prompt = CardSelectionPrompt(_pendingCardSelectionSourceCard);
+            var state = new Dictionary<string, object?>
             {
                 ["type"] = "decision",
                 ["decision"] = "card_select",
@@ -2232,6 +2237,15 @@ public class RunSimulator
                 ["max_select"] = _cardSelector.PendingMaxSelect,
                 ["player"] = PlayerSummary(player),
             };
+            if (prompt != null)
+            {
+                state["prompt"] = prompt;
+            }
+            if (_pendingCardSelectionSourceCard != null)
+            {
+                state["source_card"] = CardSummary(_pendingCardSelectionSourceCard);
+            }
+            return state;
         }
 
         if (YieldPatches.ActiveCrystalSphereMinigame != null)
@@ -2627,6 +2641,39 @@ public class RunSimulator
         }
 
         return result;
+    }
+
+    private string? CardSelectionPrompt(CardModel? sourceCard)
+    {
+        var pendingPrompt = CleanResolvedEngineText(_cardSelector.PendingPrompt);
+        if (pendingPrompt != null)
+            return pendingPrompt;
+
+        if (sourceCard == null)
+            return null;
+
+        var key = sourceCard.Id.Entry + ".selectionScreenPrompt";
+        var raw = _loc.Bilingual("cards", key);
+        var interpolated = InterpolateDynamicVars(raw, ExportDynamicVars(sourceCard)) ?? raw;
+        return CleanResolvedEngineText(interpolated);
+    }
+
+    private Dictionary<string, object?> CardSummary(CardModel card)
+    {
+        var stats = ExtractCardStats(card, _runState?.Players.FirstOrDefault());
+        var summary = new Dictionary<string, object?>
+        {
+            ["id"] = card.Id.ToString(),
+            ["name"] = _loc.Card(card.Id.Entry),
+            ["cost"] = GetEnergyCostDisplay(card),
+            ["type"] = card.Type.ToString(),
+            ["upgraded"] = card.IsUpgraded,
+            ["description"] = CardDescription(card, stats),
+        };
+        if (stats.Count > 0)
+            summary["stats"] = stats;
+        AddEnergyCostDetails(summary, card);
+        return summary;
     }
 
     private static bool CombatHasAliveEnemies()
@@ -7587,6 +7634,7 @@ public class RunSimulator
         _rewardsProcessed = false;
         _goldBeforeCombat = 0;
         _lastKnownHp = 0;
+        _pendingCardSelectionSourceCard = null;
         _shopItemSnapshots.Clear();
         _preCurrentRoomSaveJson = null;
         _pendingBundles = null;
