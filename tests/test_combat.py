@@ -328,6 +328,49 @@ class TestPlayCards:
         assert whirlwind["target_type"] == "AllEnemies"
         assert sum(e["hp"] for e in result.get("enemies", [])) < hp_before
 
+    def test_played_card_returned_to_hand_is_successful_play(self, game):
+        state = game.start(character="Defect", seed="feral-returned-card")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "FERAL",
+                "GO_FOR_THE_EYES",
+                "BLOODLETTING",
+                "BLOODLETTING",
+                "BLOODLETTING",
+            ],
+        )
+        game.set_draw_order([
+            "FERAL",
+            "GO_FOR_THE_EYES",
+            "BLOODLETTING",
+            "BLOODLETTING",
+            "BLOODLETTING",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        feral = next(card for card in state["hand"] if card["id"] == "CARD.FERAL")
+        state = game.act("play_card", card_index=feral["index"])
+
+        while any(card["id"] == "CARD.BLOODLETTING" for card in state["hand"]):
+            bloodletting = next(card for card in state["hand"] if card["id"] == "CARD.BLOODLETTING")
+            state = game.act("play_card", card_index=bloodletting["index"])
+
+        go_for_the_eyes = next(card for card in state["hand"] if card["id"] == "CARD.GO_FOR_THE_EYES")
+        target = state["enemies"][0]
+        hp_before = target["hp"]
+
+        assert go_for_the_eyes["index"] == 0
+
+        result = game.act("play_card", card_index=go_for_the_eyes["index"], target_index=target["index"])
+
+        assert result.get("type") != "error"
+        assert result["decision"] == "combat_play"
+        assert result["enemies"][0]["hp"] < hp_before
+        assert any(card["id"] == "CARD.GO_FOR_THE_EYES" for card in result["hand"])
+
     def test_play_card_costs_energy(self, game):
         state = game.start(seed="cp1")
         game.skip_neow(state)

@@ -1171,19 +1171,13 @@ public class RunSimulator
 
         Log($"Playing card {card.GetType().Name} (index {cardIndex}) targeting {(target != null ? target.Monster?.GetType().Name ?? "creature" : "none")}");
 
-        var handCountBefore = hand.Count;
-
         var playAction = new PlayCardAction(card, target);
         RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
         WaitForActionExecutor();
 
-        // Check if card play had no effect (hand unchanged, same card still at same index)
-        var handAfter = pcs.Hand.Cards;
-        if (handAfter.Count == handCountBefore && cardIndex < handAfter.Count && handAfter[cardIndex] == card)
-        {
-            return Error($"Card could not be played (still in hand after action): {card.GetType().Name} [{card.Id}]");
-        }
-
+        // Some engine effects return the played card to hand. The CLI should
+        // trust the completed PlayCardAction instead of treating hand removal
+        // as the success signal.
         return DetectDecisionPoint();
     }
 
