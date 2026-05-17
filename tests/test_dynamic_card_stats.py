@@ -217,6 +217,23 @@ class TestDynamicCardStats:
         assert hand_whirlwind["energy_cost"] == state["energy"]
         assert hand_whirlwind["x_value"] == state["energy"]
 
+    def test_energy_icon_upgrade_preview_repeats_engine_icons(self, game):
+        state = game.start(seed="forgotten-ritual-energy-icon-preview")
+        game.skip_neow(state)
+        state = game.set_player(deck=[
+            "FORGOTTEN_RITUAL",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "BASH",
+        ])
+
+        ritual = next(c for c in state["player"]["deck"] if c["name"] == "Forgotten Ritual")
+        upgraded_description = ritual["after_upgrade"]["description"]
+
+        assert "4ironclad_energy_icon.png" not in upgraded_description
+        assert upgraded_description.count("ironclad_energy_icon.png") == 4
+
     def test_x_cost_aoe_exports_current_repeat_damage(self, game):
         state = game.start(seed="whirlwind-current-repeat-stats")
         game.skip_neow(state)

@@ -4004,15 +4004,70 @@ public class RunSimulator
 
     private static string ResolveEngineCardDescriptionFormatters(string text, CardModel card)
     {
+        var vars = ExportCardDescriptionVars(card);
+        if (vars != null && vars.Count > 0)
+            text = ExpandResolvedEnergyIcons(text, card, vars);
+
         if (!ContainsSmartFormatToken(text))
             return text;
 
-        var vars = ExportCardDescriptionVars(card);
         if (vars == null || vars.Count == 0)
             return text;
 
         AddSingleMissingDisplayAlias(text, vars, CardRawDescriptionTokenNames(card));
-        return InterpolateDynamicVars(text, vars) ?? text;
+        text = InterpolateDynamicVars(text, vars) ?? text;
+        return ExpandResolvedEnergyIcons(text, card, vars);
+    }
+
+    private static string ExpandResolvedEnergyIcons(
+        string text,
+        CardModel card,
+        Dictionary<string, object?> vars)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        string rawText;
+        try
+        {
+            rawText = card.Description.GetRawText();
+        }
+        catch
+        {
+            return text;
+        }
+
+        foreach (System.Text.RegularExpressions.Match token in System.Text.RegularExpressions.Regex.Matches(
+                     rawText,
+                     @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:energyIcons\(\)\}"))
+        {
+            var key = token.Groups["key"].Value;
+            if (!vars.TryGetValue(key, out var value) || value == null)
+                continue;
+
+            int count;
+            try
+            {
+                count = System.Convert.ToInt32(value);
+            }
+            catch
+            {
+                continue;
+            }
+            if (count < 1)
+                continue;
+
+            var prefix = System.Text.RegularExpressions.Regex.Escape(count.ToString());
+            var pattern = @"(?<![A-Za-z0-9_])" + prefix
+                + @"(?<icon>(?:res://[A-Za-z0-9_./-]+/)?[A-Za-z0-9_]*energy_icon\.png)";
+            var regex = new System.Text.RegularExpressions.Regex(pattern);
+            text = regex.Replace(
+                text,
+                match => string.Concat(Enumerable.Repeat(match.Groups["icon"].Value, count)),
+                1);
+        }
+
+        return text;
     }
 
     private static Dictionary<string, object?>? ExportCardDescriptionVars(CardModel card)
