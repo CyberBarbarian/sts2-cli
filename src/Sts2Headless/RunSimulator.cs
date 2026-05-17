@@ -4463,6 +4463,11 @@ public class RunSimulator
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"res://[A-Za-z0-9_./-]+/([A-Za-z0-9_.-]+\.(?:png|webp|jpg|jpeg))",
+            "$1",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\[/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
         text = System.Text.RegularExpressions.Regex.Replace(text, @"#[A-Z](?=\{|[A-Za-z0-9])", "");
         return string.IsNullOrWhiteSpace(text) ? null : text;

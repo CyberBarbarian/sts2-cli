@@ -2,6 +2,23 @@
 
 
 class TestDynamicCardStats:
+    def test_regent_sprite_font_icons_do_not_leak_resource_paths(self, game):
+        state = game.start(character="Regent", seed="regent-sprite-font-icons")
+        deck = {card["name"]: card for card in state["player"]["deck"]}
+
+        venerate = deck["Venerate"]
+
+        assert "res://" not in venerate["description"]
+        assert "star_icon.png" in venerate["description"]
+
+        game.skip_neow(state)
+        game.set_player(relics=["DIVINE_RIGHT"])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        divine_right = next(r for r in state["player"]["relics"] if r["id"] == "DIVINE_RIGHT")
+
+        assert "res://" not in divine_right["description"]
+        assert "star_icon.png" in divine_right["description"]
+
     def test_perfected_strike_exports_current_calculated_damage(self, game):
         state = game.start(seed="perfected-stats")
         game.skip_neow(state)
