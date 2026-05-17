@@ -6582,9 +6582,10 @@ public class RunSimulator
 
         public void ResolvePending(IEnumerable<CardModel> selected)
         {
-            _pendingTcs?.TrySetResult(selected);
+            var pendingTcs = _pendingTcs;
             PendingOptions = null;
             _pendingTcs = null;
+            pendingTcs?.TrySetResult(selected);
         }
 
         public void ResolvePendingByIndices(int[] indices)
@@ -6599,9 +6600,10 @@ public class RunSimulator
 
         public void CancelPending()
         {
-            _pendingTcs?.TrySetResult(Array.Empty<CardModel>());
+            var pendingTcs = _pendingTcs;
             PendingOptions = null;
             _pendingTcs = null;
+            pendingTcs?.TrySetResult(Array.Empty<CardModel>());
         }
 
         // Pending card reward from events (GetSelectedCardReward blocks until resolved)

@@ -689,6 +689,49 @@ class TestCombatEdgeCases:
         assert state["max_select"] == 1
         assert state["cards"]
 
+    def test_follow_up_start_of_combat_selection_is_exported_before_play(self, game):
+        state = game.start(character="Silent", seed="follow-up-start-selection")
+        game.skip_neow(state)
+        game.set_player(
+            hp=9999,
+            max_hp=9999,
+            relics=["GAMBLING_CHIP", "TOOLBOX"],
+            deck=[
+                "FAN_OF_KNIVES",
+                "FAN_OF_KNIVES",
+                "INFINITE_BLADES",
+                "FOLLOW_THROUGH",
+                "NEUTRALIZE",
+                "WELL_LAID_PLANS",
+                "DEFEND_SILENT",
+                "SUCKER_PUNCH",
+                "STRIKE_SILENT",
+                "STRIKE_SILENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="ENTOMANCER_ELITE")
+
+        assert state["decision"] == "card_select"
+
+        state = game.act("skip_select")
+
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 0
+        assert state["max_select"] > 1
+
+        state = game.act("skip_select")
+
+        assert state["decision"] == "combat_play"
+        card = next(card for card in state["hand"] if card["can_play"])
+        args = {"card_index": card["index"]}
+        if card["target_type"] == "AnyEnemy":
+            args["target_index"] = 0
+
+        state = game.act("play_card", **args)
+
+        assert state["type"] != "error"
+        assert state["decision"] == "combat_play"
+
     def test_soul_nexus_death_does_not_leave_combat_active(self, game):
         state = game.start(seed="soul-nexus-death-cleanup")
         game.skip_neow(state)
