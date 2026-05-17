@@ -2905,8 +2905,11 @@ public class RunSimulator
         var options = currentOptions
             .Select((opt, i) =>
             {
+                var engineTitle = EventOptionLocString(localEvent, opt.TextKey, "GetOptionTitle");
+                var engineDescription = EventOptionLocString(localEvent, opt.TextKey, "GetOptionDescription");
+
                 // Try to resolve title via loc tables
-                string? title = ResolveLocString(opt.Title);
+                string? title = ResolveLocString(engineTitle ?? opt.Title);
                 var titleFromEngine = title != null;
                 if (opt.Title != null)
                 {
@@ -2937,7 +2940,7 @@ public class RunSimulator
                 title ??= $"option_{i}";
 
                 // Description: try loc table first
-                string? optDesc = ResolveLocString(opt.Description);
+                string? optDesc = ResolveLocString(engineDescription ?? opt.Description);
                 var descriptionFromEngine = optDesc != null;
                 if (opt.Description != null && !string.IsNullOrEmpty(opt.Description.LocEntryKey))
                 {
@@ -2978,7 +2981,7 @@ public class RunSimulator
 
                 if (opt.Title != null)
                 {
-                    var formattedTitle = ResolveLocString(opt.Title, optVars);
+                    var formattedTitle = ResolveLocString(engineTitle ?? opt.Title, optVars);
                     if (formattedTitle != null)
                     {
                         title = formattedTitle;
@@ -2987,7 +2990,7 @@ public class RunSimulator
                 }
                 if (opt.Description != null)
                 {
-                    var formattedDescription = ResolveLocString(opt.Description, optVars);
+                    var formattedDescription = ResolveLocString(engineDescription ?? opt.Description, optVars);
                     if (formattedDescription != null)
                     {
                         optDesc = formattedDescription;
@@ -3076,10 +3079,186 @@ public class RunSimulator
         int optionIndex)
     {
         var vars = new Dictionary<string, object?>();
+        AddEventDynamicVars(vars, eventEntry, GetPropertyValue(localEvent, "CanonicalVars"));
         AddEventDynamicVars(vars, eventEntry, GetPropertyValue(localEvent, "DynamicVars"));
+        AddEventDynamicVars(vars, eventEntry, GetPropertyValue(option, "CanonicalVars"));
         AddEventDynamicVars(vars, eventEntry, GetPropertyValue(option, "DynamicVars"));
+        var engineTitle = EventOptionLocString(localEvent, option.TextKey, "GetOptionTitle");
+        var engineDescription = EventOptionLocString(localEvent, option.TextKey, "GetOptionDescription");
+        MergeLocStringTokenVars(vars, engineTitle);
+        MergeLocStringTokenVars(vars, engineDescription);
+        MergeLocStringTokenVars(vars, option.Title);
+        MergeLocStringTokenVars(vars, option.Description);
+        AddFormatTokenMemberVars(vars, engineTitle, localEvent, option);
+        AddFormatTokenMemberVars(vars, engineDescription, localEvent, option);
+        AddFormatTokenMemberVars(vars, option.Title, localEvent, option);
+        AddFormatTokenMemberVars(vars, option.Description, localEvent, option);
+        AddPlayerStateFormatTokenVars(vars, engineTitle);
+        AddPlayerStateFormatTokenVars(vars, engineDescription);
+        AddPlayerStateFormatTokenVars(vars, option.Title);
+        AddPlayerStateFormatTokenVars(vars, option.Description);
         AddPotionConversionOptionVars(vars, localEvent, option, optionIndex);
         return vars.Count > 0 ? vars : null;
+    }
+
+    private static void MergeLocStringTokenVars(
+        Dictionary<string, object?> vars,
+        LocString? locString)
+    {
+        var exported = ExportLocStringVariables(locString);
+        if (exported == null || exported.Count == 0)
+            return;
+
+        foreach (var token in LocStringTokenNames(locString))
+        {
+            if (exported.TryGetValue(token, out var value))
+                vars[token] = value;
+        }
+    }
+
+    private static HashSet<string> LocStringTokenNames(LocString? locString)
+    {
+        try
+        {
+            return FormatTokenNames(locString?.GetRawText());
+        }
+        catch
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+    }
+
+    private void AddPlayerStateFormatTokenVars(
+        Dictionary<string, object?> vars,
+        LocString? locString)
+    {
+        string? rawText;
+        try
+        {
+            rawText = locString?.GetRawText();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var token in FormatTokenNames(rawText))
+        {
+            if (vars.ContainsKey(token))
+                continue;
+            if (string.Equals(token, "Gold", StringComparison.OrdinalIgnoreCase))
+                vars[token] = _runState?.Players[0].Gold;
+        }
+    }
+
+    private static LocString? EventOptionLocString(object localEvent, string? textKey, string methodName)
+    {
+        var optionKey = EventOptionKey(textKey);
+        if (string.IsNullOrWhiteSpace(optionKey))
+            return null;
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        try
+        {
+            var method = localEvent.GetType()
+                .GetMethods(flags)
+                .FirstOrDefault(m =>
+                    string.Equals(m.Name, methodName, StringComparison.Ordinal)
+                    && m.ReturnType == typeof(LocString)
+                    && m.GetParameters() is [{ ParameterType: var parameterType }]
+                    && parameterType == typeof(string));
+
+            return method?.Invoke(localEvent, new object[] { optionKey }) as LocString;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? EventOptionKey(string? textKey)
+    {
+        if (string.IsNullOrWhiteSpace(textKey))
+            return null;
+        var parts = textKey.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 0 ? textKey : parts[^1];
+    }
+
+    private static void AddFormatTokenMemberVars(
+        Dictionary<string, object?> vars,
+        LocString? locString,
+        params object?[] sources)
+    {
+        string? rawText;
+        try
+        {
+            rawText = locString?.GetRawText();
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (var token in FormatTokenNames(rawText))
+        {
+            if (vars.ContainsKey(token))
+                continue;
+
+            foreach (var source in sources)
+            {
+                if (TryGetSimpleMemberValue(source, token, out var value))
+                {
+                    vars[token] = value;
+                    break;
+                }
+            }
+        }
+    }
+
+    private static bool TryGetSimpleMemberValue(object? source, string token, out object? value)
+    {
+        value = null;
+        if (source == null)
+            return false;
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        try
+        {
+            foreach (var prop in source.GetType().GetProperties(flags))
+            {
+                if (prop.GetIndexParameters().Length != 0 || !MemberNameMatchesToken(prop.Name, token))
+                    continue;
+                value = ExportLocStringVariableValue(prop.GetValue(source));
+                return true;
+            }
+
+            foreach (var field in source.GetType().GetFields(flags))
+            {
+                if (!MemberNameMatchesToken(field.Name, token))
+                    continue;
+                value = ExportLocStringVariableValue(field.GetValue(source));
+                return true;
+            }
+        }
+        catch { }
+
+        return false;
+    }
+
+    private static bool MemberNameMatchesToken(string memberName, string token)
+    {
+        if (string.Equals(memberName, token, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var normalized = memberName.TrimStart('_');
+        if (string.Equals(normalized, token, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return string.Equals(
+            memberName,
+            $"<{token}>k__BackingField",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private List<Dictionary<string, object?>>? EventOptionHoverTips(EventOption option)

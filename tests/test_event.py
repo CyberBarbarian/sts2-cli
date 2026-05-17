@@ -317,6 +317,21 @@ class TestCrystalSphere:
         )
 
 
+class TestMorphicGrove:
+    def test_morphic_grove_option_description_uses_engine_loc_vars(self, game):
+        state = game.start(seed="morphic-grove-vars")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("event", event="MORPHIC_GROVE")
+
+        group = next(o for o in state["options"] if o["title"] == "Group")
+
+        assert "{Gold}" not in group["description"]
+        assert "Lose 999 Gold." in group["description"]
+        assert "Transform 2 cards." in group["description"]
+        assert group["vars"]["Gold"] == 999
+
+
 class TestByrdonisNest:
     def test_take_option_names_byrdonis_egg(self, game):
         state = game.start(seed="byrdonis-nest-card-var")
