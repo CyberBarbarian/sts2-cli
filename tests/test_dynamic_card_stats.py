@@ -254,6 +254,51 @@ class TestDynamicCardStats:
         assert target["unblocked_total_damage"] == 0
         assert "unblocked_damage" not in target
 
+    def test_heavenly_drill_exports_doubled_x_target_repeat_at_threshold(self, game):
+        state = game.start(character="Regent", seed="heavenly-drill-threshold-stats")
+        game.skip_neow(state)
+        game.set_player(
+            relics=[],
+            deck=[
+                "BIG_BANG",
+                "HEAVENLY_DRILL",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="FROG_KNIGHT_NORMAL")
+
+        big_bang = next(c for c in state["hand"] if c["name"] == "Big Bang")
+        state = game.act("play_card", card_index=big_bang["index"])
+
+        drill = next(c for c in state["hand"] if c["name"] == "Heavenly Drill")
+        assert drill["cost"] == "X"
+        assert drill["x_value"] == 4
+        target = drill["stats"]["damage_by_target"][0]
+        assert target["repeat"] == 8
+        assert target["total_damage"] == target["damage"] * target["repeat"]
+        assert target["unblocked_total_damage"] == max(
+            0,
+            target["total_damage"] - target["block"],
+        )
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act(
+            "play_card",
+            card_index=drill["index"],
+            target_index=target["target_index"],
+        )
+        hp_after = next(
+            (
+                enemy["hp"]
+                for enemy in state.get("enemies", [])
+                if enemy["name"] == target["target_name"]
+            ),
+            0,
+        )
+        assert hp_before - hp_after == target["unblocked_total_damage"]
+
     def test_dynamic_zero_hit_attack_exports_zero_target_damage(self, game):
         state = game.start(character="Regent", seed="radiate-zero-hit-stats")
         game.skip_neow(state)

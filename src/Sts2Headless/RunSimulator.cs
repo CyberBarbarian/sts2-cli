@@ -5038,7 +5038,7 @@ public class RunSimulator
 
         try
         {
-            stats["repeat"] = GetEnergyXValue(card);
+            stats["repeat"] = GetEnergyXAttackRepeat(card);
         }
         catch { }
     }
@@ -5079,6 +5079,22 @@ public class RunSimulator
         }
         catch { }
         return Math.Max(0, amount);
+    }
+
+    private static int GetEnergyXAttackRepeat(CardModel card)
+    {
+        var repeat = GetEnergyXValue(card);
+        if (repeat <= 0)
+            return repeat;
+
+        if (card is HeavenlyDrill
+            && GetCardDynamicVarInt(card, "Energy") is { } threshold
+            && repeat >= threshold)
+        {
+            return repeat * 2;
+        }
+
+        return repeat;
     }
 
     private static void AddEnergyCostDetails(Dictionary<string, object?> cardInfo, CardModel card)
@@ -5560,6 +5576,20 @@ public class RunSimulator
         catch
         {
             return false;
+        }
+    }
+
+    private static int? GetCardDynamicVarInt(CardModel card, string name)
+    {
+        try
+        {
+            return card.DynamicVars.Values
+                .FirstOrDefault(dv => string.Equals(dv.Name, name, StringComparison.OrdinalIgnoreCase))
+                ?.IntValue;
+        }
+        catch
+        {
+            return null;
         }
     }
 
