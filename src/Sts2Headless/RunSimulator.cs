@@ -316,6 +316,8 @@ public class RunSimulator
     private CardModel? _pendingCardSelectionSourceCard;
     private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
     private string? _preCurrentRoomSaveJson;
+    private object? _starSpendTrackerCombatState;
+    private int? _starSpendObservedRound;
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
@@ -1149,6 +1151,8 @@ public class RunSimulator
         var card = hand[cardIndex];
         if (card.Type == CardType.None)
             return Error($"Cannot play card {card.GetType().Name}: uninitialized card type");
+        var starCostBeforePlay = TryGetCurrentStarCost(card);
+        var starsBeforePlay = pcs.Stars;
 
         // Determine target based on card's TargetType first.
         // Self/None/All cards: target = null (game handles internally).
@@ -1182,6 +1186,8 @@ public class RunSimulator
         var playAction = new PlayCardAction(card, target);
         RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
         WaitForActionExecutor();
+        if (starCostBeforePlay > 0 && starsBeforePlay >= starCostBeforePlay)
+            MarkStarsSpentThisTurn();
         _pendingCardSelectionSourceCard = _cardSelector.HasPending ? card : null;
 
         // Some engine effects return the played card to hand. The CLI should
@@ -5300,6 +5306,42 @@ public class RunSimulator
         return Math.Max(0, knownAdjustedTargetDamage + otherTargetAdjustment);
     }
 
+    private static int TryGetCurrentStarCost(CardModel card)
+    {
+        try
+        {
+            return card.CurrentStarCost;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private void SyncStarSpendTrackerToCurrentCombat(object? combatState)
+    {
+        if (combatState == null)
+        {
+            _starSpendTrackerCombatState = null;
+            _starSpendObservedRound = null;
+            return;
+        }
+
+        if (!ReferenceEquals(_starSpendTrackerCombatState, combatState))
+        {
+            _starSpendTrackerCombatState = combatState;
+            _starSpendObservedRound = null;
+        }
+    }
+
+    private void MarkStarsSpentThisTurn()
+    {
+        var combatState = CombatManager.Instance.DebugOnlyGetState();
+        SyncStarSpendTrackerToCurrentCombat(combatState);
+        if (combatState != null)
+            _starSpendObservedRound = TryGetIntMember(combatState, "RoundNumber", "Round");
+    }
+
     private int GetPendingStarSpendStrengthDelta(CardModel card, Player? player)
     {
         if (card.Type != CardType.Attack || player?.PlayerCombatState == null)
@@ -5316,6 +5358,12 @@ public class RunSimulator
         }
 
         if (starCost <= 0 || player.PlayerCombatState.Stars < starCost)
+            return 0;
+
+        var combatState = CombatManager.Instance.DebugOnlyGetState();
+        SyncStarSpendTrackerToCurrentCombat(combatState);
+        var round = combatState != null ? TryGetIntMember(combatState, "RoundNumber", "Round") : null;
+        if (round.HasValue && _starSpendObservedRound == round.Value)
             return 0;
 
         var starsSpentThisTurn = TryGetIntMember(
@@ -5918,6 +5966,9 @@ public class RunSimulator
             if (value is long l) return checked((int)l);
             if (value is short s) return s;
             if (value is byte b) return b;
+            if (value is float f) return checked((int)f);
+            if (value is double d) return checked((int)d);
+            if (value is decimal m) return checked((int)m);
         }
         return null;
     }

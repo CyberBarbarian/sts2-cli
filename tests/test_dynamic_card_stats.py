@@ -385,6 +385,35 @@ class TestDynamicCardStats:
         hp_after = state["enemies"][0]["hp"]
         assert hp_before - hp_after == target["unblocked_damage"]
 
+    def test_star_spend_strength_relic_applies_once_per_turn_export(self, game):
+        state = game.start(character="Regent", seed="mini-regent-second-star-spend")
+        game.skip_neow(state)
+        game.set_player(
+            relics=["DIVINE_RIGHT", "MINI_REGENT"],
+            deck=[
+                "BIG_BANG",
+                "GUIDING_STAR",
+                "FALLING_STAR",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="FROG_KNIGHT_NORMAL")
+
+        big_bang = next(card for card in state["hand"] if card["name"] == "Big Bang")
+        state = game.act("play_card", card_index=big_bang["index"])
+
+        guiding_star = next(card for card in state["hand"] if card["name"] == "Guiding Star")
+        state = game.act("play_card", card_index=guiding_star["index"], target_index=0)
+
+        falling_star = next(card for card in state["hand"] if card["name"] == "Falling Star")
+        target = falling_star["stats"]["damage_by_target"][0]
+        assert "pre_attack_strength_delta" not in target
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=falling_star["index"], target_index=0)
+        assert hp_before - state["enemies"][0]["hp"] == target["unblocked_damage"]
+
     def test_star_spend_strength_relic_respects_intangible_export(self, game):
         state = game.start(character="Regent", seed="mini-regent-intangible-stats")
         game.skip_neow(state)
