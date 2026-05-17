@@ -2497,7 +2497,7 @@ public class RunSimulator
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["description"] = CardDescription(c, stats, includeCombatText: true),
             };
-            AddEnergyCostDetails(cardInfo, c);
+            AddEnergyCostDetails(cardInfo, c, includeCurrentXValue: true);
             if (starCost > 0)
             {
                 cardInfo["star_cost"] = starCost;
@@ -5221,11 +5221,16 @@ public class RunSimulator
         return repeat;
     }
 
-    private static void AddEnergyCostDetails(Dictionary<string, object?> cardInfo, CardModel card)
+    private static void AddEnergyCostDetails(
+        Dictionary<string, object?> cardInfo,
+        CardModel card,
+        bool includeCurrentXValue = false)
     {
         try
         {
             if (card.EnergyCost?.CostsX != true)
+                return;
+            if (!includeCurrentXValue)
                 return;
 
             cardInfo["energy_cost"] = GetEnergyAmountToSpend(card);

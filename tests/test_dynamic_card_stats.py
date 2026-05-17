@@ -191,6 +191,32 @@ class TestDynamicCardStats:
         state = game.act("play_card", card_index=dismantle["index"], target_index=0)
         assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
 
+    def test_x_cost_details_are_limited_to_combat_hand(self, game):
+        state = game.start(seed="whirlwind-x-cost-display-only")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "WHIRLWIND",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+        ])
+
+        state = game.enter_room("rest_site")
+        deck_whirlwind = next(c for c in state["player"]["deck"] if c["name"] == "Whirlwind")
+        assert deck_whirlwind["cost"] == "X"
+        assert "energy_cost" not in deck_whirlwind
+        assert "x_value" not in deck_whirlwind
+        assert deck_whirlwind["after_upgrade"]["cost"] == "X"
+        assert "energy_cost" not in deck_whirlwind["after_upgrade"]
+        assert "x_value" not in deck_whirlwind["after_upgrade"]
+
+        state = game.enter_room("combat", encounter="SLIMES_WEAK")
+        hand_whirlwind = next(c for c in state["hand"] if c["name"] == "Whirlwind")
+        assert hand_whirlwind["cost"] == "X"
+        assert hand_whirlwind["energy_cost"] == state["energy"]
+        assert hand_whirlwind["x_value"] == state["energy"]
+
     def test_x_cost_aoe_exports_current_repeat_damage(self, game):
         state = game.start(seed="whirlwind-current-repeat-stats")
         game.skip_neow(state)
