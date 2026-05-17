@@ -135,6 +135,8 @@ class TestDenseVegetation:
 
         assert trudge["vars"]["Gold"] > 0
         assert trudge["vars"]["HpLoss"] > 0
+        assert f"Gain {trudge['vars']['Gold']} Gold." in trudge["description"]
+        assert "Remove a card" not in trudge["description"]
 
         hp_before = state["player"]["hp"]
         gold_before = state["player"]["gold"]

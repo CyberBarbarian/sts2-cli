@@ -138,7 +138,7 @@
   "DENSE_VEGETATION.pages.INITIAL.description": "你在错路上走了一段时间之后，你发现自己置身于一片由[green]蕨类[/green]、[green]灌木[/green]和[green]藤蔓[/green]构成的茂密丛林中。尤其是[green]藤蔓[/green]。精疲力竭的感觉油然而生，一个可怕的念头随之浮现在脑海里：\n\n[sine][purple]“你迷路了，毫无防备，而死亡的阴影正悄然逼近。”[/purple][/sine]\n\n你要怎么办呢？",
   "DENSE_VEGETATION.pages.INITIAL.options.REST.description": "回复[green]{Heal}[/green]点生命。[red]进入战斗[/red]。",
   "DENSE_VEGETATION.pages.INITIAL.options.REST.title": "休息",
-  "DENSE_VEGETATION.pages.INITIAL.options.TRUDGE_ON.description": "从你的[gold]牌组[/gold]中移除一张牌。失去[red]{HpLoss}[/red]点生命。",
+  "DENSE_VEGETATION.pages.INITIAL.options.TRUDGE_ON.description": "获得[blue]{Gold}[/blue] [gold]金币[/gold]。失去[red]{HpLoss}[/red]点生命。",
   "DENSE_VEGETATION.pages.INITIAL.options.TRUDGE_ON.title": "坚持跋涉",
   "DENSE_VEGETATION.pages.REST.description": "你精疲力竭，小歇了片刻…\n\n…不料却被[gold][jitter]在你身上蠕动的什么东西[/jitter][/gold]惊醒了！",
   "DENSE_VEGETATION.pages.REST.options.FIGHT.title": "战！",
