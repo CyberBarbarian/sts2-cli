@@ -5215,13 +5215,23 @@ public class RunSimulator
                 return;
 
             var repeat = GetStatInt(stats, "repeat", 1);
+            var pendingStrengthDelta = GetPendingStarSpendStrengthDelta(card, player);
             for (int i = 0; i < enemies.Count; i++)
             {
                 var enemy = enemies[i];
                 var previewStats = TryGetCardPreviewStats(card, CardPreviewMode.MultiCreatureTargeting, enemy);
                 var vulnerable = GetCreaturePowerAmount(enemy, "VULNERABLE", "Vulnerable");
                 var slow = GetCreaturePowerAmount(enemy, "SLOW", "Slow");
-                var targetDamage = previewStats?.GetValueOrDefault("damage") ?? Convert.ToInt32(damageObj);
+                var untargetedDamage = Convert.ToInt32(damageObj);
+                var targetDamage = previewStats?.GetValueOrDefault("damage") ?? untargetedDamage;
+                if (pendingStrengthDelta > 0)
+                {
+                    targetDamage = AdjustTargetDamageForPendingStrength(
+                        untargetedDamage,
+                        targetDamage,
+                        pendingStrengthDelta,
+                        vulnerable);
+                }
                 var previewRepeat = previewStats != null && previewStats.TryGetValue("repeat", out var repeatValue)
                     ? repeatValue
                     : repeat;
@@ -5244,6 +5254,10 @@ public class RunSimulator
                 {
                     row["slow"] = slow;
                 }
+                if (pendingStrengthDelta > 0)
+                {
+                    row["pre_attack_strength_delta"] = pendingStrengthDelta;
+                }
                 if (targetRepeat != 1)
                 {
                     row["repeat"] = targetRepeat;
@@ -5264,6 +5278,70 @@ public class RunSimulator
 
         if (rows.Count > 0)
             stats["damage_by_target"] = rows;
+    }
+
+    private static int AdjustTargetDamageForPendingStrength(
+        int untargetedDamage,
+        int targetDamage,
+        int strengthDelta,
+        int vulnerable)
+    {
+        var knownCurrentTargetDamage = untargetedDamage;
+        var knownAdjustedTargetDamage = untargetedDamage + strengthDelta;
+
+        if (vulnerable > 0)
+        {
+            knownCurrentTargetDamage = (int)Math.Floor(knownCurrentTargetDamage * 1.5m);
+            knownAdjustedTargetDamage = (int)Math.Floor(knownAdjustedTargetDamage * 1.5m);
+        }
+
+        var otherTargetAdjustment = targetDamage - knownCurrentTargetDamage;
+        return Math.Max(0, knownAdjustedTargetDamage + otherTargetAdjustment);
+    }
+
+    private int GetPendingStarSpendStrengthDelta(CardModel card, Player? player)
+    {
+        if (card.Type != CardType.Attack || player?.PlayerCombatState == null)
+            return 0;
+
+        int starCost;
+        try
+        {
+            starCost = card.CurrentStarCost;
+        }
+        catch
+        {
+            return 0;
+        }
+
+        if (starCost <= 0 || player.PlayerCombatState.Stars < starCost)
+            return 0;
+
+        var starsSpentThisTurn = TryGetIntMember(
+            player.PlayerCombatState,
+            "StarsSpent",
+            "_starsSpent",
+            "LastStarsSpent",
+            "_lastStarsSpent");
+        if (starsSpentThisTurn.GetValueOrDefault() > 0)
+            return 0;
+
+        var delta = 0;
+        try
+        {
+            foreach (var relic in player.Relics ?? Enumerable.Empty<RelicModel>())
+            {
+                if (!string.Equals(relic.Id.Entry, "MINI_REGENT", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var vars = RelicVars(relic);
+                if (vars.TryGetValue("StrengthPower", out var value) && value != null)
+                    delta += Convert.ToInt32(value);
+            }
+        }
+        catch { }
+
+        return delta;
     }
 
     private void AddCalculatedDamageByTarget(Dictionary<string, object?> stats, CardModel card, Player? player)

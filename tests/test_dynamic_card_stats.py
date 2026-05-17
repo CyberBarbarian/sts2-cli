@@ -322,6 +322,69 @@ class TestDynamicCardStats:
         assert target["unblocked_total_damage"] == 0
         assert "unblocked_damage" not in target
 
+    def test_star_spend_strength_relic_updates_target_damage_export(self, game):
+        state = game.start(character="Regent", seed="mini-regent-comet-stats")
+        game.skip_neow(state)
+        game.set_player(
+            relics=["DIVINE_RIGHT", "MINI_REGENT"],
+            deck=[
+                "VENERATE",
+                "COMET",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="FROG_KNIGHT_NORMAL")
+
+        venerate = next(c for c in state["hand"] if c["name"] == "Venerate")
+        state = game.act("play_card", card_index=venerate["index"])
+
+        comet = next(c for c in state["hand"] if c["name"] == "Comet")
+        target = comet["stats"]["damage_by_target"][0]
+        hp_before = state["enemies"][0]["hp"]
+
+        state = game.act(
+            "play_card",
+            card_index=comet["index"],
+            target_index=target["target_index"],
+        )
+
+        hp_after = state["enemies"][0]["hp"]
+        assert hp_before - hp_after == target["unblocked_damage"]
+
+    def test_star_spend_strength_relic_updates_vulnerable_target_damage_export(self, game):
+        state = game.start(character="Regent", seed="mini-regent-comet-vulnerable-stats")
+        game.skip_neow(state)
+        game.set_player(
+            relics=["DIVINE_RIGHT", "MINI_REGENT", "BAG_OF_MARBLES"],
+            deck=[
+                "VENERATE",
+                "COMET",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="FROG_KNIGHT_NORMAL")
+
+        venerate = next(c for c in state["hand"] if c["name"] == "Venerate")
+        state = game.act("play_card", card_index=venerate["index"])
+
+        comet = next(c for c in state["hand"] if c["name"] == "Comet")
+        target = comet["stats"]["damage_by_target"][0]
+        assert target["vulnerable"] > 0
+        hp_before = state["enemies"][0]["hp"]
+
+        state = game.act(
+            "play_card",
+            card_index=comet["index"],
+            target_index=target["target_index"],
+        )
+
+        hp_after = state["enemies"][0]["hp"]
+        assert hp_before - hp_after == target["unblocked_damage"]
+
     def test_fixed_multi_hit_attack_exports_repeat_damage(self, game):
         state = game.start(seed="twin-strike-repeat-stats")
         game.skip_neow(state)
