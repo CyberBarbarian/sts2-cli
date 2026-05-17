@@ -606,6 +606,31 @@ class TestSapphireSeed:
         assert "energy_icon.png" in cinder["after_upgrade"]["description"]
 
 
+class TestSelfHelpBook:
+    def test_swift_upgrade_preview_does_not_duplicate_enchantment_text(self, game):
+        state = game.start(seed="self-help-book-swift-upgrade-preview")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "ROLLING_BOULDER",
+            "STRIKE_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "DEFEND_IRONCLAD",
+            "BASH",
+        ])
+        state = game.enter_room("event", event="SELF_HELP_BOOK")
+
+        read_book = next(o for o in state["options"] if o["title"] == "Read the Entire Book")
+        state = game.act("choose_option", option_index=read_book["index"])
+        if state["decision"] == "card_select":
+            rolling_boulder = next(c for c in state["cards"] if c["name"] == "Rolling Boulder")
+            state = game.act("select_cards", indices=str(rolling_boulder["index"]))
+
+        rolling_boulder = next(c for c in state["player"]["deck"] if c["name"] == "Rolling Boulder")
+        description = rolling_boulder["after_upgrade"]["description"].lower()
+
+        assert description.count("draw 2 cards") == 1
+
+
 class TestNonupeipe:
     def test_relic_option_energy_icons_are_formatted(self, game):
         state = game.start(seed="nonupeipe-antler-5")

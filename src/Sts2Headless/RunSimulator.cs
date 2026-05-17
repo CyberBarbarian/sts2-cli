@@ -5941,12 +5941,15 @@ public class RunSimulator
         Dictionary<string, object?>? stats = null)
     {
         var description = CardDescription(upgradedCard, stats);
-        return AppendSourceEnhancementDescriptions(description, sourceCard);
+        return AppendSourceEnhancementDescriptions(description, sourceCard, upgradedCard);
     }
 
-    private string AppendSourceEnhancementDescriptions(string description, CardModel sourceCard)
+    private string AppendSourceEnhancementDescriptions(
+        string description,
+        CardModel sourceCard,
+        CardModel upgradedCard)
     {
-        foreach (var enhancementText in SourceEnhancementDescriptions(sourceCard))
+        foreach (var enhancementText in SourceEnhancementDescriptions(sourceCard, upgradedCard))
         {
             if (string.IsNullOrWhiteSpace(enhancementText))
                 continue;
@@ -5959,26 +5962,32 @@ public class RunSimulator
         return description;
     }
 
-    private IEnumerable<string> SourceEnhancementDescriptions(CardModel sourceCard)
+    private IEnumerable<string> SourceEnhancementDescriptions(CardModel sourceCard, CardModel upgradedCard)
     {
         if (sourceCard.Enchantment != null)
         {
-            var entry = sourceCard.Enchantment.Id.Entry;
-            var vars = ExportEnhancementVars(sourceCard.Enchantment);
-            var text = EngineLocStringText(sourceCard.Enchantment.DynamicDescription)
-                       ?? InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
-            if (!string.IsNullOrWhiteSpace(text))
-                yield return text;
+            if (upgradedCard.Enchantment?.Id.Entry != sourceCard.Enchantment.Id.Entry)
+            {
+                var entry = sourceCard.Enchantment.Id.Entry;
+                var vars = ExportEnhancementVars(sourceCard.Enchantment);
+                var text = EngineLocStringText(sourceCard.Enchantment.DynamicDescription)
+                           ?? InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
+                if (!string.IsNullOrWhiteSpace(text))
+                    yield return text;
+            }
         }
 
         if (sourceCard.Affliction != null)
         {
-            var entry = sourceCard.Affliction.Id.Entry;
-            var vars = ExportEnhancementVars(sourceCard.Affliction);
-            var text = EngineLocStringText(sourceCard.Affliction.DynamicDescription)
-                       ?? InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
-            if (!string.IsNullOrWhiteSpace(text))
-                yield return text;
+            if (upgradedCard.Affliction?.Id.Entry != sourceCard.Affliction.Id.Entry)
+            {
+                var entry = sourceCard.Affliction.Id.Entry;
+                var vars = ExportEnhancementVars(sourceCard.Affliction);
+                var text = EngineLocStringText(sourceCard.Affliction.DynamicDescription)
+                           ?? InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
+                if (!string.IsNullOrWhiteSpace(text))
+                    yield return text;
+            }
         }
     }
 
