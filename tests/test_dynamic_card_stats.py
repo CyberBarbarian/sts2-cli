@@ -385,6 +385,83 @@ class TestDynamicCardStats:
         hp_after = state["enemies"][0]["hp"]
         assert hp_before - hp_after == target["unblocked_damage"]
 
+    def test_star_spend_strength_relic_respects_intangible_export(self, game):
+        state = game.start(character="Regent", seed="mini-regent-intangible-stats")
+        game.skip_neow(state)
+        game.set_player(
+            hp=9999,
+            max_hp=9999,
+            relics=["DIVINE_RIGHT", "MINI_REGENT", "LANTERN"],
+            deck=(
+                ["BLUDGEON"] * 12
+                + ["VENERATE"] * 6
+                + ["ASTRAL_PULSE"] * 6
+                + ["SOLAR_STRIKE"] * 6
+                + ["DEFEND_REGENT"] * 10
+            ),
+        )
+        state = game.enter_room("combat", encounter="TEST_SUBJECT_BOSS")
+
+        for _ in range(90):
+            if state.get("decision") != "combat_play":
+                state = game.act("proceed")
+                continue
+
+            enemies = state.get("enemies") or []
+            enemy = enemies[0] if enemies else {}
+            is_phase_three = enemy.get("max_hp", 0) >= 300
+            is_intangible = any(
+                power.get("name") == "Intangible"
+                for power in enemy.get("powers", [])
+            )
+
+            if is_phase_three:
+                if is_intangible:
+                    astral = next(
+                        (card for card in state["hand"] if card["name"] == "Astral Pulse"),
+                        None,
+                    )
+                    if state.get("stars", 0) >= 3 and astral and astral.get("can_play"):
+                        target = astral["stats"]["damage_by_target"][0]
+                        assert target["damage"] == 1
+                        assert target["unblocked_damage"] == 1
+
+                        hp_before = enemy["hp"]
+                        state = game.act("play_card", card_index=astral["index"])
+                        assert hp_before - state["enemies"][0]["hp"] == target["unblocked_damage"]
+                        return
+
+                    if state.get("stars", 0) < 3:
+                        venerate = next(
+                            (card for card in state["hand"] if card["name"] == "Venerate" and card.get("can_play")),
+                            None,
+                        )
+                        if venerate:
+                            state = game.act("play_card", card_index=venerate["index"])
+                            continue
+
+                        solar = next(
+                            (card for card in state["hand"] if card["name"] == "Solar Strike" and card.get("can_play")),
+                            None,
+                        )
+                        if solar:
+                            state = game.act("play_card", card_index=solar["index"], target_index=0)
+                            continue
+
+                state = game.act("end_turn")
+                continue
+
+            bludgeon = next(
+                (card for card in state["hand"] if card["name"] == "Bludgeon" and card.get("can_play")),
+                None,
+            )
+            if bludgeon:
+                state = game.act("play_card", card_index=bludgeon["index"], target_index=0)
+            else:
+                state = game.act("end_turn")
+
+        raise AssertionError("Did not reach Intangible Astral Pulse regression state")
+
     def test_fixed_multi_hit_attack_exports_repeat_damage(self, game):
         state = game.start(seed="twin-strike-repeat-stats")
         game.skip_neow(state)

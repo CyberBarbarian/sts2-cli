@@ -5222,9 +5222,10 @@ public class RunSimulator
                 var previewStats = TryGetCardPreviewStats(card, CardPreviewMode.MultiCreatureTargeting, enemy);
                 var vulnerable = GetCreaturePowerAmount(enemy, "VULNERABLE", "Vulnerable");
                 var slow = GetCreaturePowerAmount(enemy, "SLOW", "Slow");
+                var intangible = GetCreaturePowerAmount(enemy, "INTANGIBLE", "Intangible") > 0;
                 var untargetedDamage = Convert.ToInt32(damageObj);
                 var targetDamage = previewStats?.GetValueOrDefault("damage") ?? untargetedDamage;
-                if (pendingStrengthDelta > 0)
+                if (pendingStrengthDelta > 0 && !intangible)
                 {
                     targetDamage = AdjustTargetDamageForPendingStrength(
                         untargetedDamage,
