@@ -1,6 +1,7 @@
 """Tests for events."""
 from collections import Counter
 from pathlib import Path
+import time
 
 import pytest
 
@@ -228,6 +229,28 @@ class TestCrystalSphere:
             and state.get("event_name") == "Crystal Sphere"
             and any(o["title"] == "Uncover Future" for o in state.get("options", []))
         )
+
+    def test_crystal_sphere_card_reward_pending_does_not_block_proceed(self, game):
+        state = game.start(character="Necrobinder", seed="crystal-sphere-card-reward-race")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("event", event="CRYSTAL_SPHERE")
+
+        option = next(o for o in state["options"] if o["title"] == "Uncover Future")
+        state = game.act("choose_option", option_index=option["index"])
+
+        for x, y in [(5, 5), (3, 0), (5, 0)]:
+            state = game.act("crystal_sphere_click_cell", x=x, y=y)
+
+        assert state["decision"] == "crystal_sphere"
+        assert state["can_proceed"] is True
+        assert any(item["item_kind"] == "card_reward" for item in state["revealed_items"])
+
+        time.sleep(0.5)
+        state = game.act("crystal_sphere_proceed")
+
+        assert state["type"] != "error"
+        assert state["decision"] == "card_reward"
 
     def test_crystal_sphere_exports_partial_item_fragments(self, game):
         state = game.start(seed="crystal-partial-0")
