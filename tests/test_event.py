@@ -1,5 +1,6 @@
 """Tests for events."""
 from collections import Counter
+import json
 from pathlib import Path
 import time
 
@@ -616,6 +617,40 @@ class TestNonupeipe:
         assert "{Energy:energyIcons()}" not in antler["description"]
         assert "energy_icon.png" in antler["description"]
         assert "1 Energy" not in antler["description"]
+
+
+class TestPaelAncient:
+    def test_tears_option_formats_energy_icons(self, game, tmp_path):
+        state = game.start(
+            character="Regent",
+            seed="manual-regent-a10-serious-20260518-03",
+            ascension=10,
+        )
+        state = game.skip_neow(state)
+
+        save_path = tmp_path / "act_two_map.save"
+        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+        assert save_result["success"] is True
+
+        save_data = json.loads(save_path.read_text())
+        save_data["current_act_index"] = 1
+        save_data["visited_map_coords"] = []
+        save_path.write_text(json.dumps(save_data))
+
+        state = game.send({"cmd": "load_save", "path": str(save_path), "lang": "en"})
+        ancient = next(choice for choice in state["choices"] if choice["type"] == "Ancient")
+        state = game.act("select_map_node", col=ancient["col"], row=ancient["row"])
+
+        tears = next(option for option in state["options"] if option["title"] == "Pael's Tears")
+
+        assert "{energyPrefix:energyIcons(1)}" not in tears["description"]
+        assert "{Energy:energyIcons()}" not in tears["description"]
+        assert "regent_energy_icon.png" in tears["description"]
+        assert "1 Energy" not in tears["description"]
+
+        claw = next(option for option in state["options"] if option["title"] == "Pael's Claw")
+        assert "with 0" not in claw["description"]
+        assert "Goopy" in claw["description"]
 
 
 class TestWoodCarvings:

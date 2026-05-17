@@ -3026,6 +3026,8 @@ public class RunSimulator
                     }
                     catch { }
                 }
+                if (optVars != null)
+                    AddEventOptionHoverTipNameVars(optVars, opt);
 
                 if (opt.Title != null)
                 {
@@ -3049,9 +3051,9 @@ public class RunSimulator
                 {
                     var parts = opt.TextKey.Split('.');
                     var optionId = parts.Length > 0 ? parts[^1] : opt.TextKey;
-                    var relicDescription = EngineLocStringText(
-                        new LocString("relics", optionId + ".description"),
-                        optVars);
+                    var relicDescription =
+                        EngineLocStringText(new LocString("relics", optionId + ".description"), optVars)
+                        ?? RelicOptionDescription(optionId);
                     if (relicDescription != null)
                     {
                         optDesc = relicDescription;
@@ -3061,7 +3063,7 @@ public class RunSimulator
                 if (!titleFromEngine)
                     title = InterpolateDynamicVars(title, optVars) ?? title;
                 if (!descriptionFromEngine)
-                    optDesc = InterpolateDynamicVars(optDesc, optVars);
+                    optDesc = CleanResolvedEngineText(InterpolateDynamicVars(optDesc, optVars) ?? optDesc);
 
                 var exportedOption = new Dictionary<string, object?>
                 {
@@ -3113,6 +3115,25 @@ public class RunSimulator
         };
     }
 
+    private string? RelicOptionDescription(string optionId)
+    {
+        try
+        {
+            var relicModel = ModelDb.GetById<RelicModel>(new ModelId("RELIC", optionId));
+            if (relicModel == null)
+                return null;
+
+            var info = RelicInfo(relicModel.ToMutable());
+            return info.TryGetValue("description", out var description)
+                ? CleanResolvedEngineText(description as string)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private Dictionary<string, object?>? ExportEventVars(string eventEntry, object localEvent)
     {
         var vars = new Dictionary<string, object?>();
@@ -3147,6 +3168,19 @@ public class RunSimulator
         AddPlayerStateFormatTokenVars(vars, option.Description);
         AddPotionConversionOptionVars(vars, localEvent, option, optionIndex);
         return vars.Count > 0 ? vars : null;
+    }
+
+    private void AddEventOptionHoverTipNameVars(Dictionary<string, object?> vars, EventOption option)
+    {
+        if (!vars.TryGetValue("EnchantmentName", out var value) || !IsNumericDisplayValue(value))
+            return;
+
+        var tips = EventOptionHoverTips(option);
+        var title = tips?
+            .Select(tip => tip.TryGetValue("title", out var rawTitle) ? rawTitle as string : null)
+            .FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
+        if (!string.IsNullOrWhiteSpace(title))
+            vars["EnchantmentName"] = title;
     }
 
     private static void MergeLocStringTokenVars(
@@ -4420,12 +4454,43 @@ public class RunSimulator
 
         var engineText = EngineLocStringText(locString, vars);
         if (!string.IsNullOrWhiteSpace(engineText))
-            return engineText;
+            return PreferDisplayVarInterpolation(locString, vars, engineText);
 
         var text = _loc.Bilingual(locString.LocTable, locString.LocEntryKey);
         if (text == locString.LocEntryKey)
             return null;
-        return InterpolateDynamicVars(text, vars);
+        var interpolated = InterpolateDynamicVars(text, vars);
+        return CleanResolvedEngineText(interpolated);
+    }
+
+    private static string? PreferDisplayVarInterpolation(
+        LocString? locString,
+        Dictionary<string, object?>? vars,
+        string engineText)
+    {
+        if (locString == null || vars == null || vars.Count == 0)
+            return engineText;
+
+        string? rawText;
+        try
+        {
+            rawText = locString.GetRawText();
+        }
+        catch
+        {
+            return engineText;
+        }
+
+        var tokenNames = FormatTokenNames(rawText);
+        var hasMissingStringDisplay = vars.Any(kv =>
+            kv.Value is string textValue
+            && tokenNames.Contains(kv.Key)
+            && !string.IsNullOrWhiteSpace(textValue)
+            && !engineText.Contains(textValue, StringComparison.Ordinal));
+        if (!hasMissingStringDisplay)
+            return engineText;
+
+        return CleanResolvedEngineText(InterpolateDynamicVars(rawText, vars)) ?? engineText;
     }
 
     private static string? EngineLocStringText(LocString? locString, Dictionary<string, object?>? vars = null)
