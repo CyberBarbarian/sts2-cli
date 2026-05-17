@@ -36,8 +36,8 @@ Or just run `python3 python/play.py` — it auto-detects and sets up on first ru
 ## Play
 
 ```bash
-python3 python/play.py                        # interactive (Chinese)
-python3 python/play.py --lang en              # interactive (English)
+python3 python/play.py                        # interactive (English)
+python3 python/play.py --lang zh              # interactive (Chinese)
 python3 python/play.py --ascension 10         # Ascension 10
 python3 python/play.py --character Silent      # play as Silent
 ```
@@ -169,8 +169,8 @@ cd sts2-cli
 ## 玩
 
 ```bash
-python3 python/play.py                        # 中文交互模式
-python3 python/play.py --lang en              # English
+python3 python/play.py                        # English
+python3 python/play.py --lang zh              # 中文交互模式
 python3 python/play.py --ascension 10         # 渐进难度 10
 python3 python/play.py --character Silent      # 选择静默猎手
 ```

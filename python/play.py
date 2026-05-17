@@ -191,8 +191,8 @@ def ensure_setup():
             sys.exit(1)
         print("  ✓ Build succeeded")
 
-# Language setting (set by --lang flag)
-LANG = "zh"  # "en", "zh", or "both"
+# Language setting (set by --lang flag).
+LANG = "en"  # "en", "zh", or "both"
 
 
 def card_energy_cost(card, default=99):
@@ -2247,7 +2247,7 @@ if __name__ == "__main__":
     parser.add_argument("--ascension", type=int, default=0,
                        choices=range(0, 11), metavar="0-10",
                        help="Ascension level (0-10)")
-    parser.add_argument("--lang", type=str, default="zh",
+    parser.add_argument("--lang", type=str, default="en",
                        choices=["en", "zh", "both"],
                        help="Display language: en, zh, or both")
     parser.add_argument("--no-log", action="store_true",
