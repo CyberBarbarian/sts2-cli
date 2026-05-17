@@ -1171,14 +1171,61 @@ public class RunSimulator
 
         Log($"Playing card {card.GetType().Name} (index {cardIndex}) targeting {(target != null ? target.Monster?.GetType().Name ?? "creature" : "none")}");
 
+        var mutationBefore = CombatMutationSignature(player);
+
         var playAction = new PlayCardAction(card, target);
         RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
         WaitForActionExecutor();
 
         // Some engine effects return the played card to hand. The CLI should
-        // trust the completed PlayCardAction instead of treating hand removal
-        // as the success signal.
+        // not treat hand removal as the success signal, but a completed play
+        // must still mutate visible combat state.
+        var mutationAfter = CombatMutationSignature(player);
+        var handAfter = pcs.Hand.Cards;
+        if (mutationAfter == mutationBefore
+            && cardIndex < handAfter.Count
+            && ReferenceEquals(handAfter[cardIndex], card))
+        {
+            return Error($"Card play produced no observable state change: {card.GetType().Name} [{card.Id}]");
+        }
+
         return DetectDecisionPoint();
+    }
+
+    private string CombatMutationSignature(Player player)
+    {
+        static string CardsSig(IEnumerable<CardModel>? cards) =>
+            cards == null
+                ? ""
+                : string.Join(",", cards.Select(c => $"{c.Id}:{c.IsUpgraded}:{c.GetType().Name}"));
+
+        static string PowersSig(IEnumerable<PowerModel>? powers) =>
+            powers == null
+                ? ""
+                : string.Join(",", powers.Select(p => $"{p.GetType().Name}:{p.Amount}").OrderBy(x => x));
+
+        var pcs = player.PlayerCombatState;
+        var combatState = CombatManager.Instance.DebugOnlyGetState();
+        var enemies = combatState?.Enemies?
+            .Where(e => e != null)
+            .Select(e => $"{e.GetType().Name}:{e.CurrentHp}:{e.Block}:{e.IsAlive}:{PowersSig(e.Powers)}")
+            .ToList() ?? new();
+
+        var playerCreature = player.Creature;
+        var osty = player.Osty;
+        return string.Join("||", new[]
+        {
+            $"round={combatState?.RoundNumber ?? 0}",
+            $"energy={pcs?.Energy ?? 0}",
+            $"stars={pcs?.Stars ?? 0}",
+            $"player={playerCreature?.CurrentHp ?? 0}:{playerCreature?.Block ?? 0}:{PowersSig(playerCreature?.Powers)}",
+            $"osty={osty?.CurrentHp ?? 0}:{osty?.Block ?? 0}:{osty?.IsAlive ?? false}:{PowersSig(osty?.Powers)}",
+            $"hand={CardsSig(pcs?.Hand?.Cards)}",
+            $"draw={CardsSig(pcs?.DrawPile?.Cards)}",
+            $"discard={CardsSig(pcs?.DiscardPile?.Cards)}",
+            $"deck={CardsSig(player.Deck?.Cards)}",
+            $"enemies={string.Join(";", enemies)}",
+        });
     }
 
     private bool HasPendingHeadlessChoice()
