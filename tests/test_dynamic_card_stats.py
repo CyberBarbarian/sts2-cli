@@ -254,6 +254,29 @@ class TestDynamicCardStats:
         assert target["unblocked_total_damage"] == 0
         assert "unblocked_damage" not in target
 
+    def test_dynamic_zero_hit_attack_exports_zero_target_damage(self, game):
+        state = game.start(character="Regent", seed="radiate-zero-hit-stats")
+        game.skip_neow(state)
+        game.set_player(
+            relics=[],
+            deck=[
+                "RADIATE",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        radiate = next(c for c in state["hand"] if c["name"] == "Radiate")
+        assert radiate["stats"]["calculatedhits"] == 0
+        target = radiate["stats"]["damage_by_target"][0]
+        assert target["repeat"] == 0
+        assert target["total_damage"] == 0
+        assert target["unblocked_total_damage"] == 0
+        assert "unblocked_damage" not in target
+
     def test_fixed_multi_hit_attack_exports_repeat_damage(self, game):
         state = game.start(seed="twin-strike-repeat-stats")
         game.skip_neow(state)

@@ -5162,6 +5162,8 @@ public class RunSimulator
                 var previewRepeat = previewStats != null && previewStats.TryGetValue("repeat", out var repeatValue)
                     ? repeatValue
                     : repeat;
+                if (stats.ContainsKey("calculatedhits"))
+                    previewRepeat = GetStatInt(stats, "calculatedhits", previewRepeat);
                 if (HasCardSpecificOverride(stats, card, "repeat"))
                     previewRepeat = repeat;
                 var targetRepeat = GetTargetAttackRepeat(card, enemy, previewRepeat);
