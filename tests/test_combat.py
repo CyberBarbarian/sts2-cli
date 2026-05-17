@@ -953,6 +953,8 @@ class TestCombatEdgeCases:
 
             first_option = next(o for o in state["options"] if not o.get("is_locked"))
             assert first_option["text_key"] == "THE_ARCHITECT.dialogue.0"
+            assert first_option["title"] == "Threaten"
+            assert "arch demon" in first_option["description"]
             state = game.act("choose_option", option_index=first_option["index"])
 
             assert state["decision"] == "event_choice"

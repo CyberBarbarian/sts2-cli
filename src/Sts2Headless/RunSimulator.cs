@@ -3118,6 +3118,15 @@ public class RunSimulator
                 if (!descriptionFromEngine)
                     optDesc = CleanResolvedEngineText(InterpolateDynamicVars(optDesc, optVars) ?? optDesc);
 
+                var ancientDialogue = ResolveAncientDialogueOption(eventEntry, opt.TextKey);
+                if (ancientDialogue != null)
+                {
+                    if (IsUninformativeEventOptionTitle(title, opt.TextKey, i) && !string.IsNullOrWhiteSpace(ancientDialogue.Value.title))
+                        title = ancientDialogue.Value.title;
+                    if (string.IsNullOrWhiteSpace(optDesc) && !string.IsNullOrWhiteSpace(ancientDialogue.Value.description))
+                        optDesc = ancientDialogue.Value.description;
+                }
+
                 var exportedOption = new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -3166,6 +3175,51 @@ public class RunSimulator
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    private (string? title, string? description)? ResolveAncientDialogueOption(string eventEntry, string? textKey)
+    {
+        var optionKey = EventOptionKey(textKey);
+        if (!int.TryParse(optionKey, out var step))
+            return null;
+
+        var characterEntry = _runState?.Players.FirstOrDefault()?.Character?.Id.Entry;
+        if (string.IsNullOrWhiteSpace(characterEntry))
+            return null;
+
+        for (var route = 0; route < 10; route++)
+        {
+            foreach (var suffix in new[] { "", "r" })
+            {
+                var prefix = $"{eventEntry}.talk.{characterEntry}.{route}-{step}{suffix}";
+                var description =
+                    AncientText(prefix + ".char")
+                    ?? AncientText(prefix + ".ancient");
+                var title = AncientText(prefix + ".next");
+
+                if (description != null || title != null)
+                    return (title, description);
+            }
+        }
+
+        return null;
+    }
+
+    private string? AncientText(string key)
+    {
+        var text = _loc.Bilingual("ancients", key);
+        return text == key ? null : CleanResolvedEngineText(text);
+    }
+
+    private static bool IsUninformativeEventOptionTitle(string? title, string? textKey, int optionIndex)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return true;
+
+        var optionKey = EventOptionKey(textKey);
+        return string.Equals(title, optionKey, StringComparison.Ordinal)
+            || string.Equals(title, $"option_{optionIndex}", StringComparison.Ordinal)
+            || int.TryParse(title, out _);
     }
 
     private string? RelicOptionDescription(string optionId)
