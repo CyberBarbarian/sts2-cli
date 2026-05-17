@@ -1511,6 +1511,8 @@ public class RunSimulator
         var reward = _pendingRewards[rewardIndex];
         if (reward is CardReward)
             return Error("Card rewards must use select_card_reward or skip_card_reward");
+        if (reward is MegaCrit.Sts2.Core.Rewards.PotionReward && !HasOpenPotionSlot(player))
+            return Error("Potion slots are full; use discard_potion before claiming this potion reward");
 
         try
         {
@@ -1525,6 +1527,21 @@ public class RunSimulator
         }
 
         return DetectDecisionPoint();
+    }
+
+    private static bool HasOpenPotionSlot(Player player)
+    {
+        System.Collections.IList? slots = GetBackingList<PotionModel>(player, "_potionSlots");
+        slots ??= GetBackingList<PotionModel?>(player, "_potionSlots");
+        if (slots == null)
+            return true;
+
+        foreach (var slot in slots)
+        {
+            if (slot == null)
+                return true;
+        }
+        return false;
     }
 
     private Dictionary<string, object?> DoBuyCard(Player player, Dictionary<string, object?>? args)
