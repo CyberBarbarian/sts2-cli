@@ -1051,6 +1051,47 @@ class TestCombatEdgeCases:
         assert "NullReferenceException" not in result.stderr
         assert "SlumberingBeetle.AfterAddedToRoom" not in result.stderr
 
+    def test_rolling_boulder_turn_start_does_not_log_headless_connect_exception(self):
+        session = HeadlessSession()
+        stderr = ""
+        try:
+            state = session.send({
+                "cmd": "start_run",
+                "character": "Ironclad",
+                "seed": "rolling-boulder-connect-stderr",
+                "lang": "en",
+            })
+            state = session.skip_neow(state)
+            state = session.send({
+                "cmd": "set_player",
+                "hp": 999,
+                "max_hp": 999,
+                "deck": [
+                    "ROLLING_BOULDER",
+                    "STRIKE_IRONCLAD",
+                    "DEFEND_IRONCLAD",
+                    "STRIKE_IRONCLAD",
+                    "DEFEND_IRONCLAD",
+                ],
+            })
+            state = session.send({"cmd": "enter_room", "type": "combat", "encounter": "SHRINKER_BEETLE_WEAK"})
+
+            rolling_boulder = next(card for card in state["hand"] if card["name"] == "Rolling Boulder")
+            state = session.send({
+                "cmd": "action",
+                "action": "play_card",
+                "args": {"card_index": rolling_boulder["index"]},
+            })
+            state = session.send({"cmd": "action", "action": "end_turn"})
+        finally:
+            stderr = session.close()
+
+        assert state["decision"] == "combat_play"
+        assert state["player"]["hp"] > 0
+        assert "MissingMethodException" not in stderr
+        assert "GodotObject.Connect" not in stderr
+        assert "RollingBoulderPower.AfterPlayerTurnStart" not in stderr
+
     def test_test_subject_respawn_and_burning_growl_presentation_do_not_log_headless_exception(self):
         session = HeadlessSession()
         stderr = ""

@@ -8,6 +8,7 @@ public class GodotObject
 
     public static bool IsInstanceValid(GodotObject? obj) => obj != null;
     public virtual bool IsQueuedForDeletion() => false;
+    public Error Connect(StringName signal, Callable callable, uint flags = 0) => Error.Ok;
 
     // ToSignal - must be on GodotObject (not Node) to match real Godot
     public SignalAwaiter ToSignal(GodotObject source, StringName signal)
@@ -45,6 +46,11 @@ public class Node : GodotObject
     public new class SignalName : GodotObject.SignalName
     {
         public static readonly StringName ProcessFrame = "ProcessFrame";
+        public static readonly StringName Ready = "ready";
+        public static readonly StringName Renamed = "renamed";
+        public static readonly StringName TreeEntered = "tree_entered";
+        public static readonly StringName TreeExiting = "tree_exiting";
+        public static readonly StringName TreeExited = "tree_exited";
     }
 
     public virtual StringName Name { get; set; } = "";
