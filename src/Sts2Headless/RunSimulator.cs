@@ -1141,6 +1141,8 @@ public class RunSimulator
             return Error($"Invalid card index {cardIndex}, hand has {hand.Count} cards");
 
         var card = hand[cardIndex];
+        if (card.Type == CardType.None)
+            return Error($"Cannot play card {card.GetType().Name}: uninitialized card type");
 
         // Determine target based on card's TargetType first.
         // Self/None/All cards: target = null (game handles internally).
@@ -2407,7 +2409,7 @@ public class RunSimulator
                 ["cost"] = GetEnergyCostDisplay(c),
                 ["type"] = c.Type.ToString(),
                 ["rarity"] = c.Rarity.ToString(),
-                ["can_play"] = c.CanPlay(out _, out _),
+                ["can_play"] = c.Type != CardType.None && c.CanPlay(out _, out _),
                 ["target_type"] = c.TargetType.ToString(),
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["description"] = CardDescription(c, stats, includeCombatText: true),
@@ -3281,6 +3283,13 @@ public class RunSimulator
     {
         if (rawTip == null)
             return null;
+
+        if (TryGetMember(rawTip, "Card") is CardModel instancedCard)
+        {
+            var info = SingleCardRewardInfo(instancedCard);
+            info["kind"] = "card";
+            return info;
+        }
 
         var canonicalModel = TryGetMember(rawTip, "CanonicalModel");
         if (canonicalModel is RelicModel relic)
@@ -5523,14 +5532,7 @@ public class RunSimulator
         if (!card.IsUpgradable) return null;
         try
         {
-            var clone = ModelDb.GetById<CardModel>(card.Id).ToMutable();
-            // Apply existing upgrades first
-            for (int i = 0; i < card.CurrentUpgradeLevel; i++)
-            {
-                clone.UpgradeInternal();
-                clone.FinalizeUpgradeInternal();
-            }
-            // Apply one more upgrade
+            var clone = (CardModel)card.MutableClone();
             clone.UpgradeInternal();
             clone.FinalizeUpgradeInternal();
 

@@ -617,6 +617,54 @@ class TestWoodCarvings:
         assert "randomize its cost" in deck_card["enchantment_description"]
 
 
+class TestTinkerTime:
+    def test_mad_science_hover_tips_preserve_event_selected_card_state(self, game):
+        state = game.start(seed="tinker-time-mad-science-hover")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="TINKER_TIME")
+
+        accept = next(o for o in state["options"] if o["title"] == "Accept")
+        state = game.act("choose_option", option_index=accept["index"])
+
+        card_type_tips = [
+            tip
+            for option in state["options"]
+            for tip in option.get("hover_tips", [])
+            if tip.get("id") == "CARD.MAD_SCIENCE"
+        ]
+        assert card_type_tips
+        for tip in card_type_tips:
+            assert tip["type"] in {"Attack", "Skill", "Power"}
+            assert "{CardType" not in tip["description"]
+            if tip.get("after_upgrade"):
+                assert "{CardType" not in tip["after_upgrade"]["description"]
+
+        state = game.act("choose_option", option_index=state["options"][0]["index"])
+        rider_tips = [
+            tip
+            for option in state["options"]
+            for tip in option.get("hover_tips", [])
+            if tip.get("id") == "CARD.MAD_SCIENCE"
+        ]
+        assert rider_tips
+        for tip in rider_tips:
+            assert tip["type"] in {"Attack", "Skill", "Power"}
+            assert "{CardType" not in tip["description"]
+            assert "???" not in tip["description"]
+            if tip.get("after_upgrade"):
+                assert "{CardType" not in tip["after_upgrade"]["description"]
+                assert "???" not in tip["after_upgrade"]["description"]
+
+        state = game.act("choose_option", option_index=state["options"][0]["index"])
+        mad_science = next(card for card in state["player"]["deck"] if card["id"] == "CARD.MAD_SCIENCE")
+        assert mad_science["type"] in {"Attack", "Skill", "Power"}
+        assert "{CardType" not in mad_science["description"]
+        assert "???" not in mad_science["description"]
+        if mad_science.get("after_upgrade"):
+            assert "{CardType" not in mad_science["after_upgrade"]["description"]
+            assert "???" not in mad_science["after_upgrade"]["description"]
+
+
 class TestTrial:
     def test_trial_event_description_formats_entrant_number(self, game):
         state = game.start(seed="trial-entrant-number")

@@ -727,6 +727,29 @@ class TestCombatEdgeCases:
         hand_names = [card["name"] for card in state["hand"]]
         assert "Twin Strike" in hand_names
 
+    def test_uninitialized_event_card_is_not_exported_as_playable(self, game):
+        state = game.start(seed="mad-science-uninitialized")
+        game.skip_neow(state)
+        game.set_player(
+            deck=[
+                "MAD_SCIENCE",
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        mad_science = next(card for card in state["hand"] if card["id"] == "CARD.MAD_SCIENCE")
+
+        assert mad_science["type"] == "None"
+        assert mad_science["can_play"] is False
+
+        result = game.act("play_card", card_index=mad_science["index"])
+        assert result["type"] == "error"
+        assert "uninitialized card type" in result["message"]
+
     def test_vantom_dismember_headless_vfx_does_not_force_game_over(self, game):
         state = game.start(seed="vantom-dismember-headless")
         game.skip_neow(state)
