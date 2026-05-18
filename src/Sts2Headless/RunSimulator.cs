@@ -5253,6 +5253,8 @@ public class RunSimulator
             stats["repeat"] = 1;
         }
 
+        RemoveNonAttackRepeatStat(stats, card);
+
         if (applyCombatModifiers)
         {
             ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null);

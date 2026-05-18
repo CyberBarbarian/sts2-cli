@@ -653,13 +653,21 @@ class TestDynamicCardStats:
     def test_non_repeat_attack_does_not_use_channel_count_as_damage_repeat(self, game):
         state = game.start(character="Defect", seed="ice-lance-repeat-stats")
         game.skip_neow(state)
-        game.set_player(deck=[
+        state = game.set_player(deck=[
             "ICE_LANCE",
             "STRIKE_DEFECT",
             "DEFEND_DEFECT",
             "DEFEND_DEFECT",
             "DEFEND_DEFECT",
         ])
+        deck_ice_lance = next(c for c in state["player"]["deck"] if c["name"] == "Ice Lance")
+        assert "Channel 3 Frost" in deck_ice_lance["description"]
+        assert "repeat" not in deck_ice_lance["stats"]
+        assert "total_damage" not in deck_ice_lance["stats"]
+        assert "Channel 3 Frost" in deck_ice_lance["after_upgrade"]["description"]
+        assert "repeat" not in deck_ice_lance["after_upgrade"]["stats"]
+        assert "total_damage" not in deck_ice_lance["after_upgrade"]["stats"]
+
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
 
         ice_lance = next(c for c in state["hand"] if c["name"] == "Ice Lance")
