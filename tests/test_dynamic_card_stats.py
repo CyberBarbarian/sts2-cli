@@ -191,6 +191,32 @@ class TestDynamicCardStats:
         state = game.act("play_card", card_index=dismantle["index"], target_index=0)
         assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
 
+    def test_fiend_fire_exports_hand_exhaust_total_damage(self, game):
+        state = game.start(seed="fiend-fire-hand-repeat-stats")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "FIEND_FIRE",
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "BASH",
+                "TWIN_STRIKE",
+            ],
+        )
+        state = game.enter_room("combat", encounter="ENTOMANCER_ELITE")
+
+        fiend_fire = next(c for c in state["hand"] if c["name"] == "Fiend Fire")
+        target_stats = fiend_fire["stats"]["damage_by_target"][0]
+        expected_repeat = len(state["hand"]) - 1
+        assert target_stats["repeat"] == expected_repeat
+        assert target_stats["total_damage"] == target_stats["damage"] * expected_repeat
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=fiend_fire["index"], target_index=0)
+        assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
+
     def test_x_cost_details_are_limited_to_combat_hand(self, game):
         state = game.start(seed="whirlwind-x-cost-display-only")
         game.skip_neow(state)

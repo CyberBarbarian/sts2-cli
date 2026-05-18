@@ -5207,6 +5207,7 @@ public class RunSimulator
         {
             ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null);
             AddEnergyXAttackRepeat(stats, card);
+            AddHandExhaustAttackRepeat(stats, card, player);
             if (includeTargetRows)
             {
                 AddCalculatedDamageByTarget(stats, card, player);
@@ -5265,6 +5266,30 @@ public class RunSimulator
         try
         {
             stats["repeat"] = GetEnergyXAttackRepeat(card);
+        }
+        catch { }
+    }
+
+    private static void AddHandExhaustAttackRepeat(
+        Dictionary<string, object?> stats,
+        CardModel card,
+        Player? player)
+    {
+        if (card.Type != CardType.Attack
+            || !stats.ContainsKey("damage")
+            || card is not FiendFire
+            || card.Pile?.Type != PileType.Hand)
+        {
+            return;
+        }
+
+        try
+        {
+            var hand = player?.PlayerCombatState?.Hand?.Cards;
+            if (hand == null)
+                return;
+
+            stats["repeat"] = Math.Max(0, hand.Count(c => c != null && !ReferenceEquals(c, card)));
         }
         catch { }
     }
