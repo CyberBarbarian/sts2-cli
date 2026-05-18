@@ -135,14 +135,7 @@ class Program
                     actionArgs = new Dictionary<string, object?>();
                     foreach (var prop in argsElem.EnumerateObject())
                     {
-                        actionArgs[prop.Name] = prop.Value.ValueKind switch
-                        {
-                            JsonValueKind.Number => prop.Value.GetInt32(),
-                            JsonValueKind.String => prop.Value.GetString(),
-                            JsonValueKind.True => true,
-                            JsonValueKind.False => false,
-                            _ => prop.Value.ToString(),
-                        };
+                        actionArgs[prop.Name] = ConvertJsonValue(prop.Value);
                     }
                 }
                 return sim.ExecuteAction(action, actionArgs);
@@ -233,6 +226,21 @@ class Program
             default:
                 return new Dictionary<string, object?> { ["type"] = "error", ["message"] = $"Unknown command: {cmdType}" };
         }
+    }
+
+    static object? ConvertJsonValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number => value.TryGetInt32(out var intValue) ? intValue : value.GetDouble(),
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            JsonValueKind.Array => value.EnumerateArray().Select(ConvertJsonValue).ToList(),
+            JsonValueKind.Object => value.EnumerateObject().ToDictionary(prop => prop.Name, prop => ConvertJsonValue(prop.Value)),
+            _ => value.ToString(),
+        };
     }
 
     static void WriteLine(Dictionary<string, object?> data)

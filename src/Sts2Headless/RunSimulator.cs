@@ -1710,11 +1710,7 @@ public class RunSimulator
         if (args == null || !args.ContainsKey("indices"))
             return Error("select_cards requires 'indices' (comma-separated card indices)");
 
-        var indicesStr = args["indices"]?.ToString() ?? "";
-        var indices = indicesStr.Split(',')
-            .Select(s => int.TryParse(s.Trim(), out var v) ? v : -1)
-            .Where(i => i >= 0)
-            .ToArray();
+        var indices = ParseSelectionIndices(args["indices"]);
 
         Log($"Card selection: indices [{string.Join(",", indices)}]");
         _cardSelector.ResolvePendingByIndices(indices);
@@ -1741,6 +1737,36 @@ public class RunSimulator
             WaitForPendingShopPurchaseTask();
 
         return DetectDecisionPoint();
+    }
+
+    private static int[] ParseSelectionIndices(object? indicesArg)
+    {
+        if (indicesArg is IEnumerable<object?> values)
+        {
+            return values
+                .Select(ParseSelectionIndex)
+                .Where(i => i >= 0)
+                .ToArray();
+        }
+
+        var indicesStr = indicesArg?.ToString()?.Trim() ?? "";
+        if (indicesStr.StartsWith("[", StringComparison.Ordinal) &&
+            indicesStr.EndsWith("]", StringComparison.Ordinal))
+        {
+            indicesStr = indicesStr[1..^1];
+        }
+
+        return indicesStr.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s.Trim(), out var v) ? v : -1)
+            .Where(i => i >= 0)
+            .ToArray();
+    }
+
+    private static int ParseSelectionIndex(object? value)
+    {
+        if (value == null) return -1;
+        if (value is int i) return i;
+        return int.TryParse(value.ToString(), out var parsed) ? parsed : -1;
     }
 
     private Dictionary<string, object?> DoSkipSelect(Player player)

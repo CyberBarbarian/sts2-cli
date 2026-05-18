@@ -180,6 +180,32 @@ class TestPotionActions:
         assert selected["name"] == "Strike"
         assert "damage_by_target" not in selected["stats"]
 
+    def test_skill_potion_accepts_json_array_selection_indices(self, game):
+        state = game.start(seed="skill-potion-array-selection")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["SKILL_POTION"],
+            deck=[
+                "STRIKE_SILENT",
+                "DEFEND_SILENT",
+                "DEFEND_SILENT",
+                "STRIKE_SILENT",
+                "STRIKE_SILENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        state = game.act("use_potion", potion_index=0)
+
+        assert state["decision"] == "card_select"
+        selected = state["cards"][0]
+
+        state = game.act("select_cards", indices=[selected["index"]])
+
+        assert state["decision"] == "combat_play"
+        assert state["player"]["potions"] == []
+        assert any(card["name"] == selected["name"] for card in state["hand"])
+
     def test_touch_of_insanity_card_select_exports_combat_preview_stats(self, game):
         state = game.start(seed="touch-selection-combat-stats")
         game.skip_neow(state)
