@@ -2651,6 +2651,9 @@ public class RunSimulator
             };
         }).ToList();
 
+        var drawPile = CombatPileInfo(pcs?.DrawPile?.Cards, player);
+        var discardPile = CombatPileInfo(pcs?.DiscardPile?.Cards, player);
+
         var result = new Dictionary<string, object?>
         {
             ["type"] = "decision",
@@ -2665,6 +2668,8 @@ public class RunSimulator
             ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
             ["discard_pile_count"] = pcs?.DiscardPile?.Cards?.Count ?? 0,
+            ["draw_pile"] = drawPile,
+            ["discard_pile"] = discardPile,
         };
 
         // Character-specific mechanics
@@ -6736,6 +6741,40 @@ public class RunSimulator
                 return cardInfo;
             }).ToList(),
         };
+    }
+
+    private List<Dictionary<string, object?>> CombatPileInfo(IEnumerable<CardModel>? cards, Player player)
+    {
+        if (cards == null)
+            return new();
+
+        return cards.Where(c => c != null).Select((card, i) =>
+        {
+            var stats = ExtractCardStats(card, player, applyCombatModifiers: true);
+            var keywords = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
+            var cardInfo = new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["id"] = card.Id.ToString(),
+                ["name"] = _loc.Card(card.Id.Entry),
+                ["cost"] = GetEnergyCostDisplay(card),
+                ["type"] = card.Type.ToString(),
+                ["rarity"] = card.Rarity.ToString(),
+                ["upgraded"] = card.IsUpgraded,
+                ["description"] = CardDescription(card, stats, includeCombatText: true),
+                ["stats"] = stats.Count > 0 ? stats : null,
+                ["keywords"] = keywords?.Count > 0 ? keywords : null,
+                ["after_upgrade"] = GetUpgradedInfo(
+                    card,
+                    player,
+                    applyCombatModifiers: true,
+                    useSourceDynamicContext: true),
+            };
+            AddCardVars(cardInfo, card);
+            AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: true);
+            AddCardEnhancements(cardInfo, card);
+            return cardInfo;
+        }).ToList();
     }
 
     /// <summary>Common context added to every decision point.</summary>

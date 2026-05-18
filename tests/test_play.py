@@ -112,3 +112,99 @@ def test_resolve_start_options_defaults_when_menu_is_disabled():
 
     assert character == "Ironclad"
     assert ascension == 0
+
+
+def test_combat_inline_stat_prefers_single_target_damage():
+    play.LANG = "en"
+    rendered = plain(play.combat_hand_inline_stat_str(
+        {
+            "damage": 6,
+            "damage_by_target": [
+                {"target_index": 0, "target_name": "Nibbit", "damage": 9, "vulnerable": 1}
+            ],
+        },
+        card={"id": "CARD.STRIKE", "target_type": "AnyEnemy"},
+        enemies=[{"index": 0, "name": "Nibbit", "hp": 22}],
+    ))
+
+    assert "9dmg" in rendered
+    assert "6dmg" not in rendered
+
+
+def test_target_damage_detail_lines_show_multiple_targets():
+    play.LANG = "en"
+    lines = [plain(line) for line in play.card_target_damage_display_lines(
+        {
+            "stats": {
+                "damage": 6,
+                "damage_by_target": [
+                    {"target_index": 0, "target_name": "Nibbit", "damage": 9, "vulnerable": 1},
+                    {"target_index": 1, "target_name": "Other Nibbit", "damage": 6, "vulnerable": 0},
+                ],
+            }
+        },
+        enemies=[
+            {"index": 0, "name": "Nibbit", "hp": 22},
+            {"index": 1, "name": "Other Nibbit", "hp": 31},
+        ],
+    )]
+
+    assert any("Nibbit: 9dmg" in line for line in lines)
+    assert any("Other Nibbit: 6dmg" in line for line in lines)
+
+
+def test_pile_display_lines_include_card_descriptions():
+    play.LANG = "en"
+    lines = [plain(line) for line in play.pile_display_lines(
+        "draw",
+        [
+            {
+                "index": 0,
+                "name": "Strike",
+                "cost": 1,
+                "type": "Attack",
+                "description": "Deal 6 damage.",
+            }
+        ],
+    )]
+
+    assert any("Draw Pile" in line for line in lines)
+    assert any("Strike" in line for line in lines)
+    assert any("Deal 6 damage." in line for line in lines)
+
+
+def test_parse_card_sequence_accepts_ordered_indices():
+    assert play.parse_card_sequence("seq 3,1,0") == [3, 1, 0]
+    assert play.parse_card_sequence("play 2 0") == [2, 0]
+    assert play.parse_card_sequence("3,2") == [3, 2]
+    assert play.parse_card_sequence("3") is None
+
+
+def test_execute_card_sequence_stops_when_state_requires_manual_choice():
+    state = {
+        "decision": "combat_play",
+        "energy": 3,
+        "hand": [
+            {"index": 0, "name": "Strike", "cost": 1, "energy_cost": 1, "can_play": True, "target_type": "None"},
+            {"index": 1, "name": "Strike", "cost": 1, "energy_cost": 1, "can_play": True, "target_type": "None"},
+        ],
+        "enemies": [],
+    }
+    sent = []
+    messages = []
+
+    def send(cmd):
+        sent.append(cmd)
+        return {"decision": "card_select", "cards": []}
+
+    result = play.execute_card_sequence(
+        state,
+        [0, 1],
+        send,
+        output_fn=messages.append,
+    )
+
+    assert len(sent) == 1
+    assert sent[0]["action"] == "play_card"
+    assert result["decision"] == "card_select"
+    assert any("stopped" in message.lower() for message in messages)

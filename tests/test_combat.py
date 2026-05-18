@@ -166,6 +166,22 @@ class TestCombatStructure:
                     "player", "draw_pile_count", "discard_pile_count", "player_powers"):
             assert key in state, f"Missing: {key}"
 
+    def test_draw_and_discard_pile_cards_are_exported(self, game):
+        state = game.start(seed="pile-details")
+        game.skip_neow(state)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        assert state["draw_pile_count"] == len(state["draw_pile"])
+        assert state["draw_pile"]
+        assert all(card["name"] and card["description"] for card in state["draw_pile"])
+
+        strike = next(card for card in state["hand"] if card["name"] == "Strike")
+        state = game.act("play_card", card_index=strike["index"], target_index=0)
+
+        assert state["discard_pile_count"] == len(state["discard_pile"])
+        assert state["discard_pile"]
+        assert any(card["name"] == "Strike" for card in state["discard_pile"])
+
     def test_card_fields(self, game):
         state = game.start(seed="cs2")
         game.skip_neow(state)

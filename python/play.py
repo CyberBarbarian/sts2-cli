@@ -654,7 +654,47 @@ def card_description_display_lines(card):
     return out
 
 
-def combat_hand_inline_stat_str(stats, *, card=None, osty=None):
+def target_damage_rows(stats):
+    if not stats:
+        return []
+    return stats.get("damage_by_target") or stats.get("calculateddamage_by_target") or []
+
+
+def target_row_damage(row):
+    for key in ("total_damage", "calculateddamage", "damage"):
+        value = row.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def target_row_damage_label(row):
+    damage = target_row_damage(row)
+    if damage is None:
+        return None
+    repeat = row.get("repeat")
+    base = row.get("calculateddamage", row.get("damage"))
+    if repeat and repeat > 1 and base is not None and damage != base:
+        return f"{damage}{t('dmg','dmg')} ({base}x{repeat})"
+    return f"{damage}{t('dmg','dmg')}"
+
+
+def visible_target_rows(stats, enemies=None):
+    rows = list(target_damage_rows(stats))
+    if not enemies:
+        return rows
+    live_indices = {enemy.get("index") for enemy in enemies if enemy.get("hp", 0) > 0}
+    return [row for row in rows if row.get("target_index") in live_indices]
+
+
+def single_visible_target_row(stats, enemies=None):
+    rows = visible_target_rows(stats, enemies)
+    if len(rows) == 1:
+        return rows[0]
+    return None
+
+
+def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
     """Title-row 伤/挡 from RunSimulator ``stats`` (DynamicVars, keys lowercased).
 
     Plain ``damage`` is used for Strike-like cards; many attacks use ``calculateddamage``
@@ -683,6 +723,12 @@ def combat_hand_inline_stat_str(stats, *, card=None, osty=None):
             mhp = osty.get("max_hp")
             dmg = int(base) + int(mhp) if isinstance(mhp, (int, float)) else int(base)
 
+    target_row = single_visible_target_row(stats, enemies)
+    if target_row:
+        target_damage = target_row_damage(target_row)
+        if target_damage is not None:
+            dmg = int(target_damage)
+
     if dmg is None:
         v = stats.get("damage")
         if v is None:
@@ -698,6 +744,36 @@ def combat_hand_inline_stat_str(stats, *, card=None, osty=None):
     if blk is not None:
         parts.append(c(f"{blk}{t('blk','挡')}", "blue"))
     return " ".join(parts)
+
+
+def card_target_damage_display_lines(card, enemies=None):
+    stats = (card or {}).get("stats") or {}
+    rows = visible_target_rows(stats, enemies)
+    if not rows:
+        return []
+    if len(rows) == 1:
+        row = rows[0]
+        base_damage = stats.get("damage")
+        if base_damage is None:
+            base_damage = stats.get("calculateddamage")
+        target_damage = target_row_damage(row)
+        if target_damage == base_damage:
+            return []
+
+    lines = [c("Target damage:", "dim")]
+    for row in rows:
+        label = target_row_damage_label(row)
+        if not label:
+            continue
+        target_name = row.get("target_name") or f"Target {row.get('target_index', '?')}"
+        extra = []
+        if row.get("vulnerable"):
+            extra.append(f"Vulnerable {row['vulnerable']}")
+        if row.get("block"):
+            extra.append(f"Block {row['block']}")
+        suffix = f" ({', '.join(extra)})" if extra else ""
+        lines.append(f"  {target_name}: {label}{suffix}")
+    return lines if len(lines) > 1 else []
 
 
 def relic_str(r):
@@ -876,6 +952,87 @@ def show_player(p, show_deck=False):
                 print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(t(cd.get('type',''), ctype_zh), 'dim')}{rare_part}{suf_part}")
                 print_card_detail_extension(cd, indent="      ")
 
+
+def pile_display_lines(pile_name, cards, count=None):
+    title = "Draw Pile" if pile_name == "draw" else "Discard Pile"
+    total = len(cards) if count is None else count
+    lines = [c(f"{title} ({total})", "bold")]
+    if not cards:
+        lines.append("  Empty" if total == 0 else "  Card details are only available during combat.")
+        return lines
+    for card in cards:
+        up = "+" if card.get("upgraded") else ""
+        ctype = card.get("type", "?")
+        cost = card.get("cost", "?")
+        index = card.get("index", "?")
+        lines.append(f"  [{index}] {n(card.get('name', '?'))}{up} ({cost}) {ctype}")
+        for desc_line in card_description_display_lines(card):
+            if desc_line:
+                lines.append(f"      {desc_line}")
+    return lines
+
+
+def show_pile(state, pile_name):
+    key = f"{pile_name}_pile"
+    count_key = f"{pile_name}_pile_count"
+    cards = state.get(key) or []
+    count = state.get(count_key, len(cards))
+    for line in pile_display_lines(pile_name, cards, count=count):
+        print(f"  {line}")
+
+
+def parse_card_sequence(raw):
+    text = (raw or "").strip().lower()
+    payload = None
+    for prefix in ("seq ", "play "):
+        if text.startswith(prefix):
+            payload = text[len(prefix):]
+            break
+    if payload is None and "," in text:
+        payload = text
+    if payload is None:
+        return None
+
+    payload = payload.replace(",", " ")
+    parts = [part for part in payload.split() if part]
+    if not parts or any(not part.isdigit() for part in parts):
+        return None
+    return [int(part) for part in parts]
+
+
+def execute_card_sequence(state, indices, send_fn, output_fn=print):
+    current = state
+    for card_index in indices:
+        if current.get("decision") != "combat_play":
+            output_fn("Queued play stopped: manual decision is required.")
+            return current
+
+        hand = current.get("hand", [])
+        energy = current.get("energy", 0)
+        enemies = current.get("enemies", [])
+        card = next((item for item in hand if item.get("index") == card_index), None)
+        if card is None:
+            output_fn(f"Queued play stopped: card index {card_index} is no longer in hand.")
+            return current
+        if not card.get("can_play") or card_energy_cost(card) > energy:
+            output_fn(f"Queued play stopped: {n(card.get('name', '?'))} cannot be played now.")
+            return current
+
+        args = {"card_index": card["index"]}
+        if card.get("target_type") == "AnyEnemy":
+            live_enemies = [enemy for enemy in enemies if enemy.get("hp", 0) > 0]
+            if len(live_enemies) == 1:
+                args["target_index"] = live_enemies[0]["index"]
+            else:
+                output_fn(f"Queued play stopped: {n(card.get('name', '?'))} needs a target.")
+                return current
+
+        current = send_fn({"cmd": "action", "action": "play_card", "args": args})
+        if not current or current.get("decision") != "combat_play":
+            output_fn("Queued play stopped: manual decision is required.")
+            return current
+    return current
+
 def show_combat(state):
     rnd = state.get("round", 0)
     energy = state.get("energy", 0)
@@ -969,7 +1126,7 @@ def show_combat(state):
 
         # Damage/block inline on title row; suffix keywords (e.g. 消耗) at end of title row
         stat_str = combat_hand_inline_stat_str(
-            card.get("stats") or {}, card=card, osty=state.get("osty")
+            card.get("stats") or {}, card=card, osty=state.get("osty"), enemies=state.get("enemies")
         )
 
         _pre, suf = split_card_keywords(card.get("keywords"))
@@ -981,6 +1138,8 @@ def show_combat(state):
               + (f"  {c('→','yellow')}" if target == "AnyEnemy" else ""))
 
         print_card_detail_extension(card, indent="      ")
+        for line in card_target_damage_display_lines(card, enemies=state.get("enemies")):
+            print(f"      {line}")
 
 def show_map(state, send_fn=None):
     """Show map at map_select. Fetches full map if send_fn available."""
@@ -1575,6 +1734,12 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
             p = state.get("player", {})
             show_player(p, show_deck=True)
             continue
+        if raw in ("draw", "drawpile", "draw_pile") and state:
+            show_pile(state, "draw")
+            continue
+        if raw in ("discard", "discardpile", "discard_pile") and state:
+            show_pile(state, "discard")
+            continue
         if raw == "potions" and state:
             p = state.get("player", {})
             pots = p.get("potions", [])
@@ -1624,6 +1789,9 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
             if confirm.strip().lower() in ("y", "yes", "是"):
                 raise KeyboardInterrupt("abandon")
             continue
+
+        if not multi_select and parse_card_sequence(raw):
+            return raw
 
         if valid_options:
             if multi_select and multi_max > 1:
@@ -1991,6 +2159,16 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     if choice == "help":
                         print(f"  {t('Enter card index, e=end turn, p0=use potion 0', '输入卡牌编号，e=结束回合，p0=使用药水0')}")
                         continue
+
+                sequence = parse_card_sequence(choice)
+                if sequence:
+                    state = execute_card_sequence(
+                        state,
+                        sequence,
+                        send,
+                        output_fn=lambda message: print(f"  {c(message, 'yellow')}"),
+                    )
+                    continue
 
                 if choice == "e":
                     # Track hand before end_turn to detect added status cards
