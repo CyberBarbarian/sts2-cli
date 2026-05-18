@@ -1,5 +1,11 @@
 """Tests for language support."""
+import json
+from pathlib import Path
+
 import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestLanguage:
@@ -29,3 +35,11 @@ class TestLanguage:
         # Should be English (no Chinese characters)
         has_chinese = any(any(ord(ch) > 0x4e00 for ch in name) for name in names)
         assert not has_chinese, f"Expected English by default, got: {names[:3]}"
+
+
+def test_zhs_relics_include_current_engine_winged_boots_text():
+    relics = json.loads((ROOT / "localization_zhs" / "relics.json").read_text(encoding="utf-8"))
+
+    assert "WINGED_BOOTS.title" in relics
+    assert "Winged Boots" not in relics["WINGED_BOOTS.title"]
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in relics["WINGED_BOOTS.description"])

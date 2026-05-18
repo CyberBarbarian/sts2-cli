@@ -210,8 +210,8 @@ def prompt_start_options(lang=None, character=None, ascension=None, input_fn=inp
     default_ascension = DEFAULT_ASCENSION if ascension is None else ascension
 
     output_fn("")
-    output_fn("New Run")
-    output_fn("Choose a language:")
+    output_fn("New Run / 新游戏")
+    output_fn("Choose a language / 选择语言:")
     for idx, (code, name) in enumerate(LANGUAGE_CHOICES, start=1):
         marker = " (default)" if code == default_lang else ""
         output_fn(f"  [{idx}] {name}{marker}")
@@ -239,14 +239,16 @@ def prompt_start_options(lang=None, character=None, ascension=None, input_fn=inp
             break
         output_fn(f"Invalid language. Choose 1-{len(LANGUAGE_CHOICES)} or a language name.")
 
-    output_fn("Choose a character:")
+    output_fn(menu_t(selected_lang, "Choose a character:", "选择角色:"))
     for idx, name in enumerate(CHARACTER_CHOICES, start=1):
         marker = " (default)" if name == default_character else ""
         output_fn(f"  [{idx}] {name}{marker}")
 
     while True:
         try:
-            raw_character = input_fn(f"Character [1-{len(CHARACTER_CHOICES)}] ({default_character}): ").strip()
+            raw_character = input_fn(
+                f"{menu_t(selected_lang, 'Character', '角色')} [1-{len(CHARACTER_CHOICES)}] ({default_character}): "
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             raw_character = ""
         if not raw_character:
@@ -261,11 +263,17 @@ def prompt_start_options(lang=None, character=None, ascension=None, input_fn=inp
         if name_match:
             selected_character = name_match
             break
-        output_fn(f"Invalid character. Choose 1-{len(CHARACTER_CHOICES)} or a character name.")
+        output_fn(menu_t(
+            selected_lang,
+            f"Invalid character. Choose 1-{len(CHARACTER_CHOICES)} or a character name.",
+            f"无效角色。请输入 1-{len(CHARACTER_CHOICES)} 或角色名称。",
+        ))
 
     while True:
         try:
-            raw_ascension = input_fn(f"Ascension [0-10] ({default_ascension}): ").strip()
+            raw_ascension = input_fn(
+                f"{menu_t(selected_lang, 'Ascension', '进阶')} [0-10] ({default_ascension}): "
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             raw_ascension = ""
         if not raw_ascension:
@@ -274,11 +282,19 @@ def prompt_start_options(lang=None, character=None, ascension=None, input_fn=inp
         try:
             selected_ascension = int(raw_ascension)
         except ValueError:
-            output_fn("Invalid ascension. Choose a number from 0 to 10.")
+            output_fn(menu_t(
+                selected_lang,
+                "Invalid ascension. Choose a number from 0 to 10.",
+                "无效进阶。请输入 0 到 10 的数字。",
+            ))
             continue
         if 0 <= selected_ascension <= 10:
             break
-        output_fn("Invalid ascension. Choose a number from 0 to 10.")
+        output_fn(menu_t(
+            selected_lang,
+            "Invalid ascension. Choose a number from 0 to 10.",
+            "无效进阶。请输入 0 到 10 的数字。",
+        ))
 
     return selected_lang, selected_character, selected_ascension
 
@@ -465,6 +481,21 @@ def show_native_save(save_path):
 
 def n(obj):
     """Extract display name."""
+    if isinstance(obj, dict):
+        if LANG == "both":
+            en = obj.get("en") or obj.get("eng")
+            zh = obj.get("zh") or obj.get("zhs")
+            if en and zh:
+                return f"{en} / {zh}"
+        preferred = ("zh", "zhs", "en", "eng") if LANG == "zh" else ("en", "eng", "zh", "zhs")
+        for key in preferred:
+            value = obj.get(key)
+            if value:
+                return str(value)
+        for value in obj.values():
+            if value:
+                return str(value)
+        return "?"
     return str(obj) if obj is not None else "?"
 
 def short_n(obj):
@@ -549,6 +580,11 @@ def t(en, zh=None):
     if LANG == "both":
         return f"{en} / {zh}"
     return zh
+
+
+def menu_t(lang, en, zh):
+    """Translate launcher text before the global language has been selected."""
+    return zh if lang == "zh" else en
 
 # Card rarities — keys match sts2 CardRarity.ToString(); ZHS from localization_zhs/gameplay_ui.json CARD_RARITY.*
 RARITY_ZH = {
@@ -1000,11 +1036,15 @@ def show_player(p, show_deck=False):
 
 
 def pile_display_lines(pile_name, cards, count=None):
-    title = "Draw Pile" if pile_name == "draw" else "Discard Pile"
+    title = t("Draw Pile", "抽牌堆") if pile_name == "draw" else t("Discard Pile", "弃牌堆")
     total = len(cards) if count is None else count
     lines = [c(f"{title} ({total})", "bold")]
     if not cards:
-        lines.append("  Empty" if total == 0 else "  Card details are only available during combat.")
+        lines.append(
+            t("  Empty", "  空")
+            if total == 0
+            else t("  Card details are only available during combat.", "  只有战斗中可以查看卡牌详情。")
+        )
         return lines
     for card in cards:
         up = "+" if card.get("upgraded") else ""
@@ -1302,7 +1342,7 @@ def show_card_reward(state):
 
 def show_combat_reward(state):
     print(f"\n{'-' * 60}")
-    print(f"  {c('Combat Rewards', 'bold')}")
+    print(f"  {c(t('Combat Rewards', '战斗奖励'), 'bold')}")
     show_player(state.get("player", {}))
     print()
     rewards = state.get("rewards", [])
@@ -1311,12 +1351,13 @@ def show_combat_reward(state):
         idx = reward.get("index", "?")
         name = reward.get("name")
         if kind == "gold":
-            label = f"{reward.get('amount', '?')} gold"
+            amount = reward.get("amount", "?")
+            label = t(f"{amount} gold", f"{amount} 金币")
         elif kind == "card_reward":
             count = reward.get("count")
-            label = f"Card Reward ({count} cards)" if count else "Card Reward"
+            label = t(f"Card Reward ({count} cards)", f"卡牌奖励（{count} 张）") if count else t("Card Reward", "卡牌奖励")
         elif name:
-            label = f"{name} ({kind})"
+            label = f"{n(name)} ({kind})"
         else:
             label = kind
         print(f"  [{idx}] {label}")
@@ -1483,8 +1524,8 @@ def show_crystal_sphere(state):
     print(f"\n{'-' * 60}")
     ctx = state.get("context", {})
     if ctx:
-        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','Floor')} {ctx.get('floor','?')}")
-    print(f"  {c(t('Crystal Sphere', 'Crystal Sphere'), 'bold')}")
+        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+    print(f"  {c(t('Crystal Sphere', '水晶球'), 'bold')}")
     show_player(state.get("player", {}))
     print()
 
@@ -1507,28 +1548,44 @@ def show_crystal_sphere(state):
             print(f"  {y:2d} " + " ".join(row))
 
     print()
-    print(f"  {t('Tool','Tool')}: {state.get('tool', '?')}  "
-          f"{t('Divinations','Divinations')}: {state.get('divinations_remaining', '?')}")
+    tool_labels = {
+        "big": t("big", "大"),
+        "small": t("small", "小"),
+    }
+    item_labels = {
+        "card": t("card", "卡牌"),
+        "gold": t("gold", "金币"),
+        "potion": t("potion", "药水"),
+        "relic": t("relic", "遗物"),
+        "bad": t("bad", "负面"),
+    }
+    current_tool = state.get("tool", "?")
+    print(f"  {t('Tool','工具')}: {tool_labels.get(current_tool, current_tool)}  "
+          f"{t('Divinations','占卜次数')}: {state.get('divinations_remaining', '?')}")
     if state.get("visible_items"):
-        print(f"  {t('Visible items','Visible items')}:")
+        print(f"  {t('Visible items','可见物品')}:")
         for item in state.get("visible_items", []):
             kind = item.get("item_kind") or item.get("item_type", "?")
             detail = item.get("card_rarity") or item.get("potion_rarity") or item.get("gold_size")
-            label = f"{detail} {kind}" if detail else kind
-            status = "complete" if item.get("is_fully_revealed") else "partial"
+            kind_label = item_labels.get(kind, kind)
+            detail_label = t(detail, RARITY_ZH.get(detail, detail)) if detail else None
+            label = f"{detail_label} {kind_label}" if detail_label else kind_label
+            status = t("complete", "完整") if item.get("is_fully_revealed") else t("partial", "部分")
             print(f"    - #{item.get('index')} {label} ({status}, "
-                  f"{item.get('revealed_cells')}/{item.get('total_cells')} cells)")
+                  f"{item.get('revealed_cells')}/{item.get('total_cells')} {t('cells', '格')})")
     if state.get("revealed_items"):
-        print(f"  {t('Revealed','Revealed')}:")
+        print(f"  {t('Revealed','已揭示')}:")
         for item in state.get("revealed_items", []):
             kind = item.get("item_kind") or item.get("item_type", "?")
             detail = item.get("card_rarity") or item.get("potion_rarity") or item.get("gold_size")
-            label = f"{detail} {kind}" if detail else kind
-            value = "good" if item.get("is_good") else "bad"
+            kind_label = item_labels.get(kind, kind)
+            detail_label = t(detail, RARITY_ZH.get(detail, detail)) if detail else None
+            label = f"{detail_label} {kind_label}" if detail_label else kind_label
+            value = t("good", "正面") if item.get("is_good") else t("bad", "负面")
             print(f"    - #{item.get('index')} {label} ({value}) "
-                  f"at {item.get('x')},{item.get('y')} "
+                  f"{t('at', '位置')} {item.get('x')},{item.get('y')} "
                   f"{item.get('width')}x{item.get('height')}")
-    print(f"  {c('? hidden, . empty, G good item, B bad item', 'dim')}")
+    print(f"  {c(t('? hidden, . empty, G good item, B bad item', '? 隐藏，. 空，G 正面物品，B 负面物品'), 'dim')}")
 
 def _render_map(map_data, choice_set=None, choice_indices=None):
     """Render map as a grid with connection lines between rows."""
@@ -1956,6 +2013,17 @@ def _show_quit_save_result(result):
         print(f"  {c(t('Save failed:','存档失败:'), 'red')} {save_result.get('message', '?')}")
 
 
+def start_run_summary_line(character, seed, ascension, state=None):
+    """Return the new-run summary line using engine-localized player text when available."""
+    player_name = None
+    if state:
+        player = state.get("player") or {}
+        player_name = player.get("name")
+    character_label = n(player_name) if player_name else character
+    asc_str = f"  {t('Ascension','进阶')}: {ascension}" if ascension > 0 else ""
+    return f"{t('Character','角色')}: {character_label}  {t('Seed','种子')}: {seed}{asc_str}"
+
+
 def _writeback_continue_save(send_fn, native_save_path):
     """Best-effort writeback for --continue sessions when a stable map checkpoint is reached."""
     if not native_save_path:
@@ -2084,8 +2152,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                   f"{t('HP','生命')}: {p.get('hp','?')}/{p.get('max_hp','?')}  "
                   f"{t('Gold','金')}: {p.get('gold','?')}")
         else:
-            asc_str = f"  {t('Ascension','渐进难度')}: {ascension}" if ascension > 0 else ""
-            print(f"{t('Character','角色')}: {character}  {t('Seed','种子')}: {actual_seed}{asc_str}")
+            print(start_run_summary_line(character, actual_seed, ascension, state))
         print(f"{t('Type','输入')} {c('help', 'cyan')} {t('for available commands.','查看可用命令。')}\n")
 
         _auto_last_fingerprint = None
@@ -2313,7 +2380,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     if auto:
                         state = send({"cmd": "action", "action": "proceed"})
                     else:
-                        get_input(t("Press Enter to proceed", "Press Enter to proceed"), {""}, state=state)
+                        get_input(t("Press Enter to proceed", "回车继续"), {""}, state=state)
                         state = send({"cmd": "action", "action": "proceed"})
                     continue
                 for r in relics:
@@ -2495,7 +2562,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         state = send({"cmd": "action", "action": "crystal_sphere_proceed"})
                     else:
                         choice = get_input(
-                            t("Press Enter to proceed", "Press Enter to proceed"),
+                            t("Press Enter to proceed", "回车继续"),
                             {"", "proceed", "p"},
                             state=state,
                         )
@@ -2590,7 +2657,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         changes.append(f"{t('Gold','金')}: {'+' if diff > 0 else ''}{diff}")
                     card_detail_lines = deck_change_detail_lines(old_deck_card_infos, new_p.get("deck", []))
                     if card_detail_lines:
-                        print(f"\n  {c('Card details:', 'yellow')}")
+                        print(f"\n  {c(t('Card details:', '卡牌详情:'), 'yellow')}")
                         for line in card_detail_lines:
                             print(f"    {line}")
                     if changes:

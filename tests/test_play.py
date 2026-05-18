@@ -161,6 +161,103 @@ def test_should_show_start_menu_true_for_double_click_tty():
     assert play.should_show_start_menu(args, stdin=stdin, argv=[]) is True
 
 
+def test_zh_start_summary_prefers_engine_player_name():
+    play.LANG = "zh"
+
+    line = plain(play.start_run_summary_line(
+        "Ironclad",
+        "loc-seed",
+        0,
+        {"player": {"name": {"en": "Ironclad", "zh": "\u94c1\u7532\u6218\u58eb"}}},
+    ))
+
+    assert "Ironclad" not in line
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in line)
+
+
+def test_zh_pile_display_lines_are_localized():
+    play.LANG = "zh"
+
+    text = plain("\n".join(play.pile_display_lines("draw", [], count=0)))
+
+    assert "Draw Pile" not in text
+    assert "Empty" not in text
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def test_zh_combat_rewards_are_localized(capsys):
+    play.LANG = "zh"
+
+    play.show_combat_reward({
+        "player": {
+            "name": "\u94c1\u7532\u6218\u58eb",
+            "hp": 80,
+            "max_hp": 80,
+            "gold": 99,
+            "deck_size": 10,
+            "relics": [],
+            "potions": [],
+        },
+        "rewards": [
+            {"index": 0, "kind": "gold", "amount": 12},
+            {"index": 1, "kind": "card_reward", "count": 3},
+        ],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Combat Rewards" not in text
+    assert "Card Reward" not in text
+    assert "gold" not in text
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def test_zh_crystal_sphere_labels_are_localized(capsys):
+    play.LANG = "zh"
+
+    play.show_crystal_sphere({
+        "player": {
+            "name": "\u94c1\u7532\u6218\u58eb",
+            "hp": 80,
+            "max_hp": 80,
+            "gold": 99,
+            "deck_size": 10,
+            "relics": [],
+            "potions": [],
+        },
+        "grid_width": 1,
+        "grid_height": 1,
+        "cells": [{"x": 0, "y": 0, "is_hidden": True}],
+        "tool": "big",
+        "divinations_remaining": 2,
+        "visible_items": [
+            {
+                "index": 0,
+                "item_kind": "card",
+                "card_rarity": "Rare",
+                "is_fully_revealed": False,
+                "revealed_cells": 1,
+                "total_cells": 2,
+            }
+        ],
+        "revealed_items": [
+            {
+                "index": 1,
+                "item_kind": "gold",
+                "is_good": True,
+                "x": 0,
+                "y": 0,
+                "width": 1,
+                "height": 1,
+            }
+        ],
+    })
+
+    text = plain(capsys.readouterr().out)
+    for english in ("Crystal Sphere", "Tool", "Visible items", "complete", "partial", "cells", "good item"):
+        assert english not in text
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
 def test_combat_inline_stat_prefers_single_target_damage():
     play.LANG = "en"
     rendered = plain(play.combat_hand_inline_stat_str(
