@@ -4102,15 +4102,23 @@ public class RunSimulator
         if (string.IsNullOrEmpty(text))
             return text;
 
-        string rawText;
         try
         {
-            rawText = card.Description.GetRawText();
+            return ExpandResolvedEnergyIcons(text, card.Description.GetRawText(), vars);
         }
         catch
         {
             return text;
         }
+    }
+
+    private static string ExpandResolvedEnergyIcons(
+        string text,
+        string? rawText,
+        Dictionary<string, object?> vars)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(rawText))
+            return text;
 
         foreach (System.Text.RegularExpressions.Match token in System.Text.RegularExpressions.Regex.Matches(
                      rawText,
@@ -6429,19 +6437,38 @@ public class RunSimulator
         var entry = relic.Id.Entry;
         var vars = RelicVars(relic);
         var varsOrNull = vars.Count > 0 ? vars : null;
+        var description =
+            CleanResolvedEngineText(relic.HoverTip.Description)
+            ?? EngineLocStringText(relic.DynamicDescription)
+            ?? InterpolateDynamicVars(_loc.Bilingual("relics", entry + ".description"), varsOrNull);
+        if (description != null && varsOrNull != null)
+        {
+            var rawDescription = RelicRawDescription(relic)
+                ?? _loc.Bilingual("relics", entry + ".description");
+            description = ExpandResolvedEnergyIcons(description, rawDescription, vars);
+        }
         var info = new Dictionary<string, object?>
         {
             ["id"] = entry,
             ["name"] = EngineLocStringText(relic.Title) ?? _loc.Relic(entry),
-            ["description"] =
-                CleanResolvedEngineText(relic.HoverTip.Description)
-                ?? EngineLocStringText(relic.DynamicDescription)
-                ?? InterpolateDynamicVars(_loc.Bilingual("relics", entry + ".description"), varsOrNull),
+            ["description"] = description,
             ["vars"] = varsOrNull,
         };
         if (index.HasValue)
             info["index"] = index.Value;
         return info;
+    }
+
+    private static string? RelicRawDescription(RelicModel relic)
+    {
+        try
+        {
+            return relic.DynamicDescription?.GetRawText();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Dictionary<string, object?> RelicVars(RelicModel relic)

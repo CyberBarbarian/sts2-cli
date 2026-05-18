@@ -66,6 +66,19 @@ def test_player_relic_descriptions_resolve_energy_icons(game):
     assert "1" in rose["description"]
 
 
+def test_player_relic_descriptions_repeat_multiple_energy_icons(game):
+    state = game.start(seed="relic-energy-description-multiple")
+    game.skip_neow(state)
+    game.set_player(relics=["VERY_HOT_COCOA"])
+
+    state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+    cocoa = next(r for r in state["player"]["relics"] if r["id"] == "VERY_HOT_COCOA")
+
+    assert "{Energy:energyIcons()}" not in cocoa["description"]
+    assert "4ironclad_energy_icon.png" not in cocoa["description"]
+    assert cocoa["description"].count("energy_icon.png") == 4
+
+
 def test_empty_treasure_from_silver_crucible_is_explicit_and_proceeds(game):
     game.start(seed="silver-crucible-empty-chest")
     game.set_player(relics=["SILVER_CRUCIBLE"])
