@@ -155,6 +155,31 @@ class TestPotionActions:
         assert any(card["name"] == "Strike" and card["cost"] == 0 for card in state["hand"])
         assert len(state["hand"]) == 4
 
+    def test_touch_of_insanity_card_select_exports_combat_preview_stats(self, game):
+        state = game.start(seed="touch-selection-combat-stats")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["TOUCH_OF_INSANITY"],
+            deck=[
+                "INFLAME",
+                "BASH",
+                "PERFECTED_STRIKE",
+                "POMMEL_STRIKE",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        inflame = next(card for card in state["hand"] if card["name"] == "Inflame")
+        state = game.act("play_card", card_index=inflame["index"])
+
+        state = game.act("use_potion", potion_index=0)
+
+        assert state["decision"] == "card_select"
+        bash = next(card for card in state["cards"] if card["name"] == "Bash")
+        assert bash["description"].startswith("Deal 10 damage.")
+        assert bash["stats"]["damage"] == 10
+
     def test_full_potion_slots_block_potion_reward_claim(self, game):
         state = game.start(seed="full-potion-reward-1", ascension=10)
         game.skip_neow(state)

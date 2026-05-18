@@ -2228,7 +2228,8 @@ public class RunSimulator
         {
             var opts = _cardSelector.PendingOptions.Select((card, i) =>
             {
-                var stats = ExtractCardStats(card, player);
+                var includeCombatState = ShouldExportCombatCardState(card);
+                var stats = ExtractCardStats(card, player, applyCombatModifiers: includeCombatState);
                 var selkws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
                 var cardInfo = new Dictionary<string, object?>
                 {
@@ -2240,11 +2241,11 @@ public class RunSimulator
                     ["rarity"] = card.Rarity.ToString(),
                     ["upgraded"] = card.IsUpgraded,
                     ["stats"] = stats.Count > 0 ? stats : null,
-                    ["description"] = CardDescription(card, stats),
+                    ["description"] = CardDescription(card, stats, includeCombatText: includeCombatState),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card, player),
                 };
-                AddEnergyCostDetails(cardInfo, card);
+                AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeCombatState);
                 AddCardEnhancements(cardInfo, card);
                 return cardInfo;
             }).ToList();
@@ -2266,7 +2267,9 @@ public class RunSimulator
             }
             if (_pendingCardSelectionSourceCard != null)
             {
-                state["source_card"] = CardSummary(_pendingCardSelectionSourceCard);
+                state["source_card"] = CardSummary(
+                    _pendingCardSelectionSourceCard,
+                    applyCombatModifiers: ShouldExportCombatCardState(_pendingCardSelectionSourceCard));
             }
             return state;
         }
@@ -2681,9 +2684,12 @@ public class RunSimulator
         return CleanResolvedEngineText(interpolated);
     }
 
-    private Dictionary<string, object?> CardSummary(CardModel card)
+    private Dictionary<string, object?> CardSummary(CardModel card, bool applyCombatModifiers = false)
     {
-        var stats = ExtractCardStats(card, _runState?.Players.FirstOrDefault());
+        var stats = ExtractCardStats(
+            card,
+            _runState?.Players.FirstOrDefault(),
+            applyCombatModifiers: applyCombatModifiers);
         var summary = new Dictionary<string, object?>
         {
             ["id"] = card.Id.ToString(),
@@ -2691,12 +2697,24 @@ public class RunSimulator
             ["cost"] = GetEnergyCostDisplay(card),
             ["type"] = card.Type.ToString(),
             ["upgraded"] = card.IsUpgraded,
-            ["description"] = CardDescription(card, stats),
+            ["description"] = CardDescription(card, stats, includeCombatText: applyCombatModifiers),
         };
         if (stats.Count > 0)
             summary["stats"] = stats;
-        AddEnergyCostDetails(summary, card);
+        AddEnergyCostDetails(summary, card, includeCurrentXValue: applyCombatModifiers);
         return summary;
+    }
+
+    private static bool ShouldExportCombatCardState(CardModel card)
+    {
+        try
+        {
+            return CombatManager.Instance.IsInProgress && card.CombatState != null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool CombatHasAliveEnemies()
