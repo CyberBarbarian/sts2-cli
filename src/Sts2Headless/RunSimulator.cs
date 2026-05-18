@@ -2228,8 +2228,13 @@ public class RunSimulator
         {
             var opts = _cardSelector.PendingOptions.Select((card, i) =>
             {
-                var includeCombatState = ShouldExportCombatCardState(card);
-                var stats = ExtractCardStats(card, player, applyCombatModifiers: includeCombatState);
+                var includeCombatPreview = ShouldExportCombatPreviewState(card);
+                var includeTargetRows = ShouldExportCombatCardState(card);
+                var stats = ExtractCardStats(
+                    card,
+                    player,
+                    applyCombatModifiers: includeCombatPreview,
+                    includeTargetRows: includeTargetRows);
                 var selkws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
                 var cardInfo = new Dictionary<string, object?>
                 {
@@ -2241,11 +2246,11 @@ public class RunSimulator
                     ["rarity"] = card.Rarity.ToString(),
                     ["upgraded"] = card.IsUpgraded,
                     ["stats"] = stats.Count > 0 ? stats : null,
-                    ["description"] = CardDescription(card, stats, includeCombatText: includeCombatState),
+                    ["description"] = CardDescription(card, stats, includeCombatText: includeCombatPreview),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card, player),
                 };
-                AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeCombatState);
+                AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeTargetRows);
                 AddCardEnhancements(cardInfo, card);
                 return cardInfo;
             }).ToList();
@@ -2269,7 +2274,8 @@ public class RunSimulator
             {
                 state["source_card"] = CardSummary(
                     _pendingCardSelectionSourceCard,
-                    applyCombatModifiers: ShouldExportCombatCardState(_pendingCardSelectionSourceCard));
+                    applyCombatModifiers: ShouldExportCombatPreviewState(_pendingCardSelectionSourceCard),
+                    includeTargetRows: ShouldExportCombatCardState(_pendingCardSelectionSourceCard));
             }
             return state;
         }
@@ -2684,12 +2690,16 @@ public class RunSimulator
         return CleanResolvedEngineText(interpolated);
     }
 
-    private Dictionary<string, object?> CardSummary(CardModel card, bool applyCombatModifiers = false)
+    private Dictionary<string, object?> CardSummary(
+        CardModel card,
+        bool applyCombatModifiers = false,
+        bool includeTargetRows = true)
     {
         var stats = ExtractCardStats(
             card,
             _runState?.Players.FirstOrDefault(),
-            applyCombatModifiers: applyCombatModifiers);
+            applyCombatModifiers: applyCombatModifiers,
+            includeTargetRows: includeTargetRows);
         var summary = new Dictionary<string, object?>
         {
             ["id"] = card.Id.ToString(),
@@ -2703,6 +2713,19 @@ public class RunSimulator
             summary["stats"] = stats;
         AddEnergyCostDetails(summary, card, includeCurrentXValue: applyCombatModifiers);
         return summary;
+    }
+
+    private static bool ShouldExportCombatPreviewState(CardModel card)
+    {
+        try
+        {
+            return CombatManager.Instance.IsInProgress
+                   && card.CombatState != null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool ShouldExportCombatCardState(CardModel card)
@@ -5161,7 +5184,8 @@ public class RunSimulator
         CardModel card,
         Player? player = null,
         CardModel? countAsCard = null,
-        bool applyCombatModifiers = false)
+        bool applyCombatModifiers = false,
+        bool includeTargetRows = true)
     {
         var stats = new Dictionary<string, object?>();
         try
@@ -5183,8 +5207,11 @@ public class RunSimulator
         {
             ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null);
             AddEnergyXAttackRepeat(stats, card);
-            AddCalculatedDamageByTarget(stats, card, player);
-            AddAttackDamageByTarget(stats, card, player);
+            if (includeTargetRows)
+            {
+                AddCalculatedDamageByTarget(stats, card, player);
+                AddAttackDamageByTarget(stats, card, player);
+            }
         }
 
         return stats;

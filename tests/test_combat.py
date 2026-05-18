@@ -835,6 +835,37 @@ class TestCombatEdgeCases:
         assert state["decision"] == "card_select"
         assert state["prompt"] == "Choose a card to put on top of your Draw Pile."
 
+    def test_headbutt_discard_selection_keeps_preview_stats_without_target_rows(self, game):
+        state = game.start(seed="headbutt-selection-preview-stats")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "BLOODLETTING",
+                "INFLAME",
+                "BASH",
+                "HEADBUTT",
+                "TWIN_STRIKE",
+            ],
+        )
+        state = game.enter_room("combat", encounter="ENTOMANCER_ELITE")
+
+        bloodletting = next(card for card in state["hand"] if card["name"] == "Bloodletting")
+        state = game.act("play_card", card_index=bloodletting["index"])
+        inflame = next(card for card in state["hand"] if card["name"] == "Inflame")
+        state = game.act("play_card", card_index=inflame["index"])
+        bash = next(card for card in state["hand"] if card["name"] == "Bash")
+        state = game.act("play_card", card_index=bash["index"], target_index=0)
+        headbutt = next(card for card in state["hand"] if card["name"] == "Headbutt")
+        state = game.act("play_card", card_index=headbutt["index"], target_index=0)
+
+        assert state["decision"] == "card_select"
+        selected_bash = next(card for card in state["cards"] if card["name"] == "Bash")
+        exported_damage = selected_bash["stats"]["damage"]
+        assert selected_bash["description"].startswith(f"Deal {exported_damage} damage.")
+        assert "damage_by_target" not in selected_bash["stats"]
+
     def test_uninitialized_event_card_is_not_exported_as_playable(self, game):
         state = game.start(seed="mad-science-uninitialized")
         game.skip_neow(state)
