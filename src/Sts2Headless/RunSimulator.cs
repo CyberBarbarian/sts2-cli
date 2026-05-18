@@ -284,6 +284,7 @@ internal class LocLookup
 public class RunSimulator
 {
     private const string CliEnergyToken = "[E]";
+    private const string CliStarToken = "[S]";
     private static readonly Dictionary<Type, int?> StaticAttackHitCountByCardType = new();
     private static readonly Dictionary<Type, bool> UsesAttackHitCountByCardType = new();
     private static readonly Dictionary<short, OpCode> OpCodeByValue = typeof(OpCodes)
@@ -4167,6 +4168,18 @@ public class RunSimulator
         return count <= 0 ? "" : string.Concat(Enumerable.Repeat(CliEnergyToken, count));
     }
 
+    private static string CliStarTokens(int count)
+    {
+        return count <= 0 ? "" : string.Concat(Enumerable.Repeat(CliStarToken, count));
+    }
+
+    private static string CliIconTokens(string formatterName, int count)
+    {
+        return string.Equals(formatterName, "starIcons", StringComparison.Ordinal)
+            ? CliStarTokens(count)
+            : CliEnergyTokens(count);
+    }
+
     private static Dictionary<string, object?>? ExportCardDescriptionVars(CardModel card)
     {
         var vars = new Dictionary<string, object?>();
@@ -4257,18 +4270,20 @@ public class RunSimulator
         if (string.IsNullOrEmpty(text))
             return text;
 
-        if (vars == null || vars.Count == 0)
-            return text;
+        text = text.Replace("{singleStarIcon}", CliStarToken, StringComparison.Ordinal);
 
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
-            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:energyIcons\((?<count>\d*)\)\}",
+            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:(?<formatter>energyIcons|starIcons)\((?<count>\d*)\)\}",
             match =>
             {
                 var explicitCount = match.Groups["count"].Value;
                 if (!string.IsNullOrWhiteSpace(explicitCount)
                     && int.TryParse(explicitCount, out var literalCount))
-                    return CliEnergyTokens(literalCount);
+                    return CliIconTokens(match.Groups["formatter"].Value, literalCount);
+
+                if (vars == null || vars.Count == 0)
+                    return match.Value;
 
                 var key = match.Groups["key"].Value;
                 if (!vars.TryGetValue(key, out var value) || value == null)
@@ -4276,13 +4291,16 @@ public class RunSimulator
 
                 try
                 {
-                    return CliEnergyTokens(System.Convert.ToInt32(value));
+                    return CliIconTokens(match.Groups["formatter"].Value, System.Convert.ToInt32(value));
                 }
                 catch
                 {
                     return match.Value;
                 }
             });
+
+        if (vars == null || vars.Count == 0)
+            return text;
 
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
@@ -4782,12 +4800,16 @@ public class RunSimulator
         }
 
         var tokenNames = FormatTokenNames(rawText);
-        if (rawText.Contains("energyIcons", StringComparison.Ordinal)
-            && !engineText.Contains(CliEnergyToken, StringComparison.Ordinal))
+        if ((rawText.Contains("energyIcons", StringComparison.Ordinal)
+             || rawText.Contains("starIcons", StringComparison.Ordinal)
+             || rawText.Contains("singleStarIcon", StringComparison.Ordinal))
+            && !engineText.Contains(CliEnergyToken, StringComparison.Ordinal)
+            && !engineText.Contains(CliStarToken, StringComparison.Ordinal))
         {
             var interpolated = CleanResolvedEngineText(InterpolateDynamicVars(rawText, vars));
             if (!string.IsNullOrWhiteSpace(interpolated)
-                && interpolated.Contains(CliEnergyToken, StringComparison.Ordinal))
+                && (interpolated.Contains(CliEnergyToken, StringComparison.Ordinal)
+                    || interpolated.Contains(CliStarToken, StringComparison.Ordinal)))
                 return interpolated;
         }
 
@@ -4842,7 +4864,7 @@ public class RunSimulator
             @"res://[A-Za-z0-9_./-]+/([A-Za-z0-9_.-]+\.(?:png|webp|jpg|jpeg))",
             "$1",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[(?!E\])/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[(?![ES]\])/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
         text = System.Text.RegularExpressions.Regex.Replace(text, @"#[A-Z](?=\{|[A-Za-z0-9])", "");
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
@@ -4853,8 +4875,20 @@ public class RunSimulator
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
+            @"(?<count>\d+)(?:[A-Za-z0-9_]*star_icon\.png)",
+            match => int.TryParse(match.Groups["count"].Value, out var count)
+                ? CliStarTokens(count)
+                : match.Value,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
             @"[A-Za-z0-9_]*energy_icon\.png",
             CliEnergyToken,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"[A-Za-z0-9_]*star_icon\.png",
+            CliStarToken,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }

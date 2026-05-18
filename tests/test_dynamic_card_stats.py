@@ -9,7 +9,8 @@ class TestDynamicCardStats:
         venerate = deck["Venerate"]
 
         assert "res://" not in venerate["description"]
-        assert "star_icon.png" in venerate["description"]
+        assert "[S]" in venerate["description"]
+        assert "star_icon.png" not in venerate["description"]
 
         game.skip_neow(state)
         game.set_player(relics=["DIVINE_RIGHT"])
@@ -17,7 +18,8 @@ class TestDynamicCardStats:
         divine_right = next(r for r in state["player"]["relics"] if r["id"] == "DIVINE_RIGHT")
 
         assert "res://" not in divine_right["description"]
-        assert "star_icon.png" in divine_right["description"]
+        assert "[S]" in divine_right["description"]
+        assert "star_icon.png" not in divine_right["description"]
 
     def test_perfected_strike_exports_current_calculated_damage(self, game):
         state = game.start(seed="perfected-stats")
