@@ -5128,9 +5128,18 @@ public class RunSimulator
     {
         var player = _runState!.Players[0];
         var summary = PlayerSummary(player);
-        // BUG-005: When player died, the engine resets HP to max. Use last known HP instead.
-        if (!isVictory)
+        // Terminal rooms can mutate Creature HP after combat. Keep game_over summaries tied
+        // to the last live combat HP while preserving death as zero.
+        if (isVictory)
+        {
+            var exportedHp = summary.TryGetValue("hp", out var hpObj) && hpObj is int hp ? hp : 0;
+            if (exportedHp <= 0 && _lastKnownHp > 0)
+                summary["hp"] = _lastKnownHp;
+        }
+        else
+        {
             summary["hp"] = _lastKnownHp > 0 ? 0 : (player.Creature?.CurrentHp ?? 0);
+        }
         return new Dictionary<string, object?>
         {
             ["type"] = "decision",

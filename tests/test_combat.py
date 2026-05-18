@@ -1059,6 +1059,7 @@ class TestCombatEdgeCases:
 
             assert state["decision"] == "game_over"
             assert state["victory"] is True
+            assert state["player"]["hp"] > 0
         finally:
             game.close()
 
