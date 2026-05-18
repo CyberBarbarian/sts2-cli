@@ -5184,6 +5184,7 @@ public class RunSimulator
             @"[A-Za-z0-9_]*star_icon\.png",
             CliStarToken,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]{2,}", " ");
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 

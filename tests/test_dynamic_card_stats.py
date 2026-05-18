@@ -829,6 +829,25 @@ class TestDynamicCardStats:
         assert "{Amount:plural" not in power["description"]
         assert "Exhaust the top card" in power["description"]
 
+    def test_power_description_removes_empty_plural_spacing(self, game):
+        state = game.start(character="Defect", seed="power-description-empty-plural")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "CONSUMING_SHADOW",
+            "STRIKE_DEFECT",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        consuming_shadow = next(c for c in state["hand"] if c["name"] == "Consuming Shadow")
+
+        state = game.act("play_card", card_index=consuming_shadow["index"])
+        power = next(p for p in state["player_powers"] if p["name"] == "Consuming Shadow")
+
+        assert "  " not in power["description"]
+        assert power["description"] == "At the end of your turn, Evoke your leftmost Orb."
+
     def test_card_descriptions_resolve_conditional_upgrade_formatters(self, game):
         state = game.start(seed="card-description-ifupgraded")
         state = game.skip_neow(state)
