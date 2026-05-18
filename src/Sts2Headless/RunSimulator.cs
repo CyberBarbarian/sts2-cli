@@ -284,6 +284,7 @@ internal class LocLookup
 public class RunSimulator
 {
     private static readonly Dictionary<Type, int?> StaticAttackHitCountByCardType = new();
+    private static readonly Dictionary<Type, bool> UsesAttackHitCountByCardType = new();
     private static readonly Dictionary<short, OpCode> OpCodeByValue = typeof(OpCodes)
         .GetFields(BindingFlags.Public | BindingFlags.Static)
         .Where(f => f.FieldType == typeof(OpCode))
@@ -5257,6 +5258,7 @@ public class RunSimulator
             ApplyCardPreviewStats(stats, card, CardPreviewMode.Normal, target: null);
             AddEnergyXAttackRepeat(stats, card);
             AddHandExhaustAttackRepeat(stats, card, player);
+            RemoveNonAttackRepeatStat(stats, card);
             if (includeTargetRows)
             {
                 AddCalculatedDamageByTarget(stats, card, player);
@@ -5341,6 +5343,15 @@ public class RunSimulator
             stats["repeat"] = Math.Max(0, hand.Count(c => c != null && !ReferenceEquals(c, card)));
         }
         catch { }
+    }
+
+    private static void RemoveNonAttackRepeatStat(Dictionary<string, object?> stats, CardModel card)
+    {
+        if (card.Type != CardType.Attack || !stats.ContainsKey("repeat"))
+            return;
+        if (UsesRepeatAsAttackHits(card))
+            return;
+        stats.Remove("repeat");
     }
 
     private static object GetEnergyCostDisplay(CardModel card)
@@ -5473,6 +5484,7 @@ public class RunSimulator
                 return;
 
             var repeat = GetStatInt(stats, "repeat", 1);
+            var usesRepeatAsAttackHits = UsesRepeatAsAttackHits(card);
             var pendingStrengthDelta = GetPendingStarSpendStrengthDelta(card, player);
             for (int i = 0; i < enemies.Count; i++)
             {
@@ -5491,7 +5503,9 @@ public class RunSimulator
                         pendingStrengthDelta,
                         vulnerable);
                 }
-                var previewRepeat = previewStats != null && previewStats.TryGetValue("repeat", out var repeatValue)
+                var previewRepeat = usesRepeatAsAttackHits
+                    && previewStats != null
+                    && previewStats.TryGetValue("repeat", out var repeatValue)
                     ? repeatValue
                     : repeat;
                 if (stats.ContainsKey("calculatedhits"))
@@ -5724,6 +5738,48 @@ public class RunSimulator
         return repeat;
     }
 
+    private static bool UsesRepeatAsAttackHits(CardModel card)
+    {
+        if (card.Type != CardType.Attack)
+            return false;
+        if (card.EnergyCost?.CostsX == true)
+            return true;
+        if (card is FiendFire)
+            return true;
+        if (CardUsesAttackHitCount(card))
+            return true;
+        return false;
+    }
+
+    private static bool CardUsesAttackHitCount(CardModel card)
+    {
+        var type = card.GetType();
+        if (UsesAttackHitCountByCardType.TryGetValue(type, out var cached))
+            return cached;
+
+        var usesHitCount = FindUsesAttackHitCount(type);
+        UsesAttackHitCountByCardType[type] = usesHitCount;
+        return usesHitCount;
+    }
+
+    private static bool FindUsesAttackHitCount(Type cardType)
+    {
+        var withHitCount = typeof(AttackCommand).GetMethod(
+            nameof(AttackCommand.WithHitCount),
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            types: new[] { typeof(int) },
+            modifiers: null);
+        if (withHitCount == null)
+            return false;
+
+        var methods = cardType.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)
+            .Select(t => t.GetMethod("MoveNext", BindingFlags.Instance | BindingFlags.NonPublic))
+            .Where(m => m != null);
+
+        return methods.Any(method => MethodCalls(method!, withHitCount));
+    }
+
     private static int? GetStaticAttackHitCount(CardModel card)
     {
         var type = card.GetType();
@@ -5809,6 +5865,45 @@ public class RunSimulator
         }
 
         return null;
+    }
+
+    private static bool MethodCalls(MethodInfo method, MethodInfo target)
+    {
+        byte[]? il;
+        try
+        {
+            il = method.GetMethodBody()?.GetILAsByteArray();
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (il == null)
+            return false;
+
+        var module = method.Module;
+        for (var offset = 0; offset < il.Length;)
+        {
+            if (!TryReadOpCode(il, ref offset, out var opCode))
+                return false;
+
+            var operandOffset = offset;
+            var operandSize = GetOperandSize(opCode, il, operandOffset);
+            if (operandSize < 0 || operandOffset + operandSize > il.Length)
+                return false;
+
+            if ((opCode == OpCodes.Call || opCode == OpCodes.Callvirt) && operandSize == 4)
+            {
+                var token = BitConverter.ToInt32(il, operandOffset);
+                if (IsResolvedMethod(module, token, target))
+                    return true;
+            }
+
+            offset = operandOffset + operandSize;
+        }
+
+        return false;
     }
 
     private static bool IsLikelyAttackCommandReceiverLoad(OpCode opCode)

@@ -650,6 +650,29 @@ class TestDynamicCardStats:
         state = game.act("play_card", card_index=dagger_spray["index"])
         assert hp_before - state["enemies"][0]["hp"] == target_stats["total_damage"]
 
+    def test_non_repeat_attack_does_not_use_channel_count_as_damage_repeat(self, game):
+        state = game.start(character="Defect", seed="ice-lance-repeat-stats")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "ICE_LANCE",
+            "STRIKE_DEFECT",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        ice_lance = next(c for c in state["hand"] if c["name"] == "Ice Lance")
+        target_stats = ice_lance["stats"]["damage_by_target"][0]
+
+        damage = ice_lance["stats"]["damage"]
+        assert damage > 0
+        assert "repeat" not in ice_lance["stats"]
+        assert "repeat" not in target_stats
+        assert "total_damage" not in target_stats
+        assert target_stats["damage"] == damage
+        assert target_stats["unblocked_damage"] == damage
+
     def test_attack_damage_stats_include_player_strength(self, game):
         state = game.start(seed="strength-damage-stats")
         game.skip_neow(state)
