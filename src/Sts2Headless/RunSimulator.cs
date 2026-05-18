@@ -2668,8 +2668,12 @@ public class RunSimulator
 
         var playerCreatures = combatState?.PlayerCreatures?.ToList();
 
-        var enemies = combatState?.Enemies?
-            .Where(e => e != null && e.IsAlive)
+        var allEnemies = combatState?.Enemies?
+            .Where(e => e != null)
+            .ToList() ?? new();
+
+        var enemies = allEnemies
+            .Where(e => e.IsAlive)
             .Select((e, i) =>
             {
                 // Extract detailed intent info
@@ -2724,10 +2728,13 @@ public class RunSimulator
                 var enemyInfo = new Dictionary<string, object?>
                 {
                     ["index"] = i,
+                    ["combat_index"] = allEnemies.IndexOf(e),
                     ["name"] = enemyName,
                     ["hp"] = e.CurrentHp,
                     ["max_hp"] = e.MaxHp,
                     ["block"] = e.Block,
+                    ["alive"] = true,
+                    ["targetable"] = true,
                     ["intents"] = intents.Count > 0 ? intents : null,
                     ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
                     ["powers"] = ePowers?.Count > 0 ? ePowers : null,
@@ -2742,7 +2749,46 @@ public class RunSimulator
                 }
 
                 return enemyInfo;
-            }).ToList() ?? new();
+            }).ToList();
+
+        var inactiveEnemies = allEnemies
+            .Select((e, combatIndex) => new { Enemy = e, CombatIndex = combatIndex })
+            .Where(entry => !entry.Enemy.IsAlive)
+            .Select(entry =>
+            {
+                var e = entry.Enemy;
+                var ePowers = e.Powers?.Select(pw =>
+                {
+                    return new Dictionary<string, object?>
+                    {
+                        ["name"] = PowerName(pw),
+                        ["description"] = PowerDescription(pw),
+                        ["amount"] = pw.Amount,
+                    };
+                }).ToList();
+
+                var enemyInfo = new Dictionary<string, object?>
+                {
+                    ["combat_index"] = entry.CombatIndex,
+                    ["name"] = MonsterDisplayName(e.Monster, e),
+                    ["hp"] = e.CurrentHp,
+                    ["max_hp"] = e.MaxHp,
+                    ["block"] = e.Block,
+                    ["alive"] = false,
+                    ["targetable"] = false,
+                    ["powers"] = ePowers?.Count > 0 ? ePowers : null,
+                };
+
+                var monsterEntry = e.Monster?.Id.Entry ?? "UNKNOWN";
+                var moveEntry = MoveEntry(e.Monster?.NextMove);
+                if (!string.IsNullOrWhiteSpace(moveEntry))
+                {
+                    enemyInfo["move_id"] = moveEntry;
+                    enemyInfo["move_name"] = _loc.MonsterMove(monsterEntry, moveEntry);
+                }
+
+                return enemyInfo;
+            }).ToList();
 
         // Player powers/buffs
         var playerPowers = player.Creature?.Powers?.Select(pw =>
@@ -2768,6 +2814,7 @@ public class RunSimulator
             ["max_energy"] = pcs?.MaxEnergy ?? 0,
             ["hand"] = hand,
             ["enemies"] = enemies,
+            ["inactive_enemies"] = inactiveEnemies.Count > 0 ? inactiveEnemies : null,
             ["player"] = PlayerSummary(player),
             ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,

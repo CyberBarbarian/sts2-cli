@@ -1102,6 +1102,28 @@ class TestCombatEdgeCases:
         assert state["decision"] == "combat_play"
         assert state["player"]["hp"] > 0
 
+    def test_decimillipede_dead_segment_exports_pending_reattach(self, game):
+        state = game.start(seed="decimillipede-reattach-export")
+        game.skip_neow(state)
+        game.set_player(
+            hp=9999,
+            max_hp=9999,
+            deck=["BLUDGEON"] * 10,
+            relics=["BAG_OF_MARBLES"],
+        )
+        state = game.enter_room("combat", encounter="DECIMILLIPEDE_ELITE")
+
+        state = game.act("play_card", card_index=0, target_index=0)
+
+        assert state["decision"] == "combat_play"
+        assert len(state["enemies"]) == 2
+        inactive = state.get("inactive_enemies")
+        assert inactive
+        assert inactive[0]["name"] == "Decimillipede"
+        assert inactive[0]["alive"] is False
+        assert inactive[0]["targetable"] is False
+        assert any(power["name"] == "Reattach" for power in inactive[0]["powers"])
+
     def test_decimillipede_all_segments_defeated_resolves_rewards(self, game):
         state = game.start(seed="decimillipede-empty-after-whirlwind")
         game.skip_neow(state)
