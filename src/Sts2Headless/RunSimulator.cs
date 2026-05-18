@@ -1512,8 +1512,11 @@ public class RunSimulator
             return Error($"Invalid reward_index {rewardIndex}, {_pendingRewards.Count} rewards pending");
 
         var reward = _pendingRewards[rewardIndex];
-        if (reward is CardReward)
-            return Error("Card rewards must use select_card_reward or skip_card_reward");
+        if (reward is CardReward cardReward)
+        {
+            _pendingCardReward = cardReward;
+            return CardRewardState(player, _runState?.CurrentRoom as CombatRoom);
+        }
         if (reward is MegaCrit.Sts2.Core.Rewards.PotionReward && !HasOpenPotionSlot(player))
             return Error("Potion slots are full; use discard_potion before claiming this potion reward");
 
@@ -2858,7 +2861,6 @@ public class RunSimulator
         {
             var claimableRewards = _pendingRewards
                 .Select((reward, i) => CombatRewardInfo(reward, i))
-                .Where(info => !string.Equals(info.GetValueOrDefault("kind") as string, "card_reward", StringComparison.Ordinal))
                 .ToList();
 
             if (claimableRewards.Count > 0)
@@ -2952,6 +2954,12 @@ public class RunSimulator
                 foreach (var kv in SingleCardRewardInfo(card, index))
                     info[kv.Key] = kv.Value;
             }
+        }
+        else if (kind == "card_reward" && reward is CardReward cardReward)
+        {
+            info["name"] = "Card Reward";
+            info["count"] = cardReward.Cards.Count();
+            info["can_skip"] = cardReward.CanSkip;
         }
         return info;
     }

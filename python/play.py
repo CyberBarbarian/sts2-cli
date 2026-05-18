@@ -350,7 +350,7 @@ def desc(obj):
     if obj and isinstance(obj, str):
         import re
         text = obj
-        text = re.sub(r'\[/?[^\]]+\]', '', text)  # strip BBCode [tags]
+        text = re.sub(r'\[(?![ES]\])/?[^\]]+\]', '', text)  # strip BBCode [tags], keep CLI icons
 
         # Handle SmartFormat expressions:
         # {IfUpgraded:show:text1|text2} → text2 (non-upgraded default)
@@ -642,6 +642,131 @@ def potion_str(p):
         return f"[{idx}] {name}" + (f": {c(d, 'dim')}" if d else "")
     return n(p)
 
+
+def resolved_description(obj):
+    """Resolve an exported description string with its own vars."""
+    d = desc(obj.get("description", "")) if isinstance(obj, dict) else desc(obj)
+    if isinstance(obj, dict):
+        vars_dict = obj.get("vars") or obj.get("stats") or {}
+        if vars_dict and d:
+            d = resolve_template(d, vars_dict)
+    return d
+
+
+def enemy_intent_display_parts(intents):
+    """Return text-only monster intent labels; colors are terminal styling only."""
+    parts = []
+    for it in intents or []:
+        itype = it.get("type", "")
+        dmg = it.get("damage")
+        hits = it.get("hits")
+        if itype == "Attack":
+            if dmg is not None:
+                if hits and hits > 1:
+                    parts.append(c(f"Attack {dmg}x{hits}", "red"))
+                else:
+                    parts.append(c(f"Attack {dmg}", "red"))
+            else:
+                parts.append(c("Attack", "red"))
+        elif itype == "Defend":
+            parts.append(c("Defend", "blue"))
+        elif itype in ("Buff", "Heal"):
+            parts.append(c(itype, "magenta"))
+        elif itype == "Debuff":
+            parts.append(c("Debuff", "yellow"))
+        elif itype == "DebuffStrong":
+            parts.append(c("Strong Debuff", "yellow"))
+        elif itype in ("CardDebuff", "StatusCard"):
+            parts.append(c("Add Cards", "yellow"))
+        elif itype == "DeathBlow":
+            if dmg is not None:
+                parts.append(c(f"Deathblow {dmg}", "red"))
+            else:
+                parts.append(c("Deathblow", "red"))
+        elif itype == "Escape":
+            parts.append(c("Escape", "dim"))
+        elif itype == "Summon":
+            parts.append(c("Summon", "magenta"))
+        elif itype == "Sleep":
+            parts.append(c("Sleep", "dim"))
+        elif itype == "Stun":
+            parts.append(c("Stun", "yellow"))
+        elif itype == "Hidden":
+            parts.append(c("Hidden", "dim"))
+        elif itype:
+            parts.append(c(itype, "dim"))
+    return parts
+
+
+def hover_tip_display_lines(tip):
+    """Render an exported hover tip without inventing game semantics."""
+    if not isinstance(tip, dict):
+        return []
+    title = tip.get("name") or tip.get("title") or tip.get("id") or tip.get("kind")
+    title = n(title)
+    description = card_desc(tip) if tip.get("kind") == "card" else resolved_description(tip)
+    if description:
+        detail_lines = description.splitlines()
+        if not detail_lines:
+            return [title] if title and title != "?" else []
+        return [f"{title}: {detail_lines[0]}"] + [f"  {line}" for line in detail_lines[1:]]
+    return [title] if title and title != "?" else []
+
+
+def event_option_detail_lines(option):
+    """Description plus hover-tip effects for event options."""
+    lines = []
+    option_description = resolved_description(option)
+    if option_description:
+        lines.append(option_description)
+    for tip in option.get("hover_tips") or []:
+        lines.extend(hover_tip_display_lines(tip))
+
+    deduped = []
+    seen = set()
+    for line in lines:
+        clean = line.strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            deduped.append(clean)
+    return deduped
+
+
+def _deck_card_key(card):
+    if not isinstance(card, dict):
+        return (n(card), "", False)
+    return (card.get("id") or "", n(card.get("name", "?")), bool(card.get("upgraded")))
+
+
+def added_deck_cards(old_cards, new_cards):
+    from collections import Counter
+
+    remaining = Counter(_deck_card_key(card) for card in old_cards or [])
+    added = []
+    for card in new_cards or []:
+        key = _deck_card_key(card)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+        else:
+            added.append(card)
+    return added
+
+
+def deck_change_detail_lines(old_cards, new_cards):
+    """Show effects for cards newly added by transform/change flows."""
+    lines = []
+    for card in added_deck_cards(old_cards, new_cards):
+        if not isinstance(card, dict):
+            continue
+        up = "+" if card.get("upgraded") else ""
+        ctype = card.get("type", "?")
+        cost = card.get("cost", "?")
+        lines.append(c(f"+{n(card.get('name', '?'))}{up} ({cost}) {ctype}", "green"))
+        for desc_line in card_description_display_lines(card):
+            if desc_line:
+                lines.append(f"  {desc_line}")
+    return lines
+
 def show_player(p, show_deck=False):
     hp, mhp = p.get("hp", 0), p.get("max_hp", 1)
     blk = p.get("block", 0)
@@ -732,48 +857,8 @@ def show_combat(state):
         hp, mhp = e.get("hp", 0), e.get("max_hp", 1)
         blk = e.get("block", 0)
 
-        # Build intent string from detailed intents
-        intents = e.get("intents") or []
-        intent_parts = []
-        for it in intents:
-            itype = it.get("type", "")
-            dmg = it.get("damage")
-            hits = it.get("hits")
-            if itype == "Attack":
-                if dmg is not None:
-                    if hits and hits > 1:
-                        intent_parts.append(c(f"⚔{dmg}x{hits}", "red"))
-                    else:
-                        intent_parts.append(c(f"⚔{dmg}", "red"))
-                else:
-                    intent_parts.append(c(t("⚔ATK","⚔攻击"), "red"))
-            elif itype == "Defend":
-                intent_parts.append(c(t("🛡DEF","🛡防御"), "blue"))
-            elif itype in ("Buff", "Heal"):
-                intent_parts.append(c(t(f"⬆{itype}",f"⬆{'增益' if itype=='Buff' else '回复'}"), "magenta"))
-            elif itype == "Debuff":
-                intent_parts.append(c(t("⬇Debuff","⬇减益"), "yellow"))
-            elif itype == "DebuffStrong":
-                intent_parts.append(c(t("⬇Strong","⬇强减益"), "yellow"))
-            elif itype in ("CardDebuff", "StatusCard"):
-                intent_parts.append(c(t("⬇Cards","⬇塞牌"), "yellow"))
-            elif itype == "DeathBlow":
-                if dmg is not None:
-                    intent_parts.append(c(f"💀{dmg}", "red"))
-                else:
-                    intent_parts.append(c(t("💀KILL","💀致命一击"), "red"))
-            elif itype == "Escape":
-                intent_parts.append(c(t("🏃Escape","🏃逃跑"), "dim"))
-            elif itype == "Summon":
-                intent_parts.append(c(t("📢Summon","📢召唤"), "magenta"))
-            elif itype == "Sleep":
-                intent_parts.append(c(t("💤Sleep","💤休眠"), "dim"))
-            elif itype == "Stun":
-                intent_parts.append(c(t("⚡Stun","⚡眩晕"), "yellow"))
-            elif itype == "Hidden":
-                intent_parts.append(c("? ???", "dim"))
-            elif itype:
-                intent_parts.append(c(itype, "dim"))
+        # Build text intent string from detailed intents.
+        intent_parts = enemy_intent_display_parts(e.get("intents") or [])
         intent_str = " ".join(intent_parts) if intent_parts else c("? ???", "dim")
 
         # Enemy powers
@@ -942,6 +1027,9 @@ def show_combat_reward(state):
         name = reward.get("name")
         if kind == "gold":
             label = f"{reward.get('amount', '?')} gold"
+        elif kind == "card_reward":
+            count = reward.get("count")
+            label = f"Card Reward ({count} cards)" if count else "Card Reward"
         elif name:
             label = f"{name} ({kind})"
         else:
@@ -1090,6 +1178,7 @@ def show_event(state):
             title = n(raw_title)
         else:
             title = loc_resolve(raw_title) if '.' in str(raw_title) or str(raw_title).isupper() else raw_title
+        detail_lines = event_option_detail_lines(opt)
         # Show option description with resolved template vars
         raw_desc = opt.get("description")
         opt_desc = desc(raw_desc) if raw_desc else ""
@@ -1099,6 +1188,9 @@ def show_event(state):
             opt_desc = resolve_template(opt_desc, opt_vars)
         desc_str = f" — {c(opt_desc, 'dim')}" if opt_desc else ""
         print(f"  {mark} [{opt['index']}] {title}{desc_str}")
+        followup_lines = detail_lines[1:] if opt_desc else detail_lines
+        for detail_line in followup_lines:
+            print(f"      {c(detail_line, 'dim')}")
 
 # ─── Input handling ───
 
@@ -2003,7 +2095,8 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     valid["s"] = None
 
                 # Save state before selection to show diff
-                old_deck_cards = [n(cd.get("name","?")) for cd in state.get("player",{}).get("deck",[])]
+                old_deck_card_infos = list(state.get("player",{}).get("deck",[]))
+                old_deck_cards = [n(cd.get("name","?")) for cd in old_deck_card_infos]
 
                 if auto:
                     if not cards:
@@ -2044,6 +2137,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         for card_name, cnt in added.items():
                             parts.append(c(f"+{card_name}" + (f"x{cnt}" if cnt > 1 else ""), "green"))
                         print(f"\n  {c(t('Changes:','变化:'), 'yellow')} {t('Deck','牌组')}: {' '.join(parts)}")
+
+                        for line in deck_change_detail_lines(old_deck_card_infos, state["player"].get("deck", [])):
+                            print(f"    {line}")
 
             elif dec == "shop":
                 show_shop(state)
@@ -2135,7 +2231,8 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
                 # Save state before choice to show diff
                 old_relics = set(n(r.get("name","?")) for r in state.get("player",{}).get("relics",[]))
-                old_deck_cards = [n(cd.get("name","?")) for cd in state.get("player",{}).get("deck",[])]
+                old_deck_card_infos = list(state.get("player",{}).get("deck",[]))
+                old_deck_cards = [n(cd.get("name","?")) for cd in old_deck_card_infos]
                 old_deck = state.get("player",{}).get("deck_size", 0)
                 old_hp = state.get("player",{}).get("hp", 0)
                 old_max_hp = state.get("player",{}).get("max_hp", 0)
@@ -2187,6 +2284,11 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     if new_gold != old_gold:
                         diff = new_gold - old_gold
                         changes.append(f"{t('Gold','金')}: {'+' if diff > 0 else ''}{diff}")
+                    card_detail_lines = deck_change_detail_lines(old_deck_card_infos, new_p.get("deck", []))
+                    if card_detail_lines:
+                        print(f"\n  {c('Card details:', 'yellow')}")
+                        for line in card_detail_lines:
+                            print(f"    {line}")
                     if changes:
                         print(f"\n  {c(t('Changes:','变化:'), 'yellow')} {'; '.join(changes)}")
 

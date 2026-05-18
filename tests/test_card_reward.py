@@ -26,6 +26,32 @@ class TestCardReward:
         # After combat we expect card_reward (or bundle_select, card_select)
         assert state["decision"] in ("combat_reward", "card_reward", "bundle_select", "card_select", "map_select")
 
+    def test_card_reward_is_claimable_combat_reward_entry(self, game):
+        state = game.start(seed="cr-entry")
+        game.skip_neow(state)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        state = game.auto_play_combat(state)
+
+        assert state["decision"] == "combat_reward"
+        card_rewards = [reward for reward in state["rewards"] if reward["kind"] == "card_reward"]
+        assert card_rewards
+        assert card_rewards[0]["name"] == "Card Reward"
+        assert card_rewards[0]["count"] > 0
+
+    def test_claim_card_reward_entry_opens_card_reward_choice(self, game):
+        state = game.start(seed="cr-entry-open")
+        game.skip_neow(state)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        state = game.auto_play_combat(state)
+
+        card_reward = next(reward for reward in state["rewards"] if reward["kind"] == "card_reward")
+        state = game.act("claim_reward", reward_index=card_reward["index"])
+
+        assert state["decision"] == "card_reward"
+        assert state["cards"]
+        for card in state["cards"]:
+            assert card["description"]
+
     def test_card_reward_structure(self, game):
         state = game.start(seed="cr2")
         game.skip_neow(state)
