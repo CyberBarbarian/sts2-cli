@@ -661,6 +661,30 @@ class TestWongos:
 
 
 class TestSelfHelpBook:
+    def test_enchantment_card_select_carries_source_option_context(self, game):
+        state = game.start(character="Defect", seed="self-help-book-select-context")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "STRIKE_DEFECT",
+            "DEFEND_DEFECT",
+            "ZAP",
+            "DUALCAST",
+            "GO_FOR_THE_EYES",
+        ])
+        state = game.enter_room("event", event="SELF_HELP_BOOK")
+
+        read_back = next(o for o in state["options"] if "Sharp" in o["description"])
+        state = game.act("choose_option", option_index=read_back["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == f"{read_back['title']}: {read_back['description']}"
+        source = state["source_event_option"]
+        assert source["title"] == read_back["title"]
+        assert source["description"] == read_back["description"]
+        assert source["vars"]["Enchantment1"] == "Sharp"
+        sharp_tip = next(tip for tip in source["hover_tips"] if tip["title"] == "Sharp")
+        assert "Increases damage" in sharp_tip["description"]
+
     def test_swift_upgrade_preview_does_not_duplicate_enchantment_text(self, game):
         state = game.start(seed="self-help-book-swift-upgrade-preview")
         game.skip_neow(state)

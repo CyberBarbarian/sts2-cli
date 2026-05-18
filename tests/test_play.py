@@ -92,6 +92,41 @@ def test_event_option_detail_lines_include_hover_tip_effects():
     assert any("Sown:" in line and "gain [E]" in line for line in lines)
 
 
+def test_card_select_context_lines_include_source_event_hover_tip():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_select_context_lines({
+        "prompt": "Read the Back: Choose an Attack to Enchant with Sharp 2.",
+        "source_event_option": {
+            "hover_tips": [
+                {
+                    "kind": "EnchantmentHoverTip",
+                    "title": "Sharp",
+                    "description": "Increases damage on this card by 2.",
+                }
+            ],
+        },
+    })]
+
+    assert lines[0] == "Read the Back: Choose an Attack to Enchant with Sharp 2."
+    assert any("Sharp:" in line and "damage" in line for line in lines)
+
+
+def test_card_select_context_lines_include_source_potion_description():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_select_context_lines({
+        "source_potion": {
+            "name": "Attack Potion",
+            "description": "Choose 1 of 3 random Attack cards to add into your Hand.",
+        },
+    })]
+
+    assert lines == [
+        "Attack Potion: Choose 1 of 3 random Attack cards to add into your Hand."
+    ]
+
+
 def test_deck_change_detail_lines_include_added_card_descriptions():
     play.LANG = "en"
 

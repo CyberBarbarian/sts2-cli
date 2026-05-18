@@ -319,6 +319,8 @@ public class RunSimulator
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
     private CardModel? _pendingCardSelectionSourceCard;
+    private Dictionary<string, object?>? _pendingCardSelectionSourceEventOption;
+    private Dictionary<string, object?>? _pendingCardSelectionSourcePotion;
     private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
     private string? _preCurrentRoomSaveJson;
     private object? _starSpendTrackerCombatState;
@@ -1103,6 +1105,8 @@ public class RunSimulator
         _pendingEventResult = null;
         _pendingShopPurchaseTask = null;
         _pendingRewards = null;
+        _pendingCardSelectionSourceEventOption = null;
+        _pendingCardSelectionSourcePotion = null;
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
         YieldPatches.ActiveCrystalSphereMinigame = null;
 
@@ -1196,6 +1200,11 @@ public class RunSimulator
         if (starCostBeforePlay > 0 && starsBeforePlay >= starCostBeforePlay)
             MarkStarsSpentThisTurn();
         _pendingCardSelectionSourceCard = _cardSelector.HasPending ? card : null;
+        if (_pendingCardSelectionSourceCard != null)
+        {
+            _pendingCardSelectionSourceEventOption = null;
+            _pendingCardSelectionSourcePotion = null;
+        }
 
         // Some engine effects return the played card to hand. The CLI should
         // not treat hand removal as the success signal, but a completed play
@@ -1725,6 +1734,8 @@ public class RunSimulator
         Log($"Card selection: indices [{string.Join(",", indices)}]");
         _cardSelector.ResolvePendingByIndices(indices);
         _pendingCardSelectionSourceCard = null;
+        _pendingCardSelectionSourceEventOption = null;
+        _pendingCardSelectionSourcePotion = null;
         _syncCtx.Pump();
         WaitForPendingEventOptionTask();
         WaitForActionExecutor();
@@ -1786,6 +1797,8 @@ public class RunSimulator
             Log("Skipping card selection");
             _cardSelector.CancelPending();
             _pendingCardSelectionSourceCard = null;
+            _pendingCardSelectionSourceEventOption = null;
+            _pendingCardSelectionSourcePotion = null;
             _syncCtx.Pump();
             WaitForActionExecutor();
             if (_runState?.CurrentRoom is MerchantRoom)
@@ -1833,6 +1846,8 @@ public class RunSimulator
         if (idx < 0 || idx >= potionsList.Count) return Error($"Invalid potion index {idx}");
         var potion = potionsList[idx];
         if (potion == null) return Error($"No potion at index {idx}");
+        var sourcePotion = PotionInfo(potion, idx);
+        _pendingCardSelectionSourcePotion = null;
 
         // Determine target based on potion's TargetType. Enemy-targeted potions
         // require target_index; the CLI must not choose silently.
@@ -1872,7 +1887,15 @@ public class RunSimulator
 
             // Effect may require card_select before the potion slot clears — do not discard as "stuck".
             if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
+            {
+                if (_cardSelector.HasPending)
+                {
+                    _pendingCardSelectionSourceCard = null;
+                    _pendingCardSelectionSourceEventOption = null;
+                    _pendingCardSelectionSourcePotion = sourcePotion;
+                }
                 return DetectDecisionPoint();
+            }
 
             // Verify potion was consumed
             var afterPotions = player.Potions?.ToList() ?? new();
@@ -1978,6 +2001,9 @@ public class RunSimulator
                 var optCountBefore = options?.Count ?? 0;
                 if (options != null && optionIndex >= 0 && optionIndex < options.Count)
                 {
+                    var sourceEventOption = _runState?.CurrentRoom is EventRoom eventRoom
+                        ? EventOptionSelectionContext(eventRoom, optionIndex)
+                        : null;
                     var selectedTextKey = options[optionIndex].TextKey;
                     var previousSuppressYield = YieldPatches.SuppressYield;
                     try
@@ -2004,6 +2030,12 @@ public class RunSimulator
                         }
                         if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
                         {
+                            if (_cardSelector.HasPending && sourceEventOption != null)
+                            {
+                                _pendingCardSelectionSourceCard = null;
+                                _pendingCardSelectionSourceEventOption = sourceEventOption;
+                                _pendingCardSelectionSourcePotion = null;
+                            }
                             YieldPatches.SuppressYield = previousSuppressYield;
                             WaitForActionExecutor();
                             return DetectDecisionPoint();
@@ -2327,7 +2359,9 @@ public class RunSimulator
                 return cardInfo;
             }).ToList();
 
-            var prompt = CardSelectionPrompt(_pendingCardSelectionSourceCard);
+            var prompt = CardSelectionPrompt(_pendingCardSelectionSourceCard)
+                         ?? CardSelectionPrompt(_pendingCardSelectionSourceEventOption)
+                         ?? CardSelectionPrompt(_pendingCardSelectionSourcePotion);
             var state = new Dictionary<string, object?>
             {
                 ["type"] = "decision",
@@ -2348,6 +2382,14 @@ public class RunSimulator
                     _pendingCardSelectionSourceCard,
                     applyCombatModifiers: ShouldExportCombatPreviewState(_pendingCardSelectionSourceCard),
                     includeTargetRows: ShouldExportCombatCardState(_pendingCardSelectionSourceCard));
+            }
+            if (_pendingCardSelectionSourceEventOption != null)
+            {
+                state["source_event_option"] = _pendingCardSelectionSourceEventOption;
+            }
+            if (_pendingCardSelectionSourcePotion != null)
+            {
+                state["source_potion"] = _pendingCardSelectionSourcePotion;
             }
             return state;
         }
@@ -2777,6 +2819,19 @@ public class RunSimulator
         var raw = _loc.Bilingual("cards", key);
         var interpolated = InterpolateDynamicVars(raw, ExportDynamicVars(sourceCard)) ?? raw;
         return CleanResolvedEngineText(interpolated);
+    }
+
+    private static string? CardSelectionPrompt(Dictionary<string, object?>? sourceOption)
+    {
+        if (sourceOption == null)
+            return null;
+
+        var title = CleanResolvedEngineText(sourceOption.GetValueOrDefault("title")?.ToString())
+                    ?? CleanResolvedEngineText(sourceOption.GetValueOrDefault("name")?.ToString());
+        var description = CleanResolvedEngineText(sourceOption.GetValueOrDefault("description")?.ToString());
+        if (title != null && description != null)
+            return $"{title}: {description}";
+        return title ?? description;
     }
 
     private Dictionary<string, object?> CardSummary(
@@ -3429,6 +3484,27 @@ public class RunSimulator
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    private Dictionary<string, object?>? EventOptionSelectionContext(EventRoom eventRoom, int optionIndex)
+    {
+        var state = EventChoiceState(eventRoom);
+        if (!state.TryGetValue("options", out var optionsObj)
+            || optionsObj is not IEnumerable<Dictionary<string, object?>> options)
+            return null;
+
+        var option = options.FirstOrDefault(item =>
+            item.TryGetValue("index", out var indexObj)
+            && Convert.ToInt32(indexObj) == optionIndex);
+        if (option == null)
+            return null;
+
+        var source = new Dictionary<string, object?>(option);
+        if (state.TryGetValue("event_name", out var eventName))
+            source["event_name"] = eventName;
+        if (state.TryGetValue("description", out var eventDescription))
+            source["event_description"] = eventDescription;
+        return source;
     }
 
     private (string? title, string? description)? ResolveAncientDialogueOption(string eventEntry, string? textKey)
@@ -8613,6 +8689,8 @@ public class RunSimulator
         _goldBeforeCombat = 0;
         _lastKnownHp = 0;
         _pendingCardSelectionSourceCard = null;
+        _pendingCardSelectionSourceEventOption = null;
+        _pendingCardSelectionSourcePotion = null;
         _shopItemSnapshots.Clear();
         _preCurrentRoomSaveJson = null;
         _pendingBundles = null;

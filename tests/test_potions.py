@@ -206,6 +206,31 @@ class TestPotionActions:
         assert state["player"]["potions"] == []
         assert any(card["name"] == selected["name"] for card in state["hand"])
 
+    def test_attack_potion_card_select_carries_source_potion_context(self, game):
+        state = game.start(seed="attack-potion-select-context")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["ATTACK_POTION"],
+            deck=[
+                "STRIKE_DEFECT",
+                "DEFEND_DEFECT",
+                "ZAP",
+                "DUALCAST",
+                "GO_FOR_THE_EYES",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        potion = state["player"]["potions"][0]
+
+        state = game.act("use_potion", potion_index=0)
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == f"{potion['name']}: {potion['description']}"
+        source = state["source_potion"]
+        assert source["name"] == "Attack Potion"
+        assert source["description"] == potion["description"]
+        assert source["target_type"] == "Self"
+
     def test_touch_of_insanity_card_select_exports_combat_preview_stats(self, game):
         state = game.start(seed="touch-selection-combat-stats")
         game.skip_neow(state)

@@ -972,6 +972,48 @@ def event_option_detail_lines(option):
     return deduped
 
 
+def card_select_context_lines(state):
+    """Prompt plus source event hover-tip effects for card selection screens."""
+    lines = []
+    prompt = state.get("prompt")
+    if prompt:
+        lines.append(n(prompt))
+
+    source_option = state.get("source_event_option") or {}
+    if source_option and not prompt:
+        title = n(source_option.get("title"))
+        description = resolved_description(source_option)
+        if title and description:
+            lines.append(f"{title}: {description}")
+        elif title:
+            lines.append(title)
+        elif description:
+            lines.append(description)
+
+    for tip in source_option.get("hover_tips") or []:
+        lines.extend(hover_tip_display_lines(tip))
+
+    source_potion = state.get("source_potion") or {}
+    if source_potion and not prompt:
+        name = n(source_potion.get("name"))
+        description = resolved_description(source_potion)
+        if name and description:
+            lines.append(f"{name}: {description}")
+        elif name:
+            lines.append(name)
+        elif description:
+            lines.append(description)
+
+    deduped = []
+    seen = set()
+    for line in lines:
+        clean = str(line).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            deduped.append(clean)
+    return deduped
+
+
 def _deck_card_key(card):
     if not isinstance(card, dict):
         return (n(card), "", False)
@@ -2443,6 +2485,8 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 if ctx:
                     print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
                 print(f"  {c(t('Choose a relic','选择遗物'), 'bold')}")
+                for line in card_select_context_lines(state):
+                    print(f"      {c(line, 'dim')}")
                 show_player(state.get("player", {}))
                 print()
                 relics = state.get("relics", [])
