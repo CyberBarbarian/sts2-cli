@@ -307,6 +307,8 @@ public class RunSimulator
     private bool _eventOptionChosen;
     private int _lastEventOptionCount;
     private Task? _pendingEventOptionTask;
+    private EventModel? _pendingEventChoiceAfterCombat;
+    private EventModel? _pendingEventResult;
     private Task? _pendingShopPurchaseTask;
 
     // Pending rewards for card selection (populated after combat, before proceeding)
@@ -1097,6 +1099,8 @@ public class RunSimulator
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
         _pendingEventOptionTask = null;
+        _pendingEventChoiceAfterCombat = null;
+        _pendingEventResult = null;
         _pendingShopPurchaseTask = null;
         _pendingRewards = null;
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
@@ -1911,6 +1915,13 @@ public class RunSimulator
         var optionIndex = Convert.ToInt32(args["option_index"]);
         Log($"Choosing option {optionIndex}");
 
+        if (_pendingEventResult != null)
+        {
+            if (optionIndex != 0)
+                return Error($"Invalid event result option {optionIndex}");
+            return DoProceed(player);
+        }
+
         // Dispatch based on ROOM TYPE (not event state) to avoid cross-contamination
         if (_runState?.CurrentRoom is RestSiteRoom restSiteRoom)
         {
@@ -1957,7 +1968,7 @@ public class RunSimulator
         // For events, run the original EventOption.Chosen() task directly so
         // headless can wait for selections and completion without reimplementing
         // event effects.
-        else if (_runState?.CurrentRoom is EventRoom)
+        else if (_runState?.CurrentRoom is EventRoom || _pendingEventChoiceAfterCombat != null)
         {
             var eventSync = RunManager.Instance.EventSynchronizer;
             var localEvent = eventSync?.GetLocalEvent();
@@ -2009,6 +2020,14 @@ public class RunSimulator
                         {
                             CompleteVictoryRoomTransition();
                         }
+                        if (_runState?.CurrentRoom is CombatRoom && CombatManager.Instance.IsInProgress)
+                        {
+                            _pendingEventChoiceAfterCombat = null;
+                        }
+                        else if (_runState?.CurrentRoom is CombatRoom && !localEvent.IsFinished)
+                        {
+                            _pendingEventChoiceAfterCombat = localEvent;
+                        }
                     }
                     catch (Exception ex) { Log($"Event choose: {ex.Message}"); }
                     finally
@@ -2030,6 +2049,12 @@ public class RunSimulator
     private Dictionary<string, object?> DoLeaveRoom(Player player)
     {
         Log("Leaving room");
+        if (_pendingEventChoiceAfterCombat != null)
+        {
+            _pendingEventChoiceAfterCombat = null;
+            ForceToMap();
+            return MapSelectState();
+        }
         try { RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult(); }
         catch { }
         _syncCtx.Pump();
@@ -2057,6 +2082,12 @@ public class RunSimulator
 
         // Check if we need to move to next act (boss defeated)
         var room = _runState?.CurrentRoom;
+        if (_pendingEventResult != null)
+        {
+            _pendingEventResult = null;
+            ForceToMap();
+            return MapSelectState();
+        }
         if (room is MerchantRoom)
             return DoLeaveRoom(player);
         if (room is TreasureRoom)
@@ -2324,6 +2355,17 @@ public class RunSimulator
         if (YieldPatches.ActiveCrystalSphereMinigame != null)
         {
             return CrystalSphereState(YieldPatches.ActiveCrystalSphereMinigame);
+        }
+
+        if (_pendingEventResult != null)
+        {
+            return EventResultState(_pendingEventResult);
+        }
+
+        if (_pendingEventChoiceAfterCombat != null
+            && !CombatManager.Instance.IsInProgress)
+        {
+            return EventChoiceState(new EventRoom(_pendingEventChoiceAfterCombat.CanonicalInstance));
         }
 
         // Check if there's a pending card reward
@@ -2843,6 +2885,12 @@ public class RunSimulator
         Log($"Post-combat: RoomType={combatRoom.RoomType}, IsPreFinished={combatRoom.IsPreFinished}");
         _syncCtx.Pump();
 
+        if (_pendingEventResult != null)
+            return EventResultState(_pendingEventResult);
+
+        if (combatRoom.ParentEventId != null && combatRoom.ShouldResumeParentEventAfterCombat)
+            return ResumeParentEventAfterCombat(player, combatRoom);
+
         // Generate rewards manually instead of using TestMode auto-accept
         if (_pendingRewards == null && !_rewardsProcessed)
         {
@@ -2900,6 +2948,50 @@ public class RunSimulator
         // Normal → go to map
         ForceToMap();
         return MapSelectState();
+    }
+
+    private Dictionary<string, object?> ResumeParentEventAfterCombat(Player player, CombatRoom combatRoom)
+    {
+        var localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
+        if (localEvent == null)
+        {
+            return Error($"Combat room expects parent event {combatRoom.ParentEventId}, but no local event is active");
+        }
+
+        if (combatRoom.ParentEventId != null && localEvent.Id != combatRoom.ParentEventId)
+        {
+            return Error($"Combat room parent event {combatRoom.ParentEventId} does not match active event {localEvent.Id}");
+        }
+
+        try
+        {
+            localEvent.Resume(combatRoom).GetAwaiter().GetResult();
+            _syncCtx.Pump();
+            WaitForPendingEventOptionTask();
+            WaitForActionExecutor();
+        }
+        catch (Exception ex)
+        {
+            return ErrorWithTrace($"Resuming parent event {localEvent.Id} after combat failed", ex);
+        }
+
+        if (YieldPatches.ActiveCrystalSphereMinigame != null
+            || _cardSelector.HasPending
+            || _cardSelector.HasPendingReward
+            || _pendingBundles != null)
+        {
+            return DetectDecisionPoint();
+        }
+
+        if (localEvent.IsFinished)
+        {
+            _pendingEventChoiceAfterCombat = null;
+            _pendingEventResult = localEvent;
+            return EventResultState(localEvent);
+        }
+
+        _pendingEventChoiceAfterCombat = localEvent;
+        return EventChoiceState(new EventRoom(localEvent.CanonicalInstance));
     }
 
     private Dictionary<string, object?> CombatRewardState(
@@ -3061,6 +3153,52 @@ public class RunSimulator
         }
     }
 
+    private Dictionary<string, object?> EventResultState(EventModel localEvent)
+    {
+        var eventEntry = localEvent.Id?.Entry ?? localEvent.GetType().Name.ToUpperInvariant();
+        var eventVars = ExportEventVars(eventEntry, localEvent);
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "event_result",
+            ["context"] = RunContext(),
+            ["event_id"] = eventEntry,
+            ["event_name"] = EventDisplayName(eventEntry),
+            ["description"] = EventDescription(localEvent, eventVars),
+            ["vars"] = eventVars?.Count > 0 ? eventVars : null,
+            ["options"] = new List<Dictionary<string, object?>>
+            {
+                new()
+                {
+                    ["index"] = 0,
+                    ["title"] = "Proceed",
+                    ["is_locked"] = false,
+                }
+            },
+            ["can_proceed"] = true,
+            ["player"] = PlayerSummary(_runState!.Players[0]),
+        };
+    }
+
+    private static string EventDisplayName(string eventEntry)
+    {
+        var eventName = _loc.Bilingual("ancients", eventEntry + ".title");
+        if (eventName == eventEntry + ".title")
+            eventName = _loc.Event(eventEntry);
+        return eventName;
+    }
+
+    private string? EventDescription(EventModel localEvent, Dictionary<string, object?>? eventVars)
+    {
+        if (localEvent.Description == null)
+            return null;
+
+        var d = ResolveLocString(localEvent.Description, eventVars)
+                ?? _loc.Bilingual(localEvent.Description.LocTable, localEvent.Description.LocEntryKey);
+        d = CleanResolvedEngineText(InterpolateDynamicVars(d, eventVars) ?? d);
+        return d != localEvent.Description.LocEntryKey ? d : null;
+    }
+
     private Dictionary<string, object?> EventChoiceState(EventRoom eventRoom)
     {
         var localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
@@ -3076,6 +3214,7 @@ public class RunSimulator
         // If event is finished, proceed to map
         if (localEvent == null || localEvent.IsFinished)
         {
+            _pendingEventChoiceAfterCombat = null;
             if (eventRoom.IsVictoryRoom)
             {
                 CompleteVictoryRoomTransition();
@@ -8465,6 +8604,8 @@ public class RunSimulator
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
         _pendingEventOptionTask = null;
+        _pendingEventChoiceAfterCombat = null;
+        _pendingEventResult = null;
         _pendingShopPurchaseTask = null;
         _pendingRewards = null;
         _pendingCardReward = null;

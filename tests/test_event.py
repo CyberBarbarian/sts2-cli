@@ -380,6 +380,32 @@ class TestByrdonisNest:
         assert state["decision"] == "map_select"
 
 
+class TestBattlewornDummy:
+    def test_timeout_returns_event_defeat_page_not_combat_rewards(self, game):
+        state = game.start(seed="battleworn-dummy-timeout")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="BATTLEWORN_DUMMY")
+
+        setting = next(o for o in state["options"] if o["title"] == "Setting 3")
+        state = game.act("choose_option", option_index=setting["index"])
+        assert state["decision"] == "combat_play"
+
+        for _ in range(3):
+            state = game.act("end_turn")
+
+        assert state["decision"] == "event_result"
+        assert state["event_name"] == "Battleworn Dummy"
+        assert "YOU ARE WEAK" in state["description"]
+        assert state["options"] == [{"index": 0, "title": "Proceed", "is_locked": False}]
+        assert not any(
+            reward.get("kind") in {"potion", "card_reward", "relic"}
+            for reward in state.get("rewards", [])
+        )
+
+        state = game.act("choose_option", option_index=0)
+        assert state["decision"] == "map_select"
+
+
 class TestBugslayer:
     def test_technique_options_name_reward_cards(self, game):
         state = game.start(seed="bugslayer-card-vars")

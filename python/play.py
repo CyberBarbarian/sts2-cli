@@ -1572,6 +1572,26 @@ def show_event(state):
 
 # ─── Input handling ───
 
+def show_event_result(state):
+    print(f"\n{'-' * 60}")
+    event_name = state.get("event_name", "?")
+    event_display = n(event_name) if isinstance(event_name, dict) else event_name
+    ctx = state.get("context", {})
+    if ctx:
+        act = n(ctx.get("act_name", "?"))
+        floor = ctx.get("floor", "?")
+        print(f"  {c(act, 'dim')} {t('Floor', 'Floor')} {floor}")
+    label = t("Event Result", "Event Result")
+    print(f"  {c(f'{label}: {event_display}', 'bold')}")
+    show_player(state.get("player", {}))
+    event_desc = desc(state.get("description", ""))
+    if event_desc:
+        print()
+        for line in event_desc.splitlines():
+            if line.strip():
+                print(f"  {line.strip()}")
+
+
 def show_crystal_sphere(state):
     print(f"\n{'-' * 60}")
     ctx = state.get("context", {})
@@ -2646,6 +2666,18 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         x_str, y_str = choice.split(",", 1)
                         state = send({"cmd": "action", "action": "crystal_sphere_click_cell",
                                       "args": {"x": int(x_str), "y": int(y_str)}})
+
+            elif dec == "event_result":
+                show_event_result(state)
+                if auto:
+                    state = send({"cmd": "action", "action": "proceed"})
+                else:
+                    get_input(
+                        t("Press Enter to proceed", "Press Enter to proceed"),
+                        {"", "proceed", "p"},
+                        state=state,
+                    )
+                    state = send({"cmd": "action", "action": "proceed"})
 
             elif dec == "event_choice":
                 show_event(state)
