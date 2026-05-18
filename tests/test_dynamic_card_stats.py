@@ -98,6 +98,28 @@ class TestDynamicCardStats:
         assert "(Hits 1 time)" in upgraded["description"]
         assert upgraded["stats"]["damage_by_target"][0]["unblocked_damage"] == 7
 
+    def test_adaptive_strike_description_uses_current_damage_preview(self, game):
+        state = game.start(character="Defect", seed="adaptive-strike-preview-text")
+        game.skip_neow(state)
+        game.set_player(
+            deck=[
+                "ADAPTIVE_STRIKE",
+                "STRIKE_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+            ],
+            potions=["FLEX_POTION"],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        state = game.act("use_potion", potion_index=0)
+
+        adaptive = next(c for c in state["hand"] if c["name"] == "Adaptive Strike")
+
+        assert adaptive["description"].startswith(
+            f"Deal {adaptive['stats']['damage']} damage."
+        )
+
     def test_bully_exports_vulnerable_damage_by_target(self, game):
         state = game.start(seed="bully-stats")
         game.skip_neow(state)

@@ -4393,12 +4393,18 @@ public class RunSimulator
     {
         var engineDescription = EngineCardDescription(card, includeCombatText);
         if (!string.IsNullOrWhiteSpace(engineDescription))
-            return ResolveEngineCardDescriptionFormatters(engineDescription, card);
+            return ResolveEngineCardDescriptionFormatters(
+                engineDescription,
+                card,
+                includePreviewStats: includeCombatText);
 
         var raw = _loc.Bilingual("cards", card.Id.Entry + ".description");
-        var vars = ExportDynamicVars(card);
+        var vars = ExportCardDescriptionVars(card, includePreviewStats: includeCombatText);
         var formatted = InterpolateDynamicVars(raw, vars) ?? raw;
-        return ResolveEngineCardDescriptionFormatters(CleanEngineText(formatted) ?? formatted, card);
+        return ResolveEngineCardDescriptionFormatters(
+            CleanEngineText(formatted) ?? formatted,
+            card,
+            includePreviewStats: includeCombatText);
     }
 
     private static string? EngineCardDescription(CardModel card, bool includeCombatText)
@@ -4429,10 +4435,14 @@ public class RunSimulator
         }
     }
 
-    private static string ResolveEngineCardDescriptionFormatters(string text, CardModel card)
+    private static string ResolveEngineCardDescriptionFormatters(
+        string text,
+        CardModel card,
+        bool includePreviewStats = false,
+        bool preferDisplayVars = true)
     {
-        var vars = ExportCardDescriptionVars(card);
-        if (vars != null && vars.Count > 0)
+        var vars = ExportCardDescriptionVars(card, includePreviewStats: includePreviewStats);
+        if (preferDisplayVars && vars != null && vars.Count > 0)
             text = PreferDisplayVarInterpolation(card.Description, vars, text) ?? text;
         if (vars != null && vars.Count > 0)
             text = ExpandResolvedEnergyIcons(text, card, vars);
@@ -4524,12 +4534,43 @@ public class RunSimulator
             : CliEnergyTokens(count);
     }
 
-    private static Dictionary<string, object?>? ExportCardDescriptionVars(CardModel card)
+    private static Dictionary<string, object?>? ExportCardDescriptionVars(
+        CardModel card,
+        bool includePreviewStats = false)
     {
         var vars = new Dictionary<string, object?>();
         MergeVars(vars, ExportLocStringVariables(card.Description));
         MergeVars(vars, ExportDynamicVars(card));
+        if (includePreviewStats)
+            MergePreviewStatsForDescriptionVars(vars, card);
         return vars.Count > 0 ? vars : null;
+    }
+
+    private static void MergePreviewStatsForDescriptionVars(
+        Dictionary<string, object?> vars,
+        CardModel card)
+    {
+        var stats = TryGetCardPreviewStats(card, CardPreviewMode.Normal, target: null);
+        if (stats == null || stats.Count == 0)
+            return;
+
+        try
+        {
+            foreach (var dynamicVar in card.DynamicVars.Values)
+            {
+                var name = dynamicVar.Name;
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                var stat = stats.FirstOrDefault(pair =>
+                    string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase));
+                if (string.IsNullOrEmpty(stat.Key) || !IsNumericDisplayValue(stat.Value))
+                    continue;
+
+                vars[name] = stat.Value;
+            }
+        }
+        catch { }
     }
 
     private static void MergeVars(
@@ -5162,7 +5203,12 @@ public class RunSimulator
             && tokenNames.Contains(kv.Key)
             && !string.IsNullOrWhiteSpace(textValue)
             && !engineText.Contains(textValue, StringComparison.Ordinal));
-        if (!hasMissingStringDisplay)
+
+        var hasMissingNumericDisplay = vars.Any(kv =>
+            IsNumericDisplayValue(kv.Value)
+            && tokenNames.Contains(kv.Key)
+            && !engineText.Contains(Convert.ToString(kv.Value, System.Globalization.CultureInfo.InvariantCulture) ?? "", StringComparison.Ordinal));
+        if (!hasMissingStringDisplay && !hasMissingNumericDisplay)
             return engineText;
 
         return CleanResolvedEngineText(InterpolateDynamicVars(rawText, vars)) ?? engineText;
@@ -6833,7 +6879,10 @@ public class RunSimulator
         var formatted = InterpolateDynamicVars(raw, vars);
         if (!string.IsNullOrWhiteSpace(formatted))
         {
-            var resolved = ResolveEngineCardDescriptionFormatters(CleanEngineText(formatted) ?? formatted, card);
+            var resolved = ResolveEngineCardDescriptionFormatters(
+                CleanEngineText(formatted) ?? formatted,
+                card,
+                preferDisplayVars: false);
             if (!ContainsSmartFormatToken(resolved))
                 return resolved;
 
