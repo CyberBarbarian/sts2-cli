@@ -6232,7 +6232,17 @@ public class RunSimulator
 
         var formatted = InterpolateDynamicVars(raw, vars);
         if (!string.IsNullOrWhiteSpace(formatted))
-            return ResolveEngineCardDescriptionFormatters(CleanEngineText(formatted) ?? formatted, card);
+        {
+            var resolved = ResolveEngineCardDescriptionFormatters(CleanEngineText(formatted) ?? formatted, card);
+            if (!ContainsSmartFormatToken(resolved))
+                return resolved;
+
+            var engineDescription = CardDescription(card, stats, includeCombatText: includeCombatText);
+            if (!string.IsNullOrWhiteSpace(engineDescription) && !ContainsSmartFormatToken(engineDescription))
+                return engineDescription;
+
+            return resolved;
+        }
 
         return CardDescription(card, stats, includeCombatText: includeCombatText);
     }
