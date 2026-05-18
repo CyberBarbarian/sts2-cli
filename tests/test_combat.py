@@ -866,6 +866,40 @@ class TestCombatEdgeCases:
         assert selected_bash["description"].startswith(f"Deal {exported_damage} damage.")
         assert "damage_by_target" not in selected_bash["stats"]
 
+    def test_headbutt_discard_selection_upgrade_preview_uses_dynamic_context(self, game):
+        state = game.start(seed="headbutt-selection-upgrade-preview")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "BLOODLETTING",
+                "INFLAME",
+                "PERFECTED_STRIKE",
+                "HEADBUTT",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="ENTOMANCER_ELITE")
+
+        bloodletting = next(card for card in state["hand"] if card["name"] == "Bloodletting")
+        state = game.act("play_card", card_index=bloodletting["index"])
+        inflame = next(card for card in state["hand"] if card["name"] == "Inflame")
+        state = game.act("play_card", card_index=inflame["index"])
+        perfected = next(card for card in state["hand"] if card["name"] == "Perfected Strike")
+        state = game.act("play_card", card_index=perfected["index"], target_index=0)
+        headbutt = next(card for card in state["hand"] if card["name"] == "Headbutt")
+        state = game.act("play_card", card_index=headbutt["index"], target_index=0)
+
+        assert state["decision"] == "card_select"
+        selected = next(card for card in state["cards"] if card["name"] == "Perfected Strike")
+        upgraded = selected["after_upgrade"]
+        upgraded_damage = upgraded["stats"]["calculateddamage"]
+
+        assert upgraded_damage > upgraded["stats"]["calculationbase"]
+        assert upgraded["description"].startswith(f"Deal {upgraded_damage} damage.")
+        assert "calculateddamage_by_target" not in upgraded["stats"]
+
     def test_uninitialized_event_card_is_not_exported_as_playable(self, game):
         state = game.start(seed="mad-science-uninitialized")
         game.skip_neow(state)

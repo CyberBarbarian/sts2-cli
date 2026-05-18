@@ -2230,6 +2230,7 @@ public class RunSimulator
             {
                 var includeCombatPreview = ShouldExportCombatPreviewState(card);
                 var includeTargetRows = ShouldExportCombatCardState(card);
+                var useSourceDynamicContext = CombatManager.Instance.IsInProgress;
                 var stats = ExtractCardStats(
                     card,
                     player,
@@ -2248,7 +2249,12 @@ public class RunSimulator
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["description"] = CardDescription(card, stats, includeCombatText: includeCombatPreview),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
-                    ["after_upgrade"] = GetUpgradedInfo(card, player),
+                    ["after_upgrade"] = GetUpgradedInfo(
+                        card,
+                        player,
+                        applyCombatModifiers: includeCombatPreview,
+                        includeTargetRows: includeTargetRows,
+                        useSourceDynamicContext: useSourceDynamicContext),
                 };
                 AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeTargetRows);
                 AddCardEnhancements(cardInfo, card);
@@ -6076,7 +6082,12 @@ public class RunSimulator
     }
 
     /// <summary>Compute what a card would look like after upgrading (stats + cost + description).</summary>
-    private Dictionary<string, object?>? GetUpgradedInfo(CardModel card, Player? player = null)
+    private Dictionary<string, object?>? GetUpgradedInfo(
+        CardModel card,
+        Player? player = null,
+        bool applyCombatModifiers = false,
+        bool includeTargetRows = true,
+        bool useSourceDynamicContext = false)
     {
         if (!card.IsUpgradable) return null;
         try
@@ -6085,7 +6096,14 @@ public class RunSimulator
             clone.UpgradeInternal();
             clone.FinalizeUpgradeInternal();
 
-            var stats = ExtractCardStats(clone, player, card);
+            var stats = ExtractCardStats(
+                clone,
+                player,
+                card,
+                applyCombatModifiers: applyCombatModifiers,
+                includeTargetRows: includeTargetRows);
+            if (useSourceDynamicContext)
+                ApplySourceDynamicUpgradeContext(stats, card, player, applyCombatModifiers, includeTargetRows);
 
             // Compare keywords before/after upgrade
             var oldKws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToHashSet() ?? new();
@@ -6097,7 +6115,12 @@ public class RunSimulator
             {
                 ["cost"] = GetEnergyCostDisplay(clone),
                 ["stats"] = stats.Count > 0 ? stats : null,
-                ["description"] = CardDescriptionWithSourceEnhancements(clone, card, stats),
+                ["description"] = CardDescriptionWithSourceEnhancements(
+                    clone,
+                    card,
+                    stats,
+                    includeCombatText: applyCombatModifiers,
+                    preferStatsText: useSourceDynamicContext),
                 ["added_keywords"] = addedKws.Count > 0 ? addedKws : null,
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
@@ -6108,13 +6131,110 @@ public class RunSimulator
         catch { return null; }
     }
 
+    private void ApplySourceDynamicUpgradeContext(
+        Dictionary<string, object?> upgradedStats,
+        CardModel sourceCard,
+        Player? player,
+        bool applyCombatModifiers,
+        bool includeTargetRows)
+    {
+        // Upgrade clones can lose the source card's pile-derived dynamic context.
+        // Keep the preview tied to the source card's exported dynamic vars.
+        var sourceStats = ExtractCardStats(
+            sourceCard,
+            player,
+            applyCombatModifiers: applyCombatModifiers,
+            includeTargetRows: includeTargetRows);
+        ApplyLinearDynamicUpgradeContext(
+            upgradedStats,
+            sourceStats,
+            calculatedKey: "calculateddamage",
+            baseKey: "calculationbase",
+            incrementKey: "extradamage");
+    }
+
+    private static void ApplyLinearDynamicUpgradeContext(
+        Dictionary<string, object?> upgradedStats,
+        Dictionary<string, object?> sourceStats,
+        string calculatedKey,
+        string baseKey,
+        string incrementKey)
+    {
+        if (!TryGetStat(sourceStats, calculatedKey, out var sourceCalculated)
+            || !TryGetStat(sourceStats, baseKey, out var sourceBase)
+            || !TryGetStat(sourceStats, incrementKey, out var sourceIncrement)
+            || !TryGetStat(upgradedStats, baseKey, out var upgradedBase)
+            || !TryGetStat(upgradedStats, incrementKey, out var upgradedIncrement)
+            || sourceIncrement == 0
+            || sourceCalculated <= sourceBase)
+        {
+            return;
+        }
+
+        var delta = sourceCalculated - sourceBase;
+        if (delta % sourceIncrement != 0)
+            return;
+
+        upgradedStats[calculatedKey] = upgradedBase + upgradedIncrement * (delta / sourceIncrement);
+    }
+
+    private static bool TryGetStat(Dictionary<string, object?> stats, string key, out int value)
+    {
+        value = 0;
+        if (!stats.TryGetValue(key, out var obj) || obj == null)
+            return false;
+        try
+        {
+            value = Convert.ToInt32(obj);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private string CardDescriptionWithSourceEnhancements(
         CardModel upgradedCard,
         CardModel sourceCard,
-        Dictionary<string, object?>? stats = null)
+        Dictionary<string, object?>? stats = null,
+        bool includeCombatText = false,
+        bool preferStatsText = false)
     {
-        var description = CardDescription(upgradedCard, stats);
+        var description = preferStatsText
+            ? CardDescriptionFromStats(upgradedCard, stats, includeCombatText)
+            : CardDescription(upgradedCard, stats, includeCombatText: includeCombatText);
         return AppendSourceEnhancementDescriptions(description, sourceCard, upgradedCard);
+    }
+
+    private string CardDescriptionFromStats(
+        CardModel card,
+        Dictionary<string, object?>? stats,
+        bool includeCombatText)
+    {
+        if (stats == null || stats.Count == 0)
+            return CardDescription(card, stats, includeCombatText: includeCombatText);
+
+        var raw = _loc.Bilingual("cards", card.Id.Entry + ".description");
+        var vars = ExportDynamicVars(card) ?? new Dictionary<string, object?>();
+        try
+        {
+            foreach (var dv in card.DynamicVars.Values)
+            {
+                var name = dv.Name;
+                if (string.IsNullOrEmpty(name))
+                    continue;
+                if (stats.TryGetValue(name.ToLowerInvariant(), out var value))
+                    vars[name] = value;
+            }
+        }
+        catch { }
+
+        var formatted = InterpolateDynamicVars(raw, vars);
+        if (!string.IsNullOrWhiteSpace(formatted))
+            return ResolveEngineCardDescriptionFormatters(CleanEngineText(formatted) ?? formatted, card);
+
+        return CardDescription(card, stats, includeCombatText: includeCombatText);
     }
 
     private string AppendSourceEnhancementDescriptions(
