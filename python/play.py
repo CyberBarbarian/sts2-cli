@@ -194,6 +194,86 @@ def ensure_setup():
 # Language setting (set by --lang flag).
 LANG = "en"  # "en", "zh", or "both"
 
+CHARACTER_CHOICES = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
+DEFAULT_CHARACTER = "Ironclad"
+DEFAULT_ASCENSION = 0
+
+
+def prompt_start_options(character=None, ascension=None, input_fn=input, output_fn=print):
+    """Prompt for new-run character and ascension before starting the engine."""
+    default_character = character or DEFAULT_CHARACTER
+    default_ascension = DEFAULT_ASCENSION if ascension is None else ascension
+
+    output_fn("")
+    output_fn("New Run")
+    output_fn("Choose a character:")
+    for idx, name in enumerate(CHARACTER_CHOICES, start=1):
+        marker = " (default)" if name == default_character else ""
+        output_fn(f"  [{idx}] {name}{marker}")
+
+    while True:
+        try:
+            raw_character = input_fn(f"Character [1-{len(CHARACTER_CHOICES)}] ({default_character}): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raw_character = ""
+        if not raw_character:
+            selected_character = default_character
+            break
+        if raw_character.isdigit():
+            index = int(raw_character)
+            if 1 <= index <= len(CHARACTER_CHOICES):
+                selected_character = CHARACTER_CHOICES[index - 1]
+                break
+        name_match = next((name for name in CHARACTER_CHOICES if name.lower() == raw_character.lower()), None)
+        if name_match:
+            selected_character = name_match
+            break
+        output_fn(f"Invalid character. Choose 1-{len(CHARACTER_CHOICES)} or a character name.")
+
+    while True:
+        try:
+            raw_ascension = input_fn(f"Ascension [0-10] ({default_ascension}): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raw_ascension = ""
+        if not raw_ascension:
+            selected_ascension = default_ascension
+            break
+        try:
+            selected_ascension = int(raw_ascension)
+        except ValueError:
+            output_fn("Invalid ascension. Choose a number from 0 to 10.")
+            continue
+        if 0 <= selected_ascension <= 10:
+            break
+        output_fn("Invalid ascension. Choose a number from 0 to 10.")
+
+    return selected_character, selected_ascension
+
+
+def resolve_start_options(character=None, ascension=None, show_menu=False, input_fn=input, output_fn=print):
+    """Resolve new-run options, prompting only when the launcher requested a menu."""
+    if show_menu:
+        return prompt_start_options(character, ascension, input_fn=input_fn, output_fn=output_fn)
+    return character or DEFAULT_CHARACTER, DEFAULT_ASCENSION if ascension is None else ascension
+
+
+def should_show_start_menu(args, stdin=None):
+    """Return true for the human double-click path, false for scripted runs."""
+    if getattr(args, "auto", False):
+        return False
+    if getattr(args, "seed", None):
+        return False
+    if getattr(args, "character", None) is not None:
+        return False
+    if getattr(args, "ascension", None) is not None:
+        return False
+    if getattr(args, "load", None) is not None:
+        return False
+    if getattr(args, "continue_save", None) is not None:
+        return False
+    stream = stdin if stdin is not None else sys.stdin
+    return bool(getattr(stream, "isatty", lambda: False)())
+
 
 def card_energy_cost(card, default=99):
     cost = card.get("energy_cost", card.get("cost", default))
@@ -2343,10 +2423,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Play Slay the Spire 2 in your terminal")
     parser.add_argument("--auto", action="store_true", help="Auto-play with simple AI")
     parser.add_argument("--seed", type=str, default=None, help="Random seed")
-    parser.add_argument("--character", type=str, default="Ironclad",
-                       choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
+    parser.add_argument("--character", type=str, default=None,
+                       choices=CHARACTER_CHOICES,
                        help="Character to play")
-    parser.add_argument("--ascension", type=int, default=0,
+    parser.add_argument("--ascension", type=int, default=None,
                        choices=range(0, 11), metavar="0-10",
                        help="Ascension level (0-10)")
     parser.add_argument("--lang", type=str, default="en",
@@ -2429,6 +2509,13 @@ if __name__ == "__main__":
             print(f"Save file not found: {native_save_path}")
             sys.exit(1)
         show_native_save(native_save_path)
+
+    show_menu = should_show_start_menu(args)
+    args.character, args.ascension = resolve_start_options(
+        args.character,
+        args.ascension,
+        show_menu=show_menu,
+    )
 
     ensure_setup()
     next_seed = args.seed

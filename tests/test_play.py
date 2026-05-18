@@ -86,3 +86,29 @@ def test_deck_change_detail_lines_include_added_card_descriptions():
     assert any("+Bash" in line and "Attack" in line for line in lines)
     assert any("Deal 8 damage." in line for line in lines)
     assert any("Apply 2 Vulnerable." in line for line in lines)
+
+
+def test_prompt_start_options_lets_player_choose_character_and_ascension():
+    play.LANG = "en"
+    answers = iter(["3", "7"])
+
+    character, ascension = play.prompt_start_options(
+        character=None,
+        ascension=None,
+        input_fn=lambda prompt="": next(answers),
+        output_fn=lambda text="": None,
+    )
+
+    assert character == "Defect"
+    assert ascension == 7
+
+
+def test_resolve_start_options_defaults_when_menu_is_disabled():
+    character, ascension = play.resolve_start_options(
+        character=None,
+        ascension=None,
+        show_menu=False,
+    )
+
+    assert character == "Ironclad"
+    assert ascension == 0
