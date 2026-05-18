@@ -272,6 +272,54 @@ class TestDynamicCardStats:
         )
         assert hp_before - hp_after == target["total_damage"]
 
+    def test_x_cost_repeat_exports_consumed_slippery_total_damage(self, game):
+        state = game.start(seed="whirlwind-slippery-consumed-repeat")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=(["ANGER"] * 16) + (["WHIRLWIND"] * 4) + ["DEFEND_IRONCLAD"],
+        )
+        state = game.enter_room("combat", encounter="VANTOM_BOSS")
+
+        game.set_draw_order([
+            "ANGER",
+            "ANGER",
+            "ANGER",
+            "ANGER",
+            "ANGER",
+        ])
+        state = game.act("end_turn")
+
+        for _ in range(5):
+            anger = next(card for card in state["hand"] if card["name"] == "Anger")
+            state = game.act("play_card", card_index=anger["index"], target_index=0)
+
+        game.set_draw_order([
+            "ANGER",
+            "ANGER",
+            "ANGER",
+            "WHIRLWIND",
+            "DEFEND_IRONCLAD",
+        ])
+        state = game.act("end_turn")
+        for _ in range(3):
+            anger = next(card for card in state["hand"] if card["name"] == "Anger")
+            state = game.act("play_card", card_index=anger["index"], target_index=0)
+
+        slippery = next(power for power in state["enemies"][0]["powers"] if power["name"] == "Slippery")
+        assert slippery["amount"] == 1
+
+        whirlwind = next(card for card in state["hand"] if card["name"] == "Whirlwind")
+        target = whirlwind["stats"]["damage_by_target"][0]
+        assert target["repeat"] == state["energy"]
+
+        hp_before = state["enemies"][0]["hp"]
+        state = game.act("play_card", card_index=whirlwind["index"])
+        hp_after = state["enemies"][0]["hp"]
+
+        assert hp_before - hp_after == target["total_damage"]
+
     def test_x_cost_aoe_exports_zero_repeat_damage(self, game):
         state = game.start(seed="whirlwind-zero-repeat-stats")
         game.skip_neow(state)

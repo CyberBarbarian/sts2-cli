@@ -5379,6 +5379,19 @@ public class RunSimulator
                     previewRepeat = repeat;
                 var targetRepeat = GetTargetAttackRepeat(card, enemy, previewRepeat);
                 var totalDamage = targetDamage * targetRepeat;
+                var slippery = GetCreaturePowerAmount(enemy, "SLIPPERY", "Slippery");
+                if (!intangible
+                    && slippery > 0
+                    && targetRepeat > slippery
+                    && targetDamage <= 1)
+                {
+                    var uncappedTargetDamage = EstimateUncappedTargetDamage(
+                        untargetedDamage,
+                        pendingStrengthDelta,
+                        vulnerable);
+                    totalDamage = targetDamage * slippery
+                        + uncappedTargetDamage * (targetRepeat - slippery);
+                }
                 var block = Math.Max(0, enemy.Block);
                 var row = new Dictionary<string, object?>
                 {
@@ -5416,6 +5429,17 @@ public class RunSimulator
 
         if (rows.Count > 0)
             stats["damage_by_target"] = rows;
+    }
+
+    private static int EstimateUncappedTargetDamage(
+        int untargetedDamage,
+        int pendingStrengthDelta,
+        int vulnerable)
+    {
+        var damage = Math.Max(0, untargetedDamage + Math.Max(0, pendingStrengthDelta));
+        if (vulnerable > 0)
+            damage = (int)Math.Floor(damage * 1.5m);
+        return damage;
     }
 
     private static int AdjustTargetDamageForPendingStrength(
