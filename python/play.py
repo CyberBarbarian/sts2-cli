@@ -194,18 +194,51 @@ def ensure_setup():
 # Language setting (set by --lang flag).
 LANG = "en"  # "en", "zh", or "both"
 
+LANGUAGE_CHOICES = [("en", "English"), ("zh", "Chinese")]
+DEFAULT_LANG = "en"
 CHARACTER_CHOICES = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
 DEFAULT_CHARACTER = "Ironclad"
 DEFAULT_ASCENSION = 0
 
 
-def prompt_start_options(character=None, ascension=None, input_fn=input, output_fn=print):
-    """Prompt for new-run character and ascension before starting the engine."""
+def prompt_start_options(lang=None, character=None, ascension=None, input_fn=input, output_fn=print):
+    """Prompt for new-run language, character, and ascension before starting the engine."""
+    language_names = dict(LANGUAGE_CHOICES)
+    promptable_langs = set(language_names)
+    default_lang = lang if lang in promptable_langs else DEFAULT_LANG
     default_character = character or DEFAULT_CHARACTER
     default_ascension = DEFAULT_ASCENSION if ascension is None else ascension
 
     output_fn("")
     output_fn("New Run")
+    output_fn("Choose a language:")
+    for idx, (code, name) in enumerate(LANGUAGE_CHOICES, start=1):
+        marker = " (default)" if code == default_lang else ""
+        output_fn(f"  [{idx}] {name}{marker}")
+
+    while True:
+        try:
+            raw_lang = input_fn(f"Language [1-{len(LANGUAGE_CHOICES)}] ({language_names[default_lang]}): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            raw_lang = ""
+        if not raw_lang:
+            selected_lang = default_lang
+            break
+        if raw_lang.isdigit():
+            index = int(raw_lang)
+            if 1 <= index <= len(LANGUAGE_CHOICES):
+                selected_lang = LANGUAGE_CHOICES[index - 1][0]
+                break
+        lang_match = next(
+            (code for code, name in LANGUAGE_CHOICES
+             if code.lower() == raw_lang.lower() or name.lower() == raw_lang.lower()),
+            None,
+        )
+        if lang_match:
+            selected_lang = lang_match
+            break
+        output_fn(f"Invalid language. Choose 1-{len(LANGUAGE_CHOICES)} or a language name.")
+
     output_fn("Choose a character:")
     for idx, name in enumerate(CHARACTER_CHOICES, start=1):
         marker = " (default)" if name == default_character else ""
@@ -247,18 +280,31 @@ def prompt_start_options(character=None, ascension=None, input_fn=input, output_
             break
         output_fn("Invalid ascension. Choose a number from 0 to 10.")
 
-    return selected_character, selected_ascension
+    return selected_lang, selected_character, selected_ascension
 
 
-def resolve_start_options(character=None, ascension=None, show_menu=False, input_fn=input, output_fn=print):
+def resolve_start_options(lang=None, character=None, ascension=None, show_menu=False, input_fn=input, output_fn=print):
     """Resolve new-run options, prompting only when the launcher requested a menu."""
     if show_menu:
-        return prompt_start_options(character, ascension, input_fn=input_fn, output_fn=output_fn)
-    return character or DEFAULT_CHARACTER, DEFAULT_ASCENSION if ascension is None else ascension
+        return prompt_start_options(
+            lang=lang,
+            character=character,
+            ascension=ascension,
+            input_fn=input_fn,
+            output_fn=output_fn,
+        )
+    return (
+        lang or DEFAULT_LANG,
+        character or DEFAULT_CHARACTER,
+        DEFAULT_ASCENSION if ascension is None else ascension,
+    )
 
 
-def should_show_start_menu(args, stdin=None):
+def should_show_start_menu(args, stdin=None, argv=None):
     """Return true for the human double-click path, false for scripted runs."""
+    argv = [] if argv is None else argv
+    if any(token == "--lang" or token.startswith("--lang=") for token in argv):
+        return False
     if getattr(args, "auto", False):
         return False
     if getattr(args, "seed", None):
@@ -2688,12 +2734,14 @@ if __name__ == "__main__":
             sys.exit(1)
         show_native_save(native_save_path)
 
-    show_menu = should_show_start_menu(args)
-    args.character, args.ascension = resolve_start_options(
-        args.character,
-        args.ascension,
+    show_menu = should_show_start_menu(args, argv=sys.argv[1:])
+    args.lang, args.character, args.ascension = resolve_start_options(
+        lang=args.lang,
+        character=args.character,
+        ascension=args.ascension,
         show_menu=show_menu,
     )
+    LANG = args.lang
 
     ensure_setup()
     next_seed = args.seed

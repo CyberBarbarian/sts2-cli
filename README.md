@@ -36,8 +36,8 @@ Or just run `python3 python/play.py` — it auto-detects and sets up on first ru
 ## Play
 
 ```bash
-python3 python/play.py                        # interactive (English)
-python3 python/play.py --lang zh              # interactive (Chinese)
+python3 python/play.py                        # interactive menu: language, character, ascension
+python3 python/play.py --lang zh              # Chinese UI with default start options
 python3 python/play.py --ascension 10         # Ascension 10
 python3 python/play.py --character Silent      # play as Silent
 ```

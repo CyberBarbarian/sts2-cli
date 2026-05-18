@@ -6,6 +6,7 @@ import importlib.util
 import pathlib
 import re
 import sys
+import types
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -90,28 +91,74 @@ def test_deck_change_detail_lines_include_added_card_descriptions():
 
 def test_prompt_start_options_lets_player_choose_character_and_ascension():
     play.LANG = "en"
-    answers = iter(["3", "7"])
+    answers = iter(["2", "3", "7"])
 
-    character, ascension = play.prompt_start_options(
+    lang, character, ascension = play.prompt_start_options(
+        lang=None,
         character=None,
         ascension=None,
         input_fn=lambda prompt="": next(answers),
         output_fn=lambda text="": None,
     )
 
+    assert lang == "zh"
     assert character == "Defect"
     assert ascension == 7
 
 
 def test_resolve_start_options_defaults_when_menu_is_disabled():
-    character, ascension = play.resolve_start_options(
+    lang, character, ascension = play.resolve_start_options(
+        lang=None,
         character=None,
         ascension=None,
         show_menu=False,
     )
 
+    assert lang == "en"
     assert character == "Ironclad"
     assert ascension == 0
+
+
+def test_resolve_start_options_preserves_explicit_language_without_menu():
+    lang, character, ascension = play.resolve_start_options(
+        lang="zh",
+        character=None,
+        ascension=None,
+        show_menu=False,
+    )
+
+    assert lang == "zh"
+    assert character == "Ironclad"
+    assert ascension == 0
+
+
+def test_should_show_start_menu_false_when_lang_arg_is_explicit():
+    args = types.SimpleNamespace(
+        auto=False,
+        seed=None,
+        character=None,
+        ascension=None,
+        load=None,
+        continue_save=None,
+    )
+    stdin = types.SimpleNamespace(isatty=lambda: True)
+
+    assert play.should_show_start_menu(args, stdin=stdin, argv=["--lang", "zh"]) is False
+    assert play.should_show_start_menu(args, stdin=stdin, argv=["--lang=zh"]) is False
+
+
+def test_should_show_start_menu_true_for_double_click_tty():
+    args = types.SimpleNamespace(
+        auto=False,
+        seed=None,
+        character=None,
+        ascension=None,
+        load=None,
+        continue_save=None,
+    )
+    stdin = types.SimpleNamespace(isatty=lambda: True)
+
+    assert play.should_show_start_menu(args, stdin=stdin, argv=[]) is True
 
 
 def test_combat_inline_stat_prefers_single_target_damage():
