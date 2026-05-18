@@ -3389,6 +3389,9 @@ public class RunSimulator
         AddPlayerStateFormatTokenVars(vars, option.Title);
         AddPlayerStateFormatTokenVars(vars, option.Description);
         AddPotionConversionOptionVars(vars, localEvent, option, optionIndex);
+        KeepOnlyVisibleOptionVars(
+            vars,
+            EventOptionFormatTokenNames(engineTitle, engineDescription, option.Title, option.Description));
         return vars.Count > 0 ? vars : null;
     }
 
@@ -3429,6 +3432,34 @@ public class RunSimulator
         catch
         {
             return new HashSet<string>(StringComparer.Ordinal);
+        }
+    }
+
+    private static HashSet<string> EventOptionFormatTokenNames(params LocString?[] locStrings)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var locString in locStrings)
+            names.UnionWith(LocStringTokenNames(locString));
+        return names;
+    }
+
+    private static void KeepOnlyVisibleOptionVars(
+        Dictionary<string, object?> vars,
+        HashSet<string> visibleTokenNames)
+    {
+        if (vars.Count == 0)
+            return;
+
+        if (visibleTokenNames.Count == 0)
+        {
+            vars.Clear();
+            return;
+        }
+
+        foreach (var key in vars.Keys.ToList())
+        {
+            if (!visibleTokenNames.Contains(key))
+                vars.Remove(key);
         }
     }
 

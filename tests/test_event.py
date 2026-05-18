@@ -609,6 +609,31 @@ class TestSapphireSeed:
         assert "energy_icon.png" not in cinder["after_upgrade"]["description"]
 
 
+class TestWongos:
+    def test_bargain_bin_does_not_export_featured_random_relic_var(self, game):
+        state = game.start(seed="wongos-random-relic-vars")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("event", event="WELCOME_TO_WONGOS")
+
+        bargain = next(
+            opt for opt in state["options"]
+            if str(opt.get("text_key", "")).endswith(".BARGAIN_BIN")
+        )
+        featured = next(
+            opt for opt in state["options"]
+            if str(opt.get("text_key", "")).endswith(".FEATURED_ITEM")
+        )
+
+        assert "RandomRelic" not in (bargain.get("vars") or {})
+        assert "random Common Relic" in bargain["description"]
+
+        featured_vars = featured.get("vars") or {}
+        assert "RandomRelic" in featured_vars
+        assert "{RandomRelic}" not in featured["description"]
+        assert featured_vars["RandomRelic"] in featured["description"]
+
+
 class TestSelfHelpBook:
     def test_swift_upgrade_preview_does_not_duplicate_enchantment_text(self, game):
         state = game.start(seed="self-help-book-swift-upgrade-preview")
