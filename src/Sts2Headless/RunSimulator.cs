@@ -6637,7 +6637,7 @@ public class RunSimulator
                 applyCombatModifiers: applyCombatModifiers,
                 includeTargetRows: includeTargetRows);
             if (useSourceDynamicContext)
-                ApplySourceDynamicUpgradeContext(stats, card, player, applyCombatModifiers, includeTargetRows);
+                ApplySourceDynamicUpgradeContext(stats, card, clone, player, applyCombatModifiers, includeTargetRows);
 
             // Compare keywords before/after upgrade
             var oldKws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToHashSet() ?? new();
@@ -6669,6 +6669,7 @@ public class RunSimulator
     private void ApplySourceDynamicUpgradeContext(
         Dictionary<string, object?> upgradedStats,
         CardModel sourceCard,
+        CardModel upgradedCard,
         Player? player,
         bool applyCombatModifiers,
         bool includeTargetRows)
@@ -6686,9 +6687,20 @@ public class RunSimulator
             calculatedKey: "calculateddamage",
             baseKey: "calculationbase",
             incrementKey: "extradamage");
+        var changedHits = ApplyLinearDynamicUpgradeContext(
+            upgradedStats,
+            sourceStats,
+            calculatedKey: "calculatedhits",
+            baseKey: "calculationbase",
+            incrementKey: "calculationextra");
+        if (changedHits && applyCombatModifiers && includeTargetRows)
+        {
+            upgradedStats.Remove("damage_by_target");
+            AddAttackDamageByTarget(upgradedStats, upgradedCard, player);
+        }
     }
 
-    private static void ApplyLinearDynamicUpgradeContext(
+    private static bool ApplyLinearDynamicUpgradeContext(
         Dictionary<string, object?> upgradedStats,
         Dictionary<string, object?> sourceStats,
         string calculatedKey,
@@ -6703,14 +6715,15 @@ public class RunSimulator
             || sourceIncrement == 0
             || sourceCalculated <= sourceBase)
         {
-            return;
+            return false;
         }
 
         var delta = sourceCalculated - sourceBase;
         if (delta % sourceIncrement != 0)
-            return;
+            return false;
 
         upgradedStats[calculatedKey] = upgradedBase + upgradedIncrement * (delta / sourceIncrement);
+        return true;
     }
 
     private static bool TryGetStat(Dictionary<string, object?> stats, string key, out int value)
@@ -6751,6 +6764,7 @@ public class RunSimulator
             return CardDescription(card, stats, includeCombatText: includeCombatText);
 
         var raw = _loc.Bilingual("cards", card.Id.Entry + ".description");
+        raw = ApplyBooleanChoiceFormatter(raw, "InCombat", includeCombatText);
         var vars = ExportDynamicVars(card) ?? new Dictionary<string, object?>();
         try
         {
@@ -6780,6 +6794,65 @@ public class RunSimulator
         }
 
         return CardDescription(card, stats, includeCombatText: includeCombatText);
+    }
+
+    private static string ApplyBooleanChoiceFormatter(string text, string key, bool useTrueBranch)
+    {
+        var marker = "{" + key + ":";
+        var start = text.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0)
+            return text;
+
+        var output = new System.Text.StringBuilder(text.Length);
+        var cursor = 0;
+        while (start >= 0)
+        {
+            output.Append(text, cursor, start - cursor);
+
+            var bodyStart = start + marker.Length;
+            var depth = 0;
+            var split = -1;
+            var end = -1;
+            for (var i = bodyStart; i < text.Length; i++)
+            {
+                var ch = text[i];
+                if (ch == '{')
+                {
+                    depth++;
+                }
+                else if (ch == '}')
+                {
+                    if (depth == 0)
+                    {
+                        end = i;
+                        break;
+                    }
+                    depth--;
+                }
+                else if (ch == '|' && depth == 0 && split < 0)
+                {
+                    split = i;
+                }
+            }
+
+            if (end < 0)
+            {
+                output.Append(text, start, text.Length - start);
+                return output.ToString();
+            }
+
+            var trueEnd = split >= 0 ? split : end;
+            if (useTrueBranch)
+                output.Append(text, bodyStart, trueEnd - bodyStart);
+            else if (split >= 0)
+                output.Append(text, split + 1, end - split - 1);
+
+            cursor = end + 1;
+            start = text.IndexOf(marker, cursor, StringComparison.Ordinal);
+        }
+
+        output.Append(text, cursor, text.Length - cursor);
+        return output.ToString();
     }
 
     private string AppendSourceEnhancementDescriptions(

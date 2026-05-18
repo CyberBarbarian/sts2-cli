@@ -71,6 +71,33 @@ class TestDynamicCardStats:
         assert upgraded_stats["extradamage"] == 3
         assert upgraded_stats["calculateddamage"] == upgraded_stats["calculationbase"]
 
+    def test_barrage_after_upgrade_preview_uses_current_orb_count(self, game):
+        state = game.start(character="Defect", seed="barrage-upgrade-preview")
+        game.skip_neow(state)
+        game.set_player(
+            relics=["CRACKED_CORE"],
+            deck=[
+                "STRIKE_DEFECT",
+                "DEFEND_DEFECT",
+                "ZAP",
+                "DUALCAST",
+                "STRIKE_DEFECT",
+                "DEFEND_DEFECT",
+                "STRIKE_DEFECT",
+                "DEFEND_DEFECT",
+                "BARRAGE",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        barrage = next(c for c in state["draw_pile"] if c["name"] == "Barrage")
+        upgraded = barrage["after_upgrade"]
+
+        assert barrage["stats"]["calculatedhits"] == 1
+        assert upgraded["stats"]["calculatedhits"] == 1
+        assert "(Hits 1 time)" in upgraded["description"]
+        assert upgraded["stats"]["damage_by_target"][0]["unblocked_damage"] == 7
+
     def test_bully_exports_vulnerable_damage_by_target(self, game):
         state = game.start(seed="bully-stats")
         game.skip_neow(state)
