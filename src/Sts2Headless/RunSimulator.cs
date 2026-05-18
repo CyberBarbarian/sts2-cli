@@ -2803,6 +2803,7 @@ public class RunSimulator
 
         var drawPile = CombatPileInfo(pcs?.DrawPile?.Cards, player);
         var discardPile = CombatPileInfo(pcs?.DiscardPile?.Cards, player);
+        var exhaustPile = CombatPileInfo(pcs?.ExhaustPile?.Cards, player);
 
         var result = new Dictionary<string, object?>
         {
@@ -2819,8 +2820,10 @@ public class RunSimulator
             ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
             ["discard_pile_count"] = pcs?.DiscardPile?.Cards?.Count ?? 0,
+            ["exhaust_pile_count"] = pcs?.ExhaustPile?.Cards?.Count ?? 0,
             ["draw_pile"] = drawPile,
             ["discard_pile"] = discardPile,
+            ["exhaust_pile"] = exhaustPile,
         };
 
         // Character-specific mechanics

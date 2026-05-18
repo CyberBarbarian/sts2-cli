@@ -611,6 +611,28 @@ class TestCombatEdgeCases:
             state = game.act("end_turn")
             assert state.get("type") != "error"
 
+    def test_played_exhaust_status_exports_exhaust_pile(self, game):
+        state = game.start(seed="slimed-exhaust-pile-export")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "SLIMED",
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        slimed = next(card for card in state["hand"] if card["name"] == "Slimed")
+
+        state = game.act("play_card", card_index=slimed["index"])
+
+        assert state["exhaust_pile_count"] == 1
+        assert state["exhaust_pile"][0]["name"] == "Slimed"
+
     def test_many_cards_per_turn(self, game):
         """Play all playable cards in a single turn without errors."""
         state = game.start(seed="inf1")
