@@ -1083,14 +1083,54 @@ def parse_card_sequence(raw):
 
     payload = payload.replace(",", " ")
     parts = [part for part in payload.split() if part]
-    if not parts or any(not part.isdigit() for part in parts):
+    if not parts:
         return None
-    return [int(part) for part in parts]
+
+    steps = []
+    has_targets = False
+    for part in parts:
+        target_sep = None
+        for sep in ("@", ">"):
+            if sep in part:
+                target_sep = sep
+                break
+        if target_sep:
+            card_text, target_text = part.split(target_sep, 1)
+            if not card_text.isdigit() or not target_text.isdigit():
+                return None
+            steps.append({"card_index": int(card_text), "target_index": int(target_text)})
+            has_targets = True
+        else:
+            if not part.isdigit():
+                return None
+            steps.append(int(part))
+
+    if has_targets:
+        return [
+            step if isinstance(step, dict) else {"card_index": step}
+            for step in steps
+        ]
+    return steps
+
+
+def _sequence_step_indices(step):
+    if isinstance(step, dict):
+        card_index = step.get("card_index")
+        target_index = step.get("target_index")
+    else:
+        card_index = step
+        target_index = None
+
+    if isinstance(card_index, str) and card_index.isdigit():
+        card_index = int(card_index)
+    if isinstance(target_index, str) and target_index.isdigit():
+        target_index = int(target_index)
+    return card_index, target_index
 
 
 def execute_card_sequence(state, indices, send_fn, output_fn=print):
     current = state
-    for card_index in indices:
+    for step in indices:
         if current.get("decision") != "combat_play":
             output_fn("Queued play stopped: manual decision is required.")
             return current
@@ -1098,6 +1138,7 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
         hand = current.get("hand", [])
         energy = current.get("energy", 0)
         enemies = current.get("enemies", [])
+        card_index, target_index = _sequence_step_indices(step)
         card = next((item for item in hand if item.get("index") == card_index), None)
         if card is None:
             output_fn(f"Queued play stopped: card index {card_index} is no longer in hand.")
@@ -1109,11 +1150,20 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
         args = {"card_index": card["index"]}
         if card.get("target_type") == "AnyEnemy":
             live_enemies = [enemy for enemy in enemies if enemy.get("hp", 0) > 0]
-            if len(live_enemies) == 1:
+            if target_index is not None:
+                target = next((enemy for enemy in live_enemies if enemy.get("index") == target_index), None)
+                if target is None:
+                    output_fn(f"Queued play stopped: enemy target {target_index} is not available.")
+                    return current
+                args["target_index"] = target_index
+            elif len(live_enemies) == 1:
                 args["target_index"] = live_enemies[0]["index"]
             else:
-                output_fn(f"Queued play stopped: {n(card.get('name', '?'))} needs a target.")
+                output_fn(f"Queued play stopped: {n(card.get('name', '?'))} needs a target. Use seq {card_index}@<enemy_index>.")
                 return current
+        elif target_index is not None:
+            output_fn(f"Queued play stopped: {n(card.get('name', '?'))} does not take an enemy target.")
+            return current
 
         current = send_fn({"cmd": "action", "action": "play_card", "args": args})
         if not current or current.get("decision") != "combat_play":
@@ -1806,6 +1856,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
   {c('操作:', 'bold')}
     地图:    输入路径编号 (0, 1, 2)
     战斗:    卡牌编号 / {c('e', 'yellow')} 结束回合 / {c('p0', 'yellow')} 使用药水
+    \u961f\u5217:    {c('seq 0 2 1', 'yellow')} \u8fde\u7eed\u6253\u51fa\u591a\u5f20\u724c\uff1b\u591a\u654c\u4eba\u6218\u6597\u7528 {c('seq 0@1 2@0', 'yellow')} \u6307\u5b9a\u76ee\u6807
     奖励:    卡牌编号 / {c('s', 'yellow')} 跳过
     多选:    按提示选择张数（须选 N–M 张 / 可选 0–M 张等），编号逗号分隔，例如 {c('0,1,2', 'yellow')}
     休息:    选项编号
@@ -1828,6 +1879,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
   {c('Actions:', 'bold')}
     Map:     path number (0, 1, 2)
     Combat:  card index / {c('e', 'yellow')} end turn / {c('p0', 'yellow')} use potion
+    Queue:   {c('seq 0 2 1', 'yellow')} plays several cards; use {c('seq 0@1 2@0', 'yellow')} to target multi-enemy fights
     Reward:  card index / {c('s', 'yellow')} skip
     Multi:   when prompted for N–M cards (or 0–M optional), comma-separate indices, e.g. {c('0,1,2', 'yellow')}
     Rest:    option index
@@ -2270,9 +2322,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         _auto_last_fingerprint = fp
                         _auto_stuck_count = 0
                 else:
-                    choice = get_input(t("Play card [index], (e)nd turn, (p0) potion", "出牌 [编号], (e)结束回合, (p0)药水"), set(valid.keys()) | {"help"}, state=state)
+                    choice = get_input(t("Play card [index/seq], (e)nd turn, (p0) potion", "\u51fa\u724c [\u7f16\u53f7/seq], (e)\u7ed3\u675f\u56de\u5408, (p0)\u836f\u6c34"), set(valid.keys()) | {"help"}, state=state)
                     if choice == "help":
-                        print(f"  {t('Enter card index, e=end turn, p0=use potion 0', '输入卡牌编号，e=结束回合，p0=使用药水0')}")
+                        print(f"  {t('Enter card index, seq 0 2 1, seq 0@1 2@0, e=end turn, p0=use potion 0', '\u8f93\u5165\u5361\u724c\u7f16\u53f7\u3001seq 0 2 1\u3001seq 0@1 2@0\u3001e=\u7ed3\u675f\u56de\u5408\u3001p0=\u4f7f\u7528\u836f\u6c340')}")
                         continue
 
                 sequence = parse_card_sequence(choice)

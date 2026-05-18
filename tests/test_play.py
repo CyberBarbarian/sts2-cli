@@ -365,6 +365,56 @@ def test_parse_card_sequence_accepts_ordered_indices():
     assert play.parse_card_sequence("3") is None
 
 
+def test_parse_card_sequence_accepts_per_card_targets():
+    assert play.parse_card_sequence("seq 3@1,2@0") == [
+        {"card_index": 3, "target_index": 1},
+        {"card_index": 2, "target_index": 0},
+    ]
+    assert play.parse_card_sequence("play 4>2 1") == [
+        {"card_index": 4, "target_index": 2},
+        {"card_index": 1},
+    ]
+
+
+def test_execute_card_sequence_uses_explicit_targets_with_multiple_enemies():
+    state = {
+        "decision": "combat_play",
+        "energy": 3,
+        "hand": [
+            {"index": 0, "name": "Strike", "cost": 1, "energy_cost": 1, "can_play": True, "target_type": "AnyEnemy"},
+            {"index": 1, "name": "Strike", "cost": 1, "energy_cost": 1, "can_play": True, "target_type": "AnyEnemy"},
+        ],
+        "enemies": [
+            {"index": 0, "name": "Louse", "hp": 12},
+            {"index": 1, "name": "Cultist", "hp": 20},
+        ],
+    }
+    sent = []
+
+    def send(cmd):
+        sent.append(cmd)
+        return {
+            "decision": "combat_play",
+            "energy": 2,
+            "hand": [
+                {"index": 1, "name": "Strike", "cost": 1, "energy_cost": 1, "can_play": True, "target_type": "AnyEnemy"},
+            ],
+            "enemies": state["enemies"],
+        }
+
+    result = play.execute_card_sequence(
+        state,
+        [{"card_index": 0, "target_index": 1}, {"card_index": 1, "target_index": 0}],
+        send,
+    )
+
+    assert [cmd["args"] for cmd in sent] == [
+        {"card_index": 0, "target_index": 1},
+        {"card_index": 1, "target_index": 0},
+    ]
+    assert result["decision"] == "combat_play"
+
+
 def test_execute_card_sequence_stops_when_state_requires_manual_choice():
     state = {
         "decision": "combat_play",
