@@ -2139,7 +2139,7 @@ public class RunSimulator
         if (_pendingEventResult != null)
         {
             _pendingEventResult = null;
-            ForceToMap();
+            ForceToMap(skipTerminalProceed: true);
             return MapSelectState();
         }
         if (room is MerchantRoom)
@@ -3269,14 +3269,17 @@ public class RunSimulator
         };
     }
 
-    private void ForceToMap()
+    private void ForceToMap(bool skipTerminalProceed = false)
     {
-        try
+        if (!skipTerminalProceed)
         {
-            RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
-            _syncCtx.Pump();
+            try
+            {
+                RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
+                _syncCtx.Pump();
+            }
+            catch { }
         }
-        catch { }
 
         if (_runState?.CurrentRoom is not MapRoom)
         {

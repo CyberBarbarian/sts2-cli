@@ -7,7 +7,7 @@ import tempfile
 import threading
 
 import pytest
-from conftest import DOTNET, HEADLESS_DLL, LOCAL_DOTNET_DIR, STS2_CLI_ROOT, Game
+from conftest import DOTNET, HEADLESS_DLL, LOCAL_DOTNET_DIR, STS2_CLI_ROOT, Game, run_headless_jsonl
 
 
 def card_energy_cost(card, default=99):
@@ -20,29 +20,6 @@ def card_energy_cost(card, default=99):
             return x_value
         return 0
     return default
-
-
-def run_headless_jsonl(commands, timeout=90):
-    env = os.environ.copy()
-    env["DOTNET_ROOT"] = str(LOCAL_DOTNET_DIR)
-    env["PATH"] = str(LOCAL_DOTNET_DIR) + os.pathsep + env.get("PATH", "")
-    env["STS2_LIB"] = str(STS2_CLI_ROOT / "lib")
-    env["STS2_GAME_DIR"] = str(STS2_CLI_ROOT / "lib")
-    payload = "".join(json.dumps(command) + "\n" for command in commands)
-    result = subprocess.run(
-        [DOTNET, str(HEADLESS_DLL)],
-        input=payload,
-        cwd=STS2_CLI_ROOT,
-        env=env,
-        text=True,
-        encoding="utf-8",
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-        check=False,
-    )
-    outputs = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
-    return result, outputs
 
 
 class HeadlessSession:

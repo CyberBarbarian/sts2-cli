@@ -5,6 +5,7 @@ from pathlib import Path
 import time
 
 import pytest
+from conftest import run_headless_jsonl
 
 
 class TestNeowEvent:
@@ -404,6 +405,23 @@ class TestBattlewornDummy:
 
         state = game.act("choose_option", option_index=0)
         assert state["decision"] == "map_select"
+
+    def test_timeout_proceed_does_not_resume_finished_event_again(self):
+        result, outputs = run_headless_jsonl([
+            {"cmd": "start_run", "character": "Defect", "seed": "battleworn-dummy-proceed-stderr", "lang": "en"},
+            {"cmd": "action", "action": "choose_option", "args": {"option_index": 0}},
+            {"cmd": "enter_room", "type": "event", "event": "BATTLEWORN_DUMMY"},
+            {"cmd": "action", "action": "choose_option", "args": {"option_index": 2}},
+            {"cmd": "action", "action": "end_turn"},
+            {"cmd": "action", "action": "end_turn"},
+            {"cmd": "action", "action": "end_turn"},
+            {"cmd": "action", "action": "proceed"},
+        ])
+
+        assert outputs[-2]["decision"] == "event_result"
+        assert outputs[-1]["decision"] == "map_select"
+        assert "Tried to set event options after event was finished" not in result.stderr
+        assert "BattlewornDummy+<Resume" not in result.stderr
 
 
 class TestBugslayer:

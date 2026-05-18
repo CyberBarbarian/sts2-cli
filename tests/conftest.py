@@ -22,6 +22,29 @@ PROJECT = str(STS2_CLI_ROOT / "src" / "Sts2Headless" / "Sts2Headless.csproj")
 HEADLESS_DLL = STS2_CLI_ROOT / "src" / "Sts2Headless" / "bin" / "Debug" / "net9.0" / "Sts2Headless.dll"
 
 
+def run_headless_jsonl(commands, timeout=90):
+    env = os.environ.copy()
+    env["DOTNET_ROOT"] = str(LOCAL_DOTNET_DIR)
+    env["PATH"] = str(LOCAL_DOTNET_DIR) + os.pathsep + env.get("PATH", "")
+    env["STS2_LIB"] = str(STS2_CLI_ROOT / "lib")
+    env["STS2_GAME_DIR"] = str(STS2_CLI_ROOT / "lib")
+    payload = "".join(json.dumps(command) + "\n" for command in commands)
+    result = subprocess.run(
+        [DOTNET, str(HEADLESS_DLL)],
+        input=payload,
+        cwd=STS2_CLI_ROOT,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+        check=False,
+    )
+    outputs = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+    return result, outputs
+
+
 class Game:
     """Wraps the headless C# process for testing."""
 
