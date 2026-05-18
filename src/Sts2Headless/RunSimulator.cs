@@ -4104,6 +4104,8 @@ public class RunSimulator
     {
         var vars = ExportCardDescriptionVars(card);
         if (vars != null && vars.Count > 0)
+            text = PreferDisplayVarInterpolation(card.Description, vars, text) ?? text;
+        if (vars != null && vars.Count > 0)
             text = ExpandResolvedEnergyIcons(text, card, vars);
 
         if (!ContainsSmartFormatToken(text))

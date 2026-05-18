@@ -817,6 +817,30 @@ class TestDynamicCardStats:
         assert deck["Cinder"]["description"] == "Deal 18 damage.\nExhaust 1 card at random."
         assert deck["Cinder"]["after_upgrade"]["description"] == "Deal 24 damage.\nExhaust 1 card at random."
 
+    def test_unrelenting_description_preserves_zero_cost_energy_icon(self, game):
+        state = game.start(seed="unrelenting-cost-icon")
+        state = game.skip_neow(state)
+        state = game.set_player(deck=["UNRELENTING"])
+
+        unrelenting = next(card for card in state["player"]["deck"] if card["id"] == "CARD.UNRELENTING")
+
+        assert "costs 0 [E]" in unrelenting["description"]
+        assert "costs ." not in unrelenting["description"]
+        assert "costs 0 [E]" in unrelenting["after_upgrade"]["description"]
+        assert "costs ." not in unrelenting["after_upgrade"]["description"]
+
+    def test_unrelenting_zh_description_preserves_zero_cost_energy_icon(self, game):
+        state = game.start(seed="unrelenting-zh-cost-icon", lang="zh")
+        state = game.skip_neow(state)
+        state = game.set_player(deck=["UNRELENTING"])
+
+        unrelenting = next(card for card in state["player"]["deck"] if card["id"] == "CARD.UNRELENTING")
+
+        assert "0[E]" in unrelenting["description"]
+        assert "{energyPrefix" not in unrelenting["description"]
+        assert "0[E]" in unrelenting["after_upgrade"]["description"]
+        assert "{energyPrefix" not in unrelenting["after_upgrade"]["description"]
+
     def test_block_stats_include_player_frail(self, game):
         state = game.start(seed="codex-frail-block")
         game.skip_neow(state)
