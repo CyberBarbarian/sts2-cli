@@ -928,7 +928,8 @@ class TestCombatEdgeCases:
         upgraded_description = selected["after_upgrade"]["description"]
 
         assert "{Energy:energyIcons()}" not in upgraded_description
-        assert upgraded_description.count("ironclad_energy_icon.png") == 3
+        assert "energy_icon.png" not in upgraded_description
+        assert upgraded_description.count("[E]") == 3
 
     def test_uninitialized_event_card_is_not_exported_as_playable(self, game):
         state = game.start(seed="mad-science-uninitialized")

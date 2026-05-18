@@ -283,6 +283,7 @@ internal class LocLookup
 /// </summary>
 public class RunSimulator
 {
+    private const string CliEnergyToken = "[E]";
     private static readonly Dictionary<Type, int?> StaticAttackHitCountByCardType = new();
     private static readonly Dictionary<Type, bool> UsesAttackHitCountByCardType = new();
     private static readonly Dictionary<short, OpCode> OpCodeByValue = typeof(OpCodes)
@@ -2194,6 +2195,7 @@ public class RunSimulator
                         ["stats"] = stats.Count > 0 ? stats : null,
                         ["keywords"] = bkws?.Count > 0 ? bkws : null,
                     };
+                    AddCardVars(cardInfo, card);
                     AddEnergyCostDetails(cardInfo, card);
                     AddCardEnhancements(cardInfo, card);
                     return cardInfo;
@@ -2232,6 +2234,7 @@ public class RunSimulator
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card, player),
                 };
+                AddCardVars(cardInfo, cr.Card);
                 AddEnergyCostDetails(cardInfo, cr.Card);
                 AddCardEnhancements(cardInfo, cr.Card);
                 return cardInfo;
@@ -2283,6 +2286,7 @@ public class RunSimulator
                         includeTargetRows: includeTargetRows,
                         useSourceDynamicContext: useSourceDynamicContext),
                 };
+                AddCardVars(cardInfo, card);
                 AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeTargetRows);
                 AddCardEnhancements(cardInfo, card);
                 return cardInfo;
@@ -2539,6 +2543,7 @@ public class RunSimulator
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["description"] = CardDescription(c, stats, includeCombatText: true),
             };
+            AddCardVars(cardInfo, c);
             AddEnergyCostDetails(cardInfo, c, includeCurrentXValue: true);
             if (starCost > 0)
             {
@@ -2744,6 +2749,7 @@ public class RunSimulator
         };
         if (stats.Count > 0)
             summary["stats"] = stats;
+        AddCardVars(summary, card);
         AddEnergyCostDetails(summary, card, includeCurrentXValue: applyCombatModifiers);
         return summary;
     }
@@ -2978,6 +2984,7 @@ public class RunSimulator
         };
         if (index.HasValue)
             info["index"] = index.Value;
+        AddCardVars(info, card);
         AddEnergyCostDetails(info, card);
         AddCardEnhancements(info, card);
         return info;
@@ -3006,6 +3013,7 @@ public class RunSimulator
                 ["keywords"] = crkws?.Count > 0 ? crkws : null,
                 ["after_upgrade"] = GetUpgradedInfo(c, player),
             };
+            AddCardVars(cardInfo, c);
             AddEnergyCostDetails(cardInfo, c);
             AddCardEnhancements(cardInfo, c);
             return cardInfo;
@@ -4147,11 +4155,16 @@ public class RunSimulator
             var regex = new System.Text.RegularExpressions.Regex(pattern);
             text = regex.Replace(
                 text,
-                match => string.Concat(Enumerable.Repeat(match.Groups["icon"].Value, count)),
+                _ => CliEnergyTokens(count),
                 1);
         }
 
         return text;
+    }
+
+    private static string CliEnergyTokens(int count)
+    {
+        return count <= 0 ? "" : string.Concat(Enumerable.Repeat(CliEnergyToken, count));
     }
 
     private static Dictionary<string, object?>? ExportCardDescriptionVars(CardModel card)
@@ -4246,6 +4259,30 @@ public class RunSimulator
 
         if (vars == null || vars.Count == 0)
             return text;
+
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"\{(?<key>[A-Za-z][A-Za-z0-9_]*)\:energyIcons\((?<count>\d*)\)\}",
+            match =>
+            {
+                var explicitCount = match.Groups["count"].Value;
+                if (!string.IsNullOrWhiteSpace(explicitCount)
+                    && int.TryParse(explicitCount, out var literalCount))
+                    return CliEnergyTokens(literalCount);
+
+                var key = match.Groups["key"].Value;
+                if (!vars.TryGetValue(key, out var value) || value == null)
+                    return match.Value;
+
+                try
+                {
+                    return CliEnergyTokens(System.Convert.ToInt32(value));
+                }
+                catch
+                {
+                    return match.Value;
+                }
+            });
 
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
@@ -4745,6 +4782,15 @@ public class RunSimulator
         }
 
         var tokenNames = FormatTokenNames(rawText);
+        if (rawText.Contains("energyIcons", StringComparison.Ordinal)
+            && !engineText.Contains(CliEnergyToken, StringComparison.Ordinal))
+        {
+            var interpolated = CleanResolvedEngineText(InterpolateDynamicVars(rawText, vars));
+            if (!string.IsNullOrWhiteSpace(interpolated)
+                && interpolated.Contains(CliEnergyToken, StringComparison.Ordinal))
+                return interpolated;
+        }
+
         var hasMissingStringDisplay = vars.Any(kv =>
             kv.Value is string textValue
             && tokenNames.Contains(kv.Key)
@@ -4796,8 +4842,20 @@ public class RunSimulator
             @"res://[A-Za-z0-9_./-]+/([A-Za-z0-9_.-]+\.(?:png|webp|jpg|jpeg))",
             "$1",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\[(?!E\])/?[a-zA-Z_][a-zA-Z0-9_=]*\]", "");
         text = System.Text.RegularExpressions.Regex.Replace(text, @"#[A-Z](?=\{|[A-Za-z0-9])", "");
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"(?<count>\d+)(?:[A-Za-z0-9_]*energy_icon\.png)",
+            match => int.TryParse(match.Groups["count"].Value, out var count)
+                ? CliEnergyTokens(count)
+                : match.Value,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"[A-Za-z0-9_]*energy_icon\.png",
+            CliEnergyToken,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
@@ -4943,6 +5001,7 @@ public class RunSimulator
                 };
                 if (card != null)
                 {
+                    AddCardVars(exported, card);
                     AddEnergyCostDetails(exported, card);
                     AddCardEnhancements(exported, card);
                 }
@@ -5426,6 +5485,13 @@ public class RunSimulator
             cardInfo["x_value"] = GetEnergyXValue(card);
         }
         catch { }
+    }
+
+    private static void AddCardVars(Dictionary<string, object?> cardInfo, CardModel card)
+    {
+        var vars = ExportCardDescriptionVars(card);
+        if (vars != null && vars.Count > 0)
+            cardInfo["vars"] = vars;
     }
 
     private static Dictionary<string, int>? TryGetCardPreviewStats(
@@ -6264,6 +6330,7 @@ public class RunSimulator
                 ["added_keywords"] = addedKws.Count > 0 ? addedKws : null,
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
+            AddCardVars(info, clone);
             AddEnergyCostDetails(info, clone);
             AddCardEnhancements(info, card);
             return info;
@@ -6621,6 +6688,7 @@ public class RunSimulator
                     ["keywords"] = dkws?.Count > 0 ? dkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(c, player),
                 };
+                AddCardVars(cardInfo, c);
                 AddEnergyCostDetails(cardInfo, c);
                 AddCardEnhancements(cardInfo, c);
                 return cardInfo;

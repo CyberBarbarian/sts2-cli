@@ -243,7 +243,7 @@ class TestDynamicCardStats:
         assert hand_whirlwind["energy_cost"] == state["energy"]
         assert hand_whirlwind["x_value"] == state["energy"]
 
-    def test_energy_icon_upgrade_preview_repeats_engine_icons(self, game):
+    def test_energy_icon_upgrade_preview_repeats_cli_energy_tokens(self, game):
         state = game.start(seed="forgotten-ritual-energy-icon-preview")
         game.skip_neow(state)
         state = game.set_player(deck=[
@@ -257,8 +257,9 @@ class TestDynamicCardStats:
         ritual = next(c for c in state["player"]["deck"] if c["name"] == "Forgotten Ritual")
         upgraded_description = ritual["after_upgrade"]["description"]
 
-        assert "4ironclad_energy_icon.png" not in upgraded_description
-        assert upgraded_description.count("ironclad_energy_icon.png") == 4
+        assert "4[E]" not in upgraded_description
+        assert "energy_icon.png" not in upgraded_description
+        assert upgraded_description.count("[E]") == 4
 
     def test_x_cost_aoe_exports_current_repeat_damage(self, game):
         state = game.start(seed="whirlwind-current-repeat-stats")
@@ -662,9 +663,11 @@ class TestDynamicCardStats:
         ])
         deck_ice_lance = next(c for c in state["player"]["deck"] if c["name"] == "Ice Lance")
         assert "Channel 3 Frost" in deck_ice_lance["description"]
+        assert deck_ice_lance["vars"]["Repeat"] == 3
         assert "repeat" not in deck_ice_lance["stats"]
         assert "total_damage" not in deck_ice_lance["stats"]
         assert "Channel 3 Frost" in deck_ice_lance["after_upgrade"]["description"]
+        assert deck_ice_lance["after_upgrade"]["vars"]["Repeat"] == 3
         assert "repeat" not in deck_ice_lance["after_upgrade"]["stats"]
         assert "total_damage" not in deck_ice_lance["after_upgrade"]["stats"]
 
@@ -675,6 +678,7 @@ class TestDynamicCardStats:
 
         damage = ice_lance["stats"]["damage"]
         assert damage > 0
+        assert ice_lance["vars"]["Repeat"] == 3
         assert "repeat" not in ice_lance["stats"]
         assert "repeat" not in target_stats
         assert "total_damage" not in target_stats

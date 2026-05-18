@@ -578,7 +578,8 @@ class TestSapphireSeed:
         assert "with 0" not in plant["description"]
         sown_tip = next(tip for tip in plant["hover_tips"] if tip["title"] == "Sown")
         assert "{Amount:energyIcons()}" not in sown_tip["description"]
-        assert "energy_icon.png" in sown_tip["description"]
+        assert "[E]" in sown_tip["description"]
+        assert "energy_icon.png" not in sown_tip["description"]
         assert "1 Energy" not in sown_tip["description"]
 
     def test_sown_card_upgrade_preview_preserves_enchantment_text(self, game):
@@ -602,8 +603,10 @@ class TestSapphireSeed:
         state = game.act("choose_option", option_index=smith["index"])
 
         cinder = next(c for c in state["cards"] if c["name"] == "Cinder")
-        assert "energy_icon.png" in cinder["description"]
-        assert "energy_icon.png" in cinder["after_upgrade"]["description"]
+        assert "[E]" in cinder["description"]
+        assert "[E]" in cinder["after_upgrade"]["description"]
+        assert "energy_icon.png" not in cinder["description"]
+        assert "energy_icon.png" not in cinder["after_upgrade"]["description"]
 
 
 class TestSelfHelpBook:
@@ -640,7 +643,8 @@ class TestNonupeipe:
         antler = next(o for o in state["options"] if o["title"] == "Blessed Antler")
 
         assert "{Energy:energyIcons()}" not in antler["description"]
-        assert "energy_icon.png" in antler["description"]
+        assert "[E]" in antler["description"]
+        assert "energy_icon.png" not in antler["description"]
         assert "1 Energy" not in antler["description"]
 
 
@@ -670,7 +674,8 @@ class TestPaelAncient:
 
         assert "{energyPrefix:energyIcons(1)}" not in tears["description"]
         assert "{Energy:energyIcons()}" not in tears["description"]
-        assert "regent_energy_icon.png" in tears["description"]
+        assert "[E]" in tears["description"]
+        assert "energy_icon.png" not in tears["description"]
         assert "1 Energy" not in tears["description"]
 
         claw = next(option for option in state["options"] if option["title"] == "Pael's Claw")
