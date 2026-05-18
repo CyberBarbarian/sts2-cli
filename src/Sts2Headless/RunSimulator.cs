@@ -7078,7 +7078,10 @@ public class RunSimulator
             ["name"] = EngineLocStringText(relic.Title) ?? _loc.Relic(entry),
             ["description"] = description,
             ["vars"] = varsOrNull,
+            ["show_counter"] = relic.ShowCounter,
         };
+        if (relic.ShowCounter)
+            info["display_amount"] = relic.DisplayAmount;
         if (index.HasValue)
             info["index"] = index.Value;
         return info;

@@ -54,6 +54,16 @@ def test_treasure_relic_exports_effect_vars_and_resolved_description(game):
     assert "{ThornsPower}" not in owned["description"]
 
 
+def test_counter_relic_exports_display_amount(game):
+    state = game.start(seed="relic-counter-export")
+    game.skip_neow(state)
+    state = game.set_player(relics=["SWORD_OF_STONE"])
+
+    sword = next(r for r in state["player"]["relics"] if r["id"] == "SWORD_OF_STONE")
+    assert sword["show_counter"] is True
+    assert sword["display_amount"] == 0
+
+
 def test_player_relic_descriptions_resolve_energy_icons(game):
     state = game.start(seed="relic-energy-description")
     game.skip_neow(state)
