@@ -979,7 +979,7 @@ def card_select_context_lines(state):
     if prompt:
         lines.append(n(prompt))
 
-    source_option = state.get("source_event_option") or {}
+    source_option = state.get("source_event_option") or state.get("source_room_option") or {}
     if source_option and not prompt:
         title = n(source_option.get("title"))
         description = resolved_description(source_option)

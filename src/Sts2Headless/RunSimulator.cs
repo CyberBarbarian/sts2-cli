@@ -320,6 +320,7 @@ public class RunSimulator
     private readonly HeadlessCardSelector _cardSelector = new();
     private CardModel? _pendingCardSelectionSourceCard;
     private Dictionary<string, object?>? _pendingCardSelectionSourceEventOption;
+    private Dictionary<string, object?>? _pendingCardSelectionSourceRoomOption;
     private Dictionary<string, object?>? _pendingCardSelectionSourcePotion;
     private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
     private string? _preCurrentRoomSaveJson;
@@ -1106,6 +1107,7 @@ public class RunSimulator
         _pendingShopPurchaseTask = null;
         _pendingRewards = null;
         _pendingCardSelectionSourceEventOption = null;
+        _pendingCardSelectionSourceRoomOption = null;
         _pendingCardSelectionSourcePotion = null;
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
         YieldPatches.ActiveCrystalSphereMinigame = null;
@@ -1203,6 +1205,7 @@ public class RunSimulator
         if (_pendingCardSelectionSourceCard != null)
         {
             _pendingCardSelectionSourceEventOption = null;
+            _pendingCardSelectionSourceRoomOption = null;
             _pendingCardSelectionSourcePotion = null;
         }
 
@@ -1735,6 +1738,7 @@ public class RunSimulator
         _cardSelector.ResolvePendingByIndices(indices);
         _pendingCardSelectionSourceCard = null;
         _pendingCardSelectionSourceEventOption = null;
+        _pendingCardSelectionSourceRoomOption = null;
         _pendingCardSelectionSourcePotion = null;
         _syncCtx.Pump();
         WaitForPendingEventOptionTask();
@@ -1798,6 +1802,7 @@ public class RunSimulator
             _cardSelector.CancelPending();
             _pendingCardSelectionSourceCard = null;
             _pendingCardSelectionSourceEventOption = null;
+            _pendingCardSelectionSourceRoomOption = null;
             _pendingCardSelectionSourcePotion = null;
             _syncCtx.Pump();
             WaitForActionExecutor();
@@ -1892,6 +1897,7 @@ public class RunSimulator
                 {
                     _pendingCardSelectionSourceCard = null;
                     _pendingCardSelectionSourceEventOption = null;
+                    _pendingCardSelectionSourceRoomOption = null;
                     _pendingCardSelectionSourcePotion = sourcePotion;
                 }
                 return DetectDecisionPoint();
@@ -1951,6 +1957,7 @@ public class RunSimulator
             Log($"Rest site: choosing option {optionIndex}");
             try
             {
+                var sourceRoomOption = RestSiteOptionSelectionContext(restSiteRoom, optionIndex);
                 // Run on background thread so Smith card selection can pause
                 var task = Task.Run(() => RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex));
                 for (int i = 0; i < 100; i++)
@@ -1962,6 +1969,13 @@ public class RunSimulator
                 }
                 if (_cardSelector.HasPending)
                 {
+                    if (sourceRoomOption != null)
+                    {
+                        _pendingCardSelectionSourceCard = null;
+                        _pendingCardSelectionSourceEventOption = null;
+                        _pendingCardSelectionSourceRoomOption = sourceRoomOption;
+                        _pendingCardSelectionSourcePotion = null;
+                    }
                     WaitForActionExecutor();
                     return DetectDecisionPoint();
                 }
@@ -2034,6 +2048,7 @@ public class RunSimulator
                             {
                                 _pendingCardSelectionSourceCard = null;
                                 _pendingCardSelectionSourceEventOption = sourceEventOption;
+                                _pendingCardSelectionSourceRoomOption = null;
                                 _pendingCardSelectionSourcePotion = null;
                             }
                             YieldPatches.SuppressYield = previousSuppressYield;
@@ -2361,6 +2376,7 @@ public class RunSimulator
 
             var prompt = CardSelectionPrompt(_pendingCardSelectionSourceCard)
                          ?? CardSelectionPrompt(_pendingCardSelectionSourceEventOption)
+                         ?? CardSelectionPrompt(_pendingCardSelectionSourceRoomOption)
                          ?? CardSelectionPrompt(_pendingCardSelectionSourcePotion);
             var state = new Dictionary<string, object?>
             {
@@ -2386,6 +2402,10 @@ public class RunSimulator
             if (_pendingCardSelectionSourceEventOption != null)
             {
                 state["source_event_option"] = _pendingCardSelectionSourceEventOption;
+            }
+            if (_pendingCardSelectionSourceRoomOption != null)
+            {
+                state["source_room_option"] = _pendingCardSelectionSourceRoomOption;
             }
             if (_pendingCardSelectionSourcePotion != null)
             {
@@ -3505,6 +3525,19 @@ public class RunSimulator
         if (state.TryGetValue("description", out var eventDescription))
             source["event_description"] = eventDescription;
         return source;
+    }
+
+    private Dictionary<string, object?>? RestSiteOptionSelectionContext(RestSiteRoom restSiteRoom, int optionIndex)
+    {
+        var state = RestSiteState(restSiteRoom);
+        if (!state.TryGetValue("options", out var optionsObj)
+            || optionsObj is not IEnumerable<Dictionary<string, object?>> options)
+            return null;
+
+        var option = options.FirstOrDefault(item =>
+            item.TryGetValue("index", out var indexObj)
+            && Convert.ToInt32(indexObj) == optionIndex);
+        return option == null ? null : new Dictionary<string, object?>(option);
     }
 
     private (string? title, string? description)? ResolveAncientDialogueOption(string eventEntry, string? textKey)
@@ -8690,6 +8723,7 @@ public class RunSimulator
         _lastKnownHp = 0;
         _pendingCardSelectionSourceCard = null;
         _pendingCardSelectionSourceEventOption = null;
+        _pendingCardSelectionSourceRoomOption = null;
         _pendingCardSelectionSourcePotion = null;
         _shopItemSnapshots.Clear();
         _preCurrentRoomSaveJson = null;

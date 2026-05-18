@@ -72,4 +72,7 @@ class TestRestSiteActions:
         assert smith, "SMITH not available"
         state = game.act("choose_option", option_index=smith["index"])
         assert state["decision"] == "card_select"
+        assert state["prompt"] == f"{smith['title']}: {smith['description']}"
+        assert state["source_room_option"]["option_id"] == "SMITH"
+        assert state["source_room_option"]["description"] == smith["description"]
         assert len(state.get("cards", [])) > 0

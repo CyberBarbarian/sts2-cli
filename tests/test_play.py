@@ -127,6 +127,19 @@ def test_card_select_context_lines_include_source_potion_description():
     ]
 
 
+def test_card_select_context_lines_include_source_room_option_description():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_select_context_lines({
+        "source_room_option": {
+            "title": "Smith",
+            "description": "Upgrade a card in your Deck.",
+        },
+    })]
+
+    assert lines == ["Smith: Upgrade a card in your Deck."]
+
+
 def test_deck_change_detail_lines_include_added_card_descriptions():
     play.LANG = "en"
 
