@@ -757,8 +757,8 @@ def target_row_damage_label(row):
     repeat = row.get("repeat")
     base = row.get("calculateddamage", row.get("damage"))
     if repeat and repeat > 1 and base is not None and damage != base:
-        return f"{damage}{t('dmg','dmg')} ({base}x{repeat})"
-    return f"{damage}{t('dmg','dmg')}"
+        return f"{damage}{t('dmg','\u4f24')} ({base}x{repeat})"
+    return f"{damage}{t('dmg','\u4f24')}"
 
 
 def visible_target_rows(stats, enemies=None):
@@ -842,17 +842,17 @@ def card_target_damage_display_lines(card, enemies=None):
         if target_damage == base_damage:
             return []
 
-    lines = [c("Target damage:", "dim")]
+    lines = [c(t("Target damage:", "\u76ee\u6807\u4f24\u5bb3:"), "dim")]
     for row in rows:
         label = target_row_damage_label(row)
         if not label:
             continue
-        target_name = row.get("target_name") or f"Target {row.get('target_index', '?')}"
+        target_name = row.get("target_name") or f"{t('Target', '\u76ee\u6807')} {row.get('target_index', '?')}"
         extra = []
         if row.get("vulnerable"):
-            extra.append(f"Vulnerable {row['vulnerable']}")
+            extra.append(f"{t('Vulnerable', '\u6613\u4f24')} {row['vulnerable']}")
         if row.get("block"):
-            extra.append(f"Block {row['block']}")
+            extra.append(f"{t('Block', '\u683c\u6321')} {row['block']}")
         suffix = f" ({', '.join(extra)})" if extra else ""
         lines.append(f"  {target_name}: {label}{suffix}")
     return lines if len(lines) > 1 else []
@@ -899,38 +899,40 @@ def enemy_intent_display_parts(intents):
         dmg = it.get("damage")
         hits = it.get("hits")
         if itype == "Attack":
+            label = t("Attack", "\u653b\u51fb")
             if dmg is not None:
                 if hits and hits > 1:
-                    parts.append(c(f"Attack {dmg}x{hits}", "red"))
+                    parts.append(c(f"{label} {dmg}x{hits}", "red"))
                 else:
-                    parts.append(c(f"Attack {dmg}", "red"))
+                    parts.append(c(f"{label} {dmg}", "red"))
             else:
-                parts.append(c("Attack", "red"))
+                parts.append(c(label, "red"))
         elif itype == "Defend":
-            parts.append(c("Defend", "blue"))
+            parts.append(c(t("Defend", "\u9632\u5fa1"), "blue"))
         elif itype in ("Buff", "Heal"):
-            parts.append(c(itype, "magenta"))
+            label = t(itype, "\u6cbb\u7597" if itype == "Heal" else "\u589e\u76ca")
+            parts.append(c(label, "magenta"))
         elif itype == "Debuff":
-            parts.append(c("Debuff", "yellow"))
+            parts.append(c(t("Debuff", "\u8d1f\u9762\u6548\u679c"), "yellow"))
         elif itype == "DebuffStrong":
-            parts.append(c("Strong Debuff", "yellow"))
+            parts.append(c(t("Strong Debuff", "\u5f3a\u8d1f\u9762\u6548\u679c"), "yellow"))
         elif itype in ("CardDebuff", "StatusCard"):
-            parts.append(c("Add Cards", "yellow"))
+            parts.append(c(t("Add Cards", "\u6dfb\u52a0\u5361\u724c"), "yellow"))
         elif itype == "DeathBlow":
             if dmg is not None:
-                parts.append(c(f"Deathblow {dmg}", "red"))
+                parts.append(c(f"{t('Deathblow', '\u81f4\u547d\u4e00\u51fb')} {dmg}", "red"))
             else:
-                parts.append(c("Deathblow", "red"))
+                parts.append(c(t("Deathblow", "\u81f4\u547d\u4e00\u51fb"), "red"))
         elif itype == "Escape":
-            parts.append(c("Escape", "dim"))
+            parts.append(c(t("Escape", "\u9003\u8dd1"), "dim"))
         elif itype == "Summon":
-            parts.append(c("Summon", "magenta"))
+            parts.append(c(t("Summon", "\u53ec\u5524"), "magenta"))
         elif itype == "Sleep":
-            parts.append(c("Sleep", "dim"))
+            parts.append(c(t("Sleep", "\u7761\u7720"), "dim"))
         elif itype == "Stun":
-            parts.append(c("Stun", "yellow"))
+            parts.append(c(t("Stun", "\u7729\u6655"), "yellow"))
         elif itype == "Hidden":
-            parts.append(c("Hidden", "dim"))
+            parts.append(c(t("Hidden", "\u9690\u85cf"), "dim"))
         elif itype:
             parts.append(c(itype, "dim"))
     return parts

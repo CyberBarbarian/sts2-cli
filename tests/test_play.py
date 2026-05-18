@@ -56,6 +56,24 @@ def test_enemy_intent_labels_are_text_not_symbols():
     assert all(ord(ch) < 128 for ch in rendered)
 
 
+def test_zh_enemy_intent_labels_are_localized_text():
+    play.LANG = "zh"
+
+    parts = play.enemy_intent_display_parts([
+        {"type": "Attack", "damage": 7, "hits": 2},
+        {"type": "Defend"},
+        {"type": "Debuff"},
+    ])
+
+    rendered = plain(" ".join(parts))
+    assert "Attack" not in rendered
+    assert "Defend" not in rendered
+    assert "Debuff" not in rendered
+    assert "\u653b\u51fb 7x2" in rendered
+    assert "\u9632\u5fa1" in rendered
+    assert "\u8d1f\u9762\u6548\u679c" in rendered
+
+
 def test_event_option_detail_lines_include_hover_tip_effects():
     play.LANG = "en"
 
@@ -295,6 +313,29 @@ def test_target_damage_detail_lines_show_multiple_targets():
 
     assert any("Nibbit: 9dmg" in line for line in lines)
     assert any("Other Nibbit: 6dmg" in line for line in lines)
+
+
+def test_zh_target_damage_detail_lines_are_localized():
+    play.LANG = "zh"
+    lines = [plain(line) for line in play.card_target_damage_display_lines(
+        {
+            "stats": {
+                "damage": 6,
+                "damage_by_target": [
+                    {"target_index": 0, "target_name": "\u5c0f\u5543\u517d", "damage": 9, "vulnerable": 1},
+                ],
+            }
+        },
+        enemies=[{"index": 0, "name": "\u5c0f\u5543\u517d", "hp": 22}],
+    )]
+    rendered = "\n".join(lines)
+
+    assert "Target damage" not in rendered
+    assert "Vulnerable" not in rendered
+    assert "dmg" not in rendered
+    assert "\u76ee\u6807\u4f24\u5bb3" in rendered
+    assert "\u5c0f\u5543\u517d: 9\u4f24" in rendered
+    assert "\u6613\u4f24 1" in rendered
 
 
 def test_pile_display_lines_include_card_descriptions():
