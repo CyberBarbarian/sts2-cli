@@ -2709,7 +2709,9 @@ public class RunSimulator
     {
         try
         {
-            return CombatManager.Instance.IsInProgress && card.CombatState != null;
+            return CombatManager.Instance.IsInProgress
+                   && card.CombatState != null
+                   && card.Pile?.Type == PileType.Hand;
         }
         catch
         {

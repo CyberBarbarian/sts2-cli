@@ -155,6 +155,31 @@ class TestPotionActions:
         assert any(card["name"] == "Strike" and card["cost"] == 0 for card in state["hand"])
         assert len(state["hand"]) == 4
 
+    def test_liquid_memories_discard_selection_does_not_export_hand_target_rows(self, game):
+        state = game.start(seed="liquid-memories-selection-pile-stats")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["LIQUID_MEMORIES"],
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        for _ in range(2):
+            strike = next(card for card in state["hand"] if card["name"] == "Strike")
+            state = game.act("play_card", card_index=strike["index"], target_index=0)
+        state = game.act("use_potion", potion_index=0)
+
+        assert state["decision"] == "card_select"
+        selected = state["cards"][0]
+        assert selected["name"] == "Strike"
+        assert "damage_by_target" not in selected["stats"]
+
     def test_touch_of_insanity_card_select_exports_combat_preview_stats(self, game):
         state = game.start(seed="touch-selection-combat-stats")
         game.skip_neow(state)
