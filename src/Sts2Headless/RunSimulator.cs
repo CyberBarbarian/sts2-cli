@@ -1678,8 +1678,10 @@ public class RunSimulator
 
         try
         {
+            var sourceRoomOption = ShopCardRemovalSelectionContext(removal.Cost);
             // Run on background thread so card selection can pause (same pattern as event options)
             var task = Task.Run(() => removal.OnTryPurchaseWrapper(merchantRoom.Inventory));
+            _pendingShopPurchaseTask = task;
             for (int i = 0; i < 100; i++)
             {
                 _syncCtx.Pump();
@@ -1689,11 +1691,16 @@ public class RunSimulator
             }
             if (_cardSelector.HasPending)
             {
+                _pendingCardSelectionSourceCard = null;
+                _pendingCardSelectionSourceEventOption = null;
+                _pendingCardSelectionSourceRoomOption = sourceRoomOption;
+                _pendingCardSelectionSourcePotion = null;
                 WaitForActionExecutor();
                 return DetectDecisionPoint();
             }
             if (!task.IsCompleted) task.Wait(2000);
             _syncCtx.Pump();
+            _pendingShopPurchaseTask = null;
             Log($"Removed card for {removal.Cost}g");
         }
         catch (Exception ex) { return Error($"Remove card failed: {ex.Message}"); }
@@ -3588,6 +3595,23 @@ public class RunSimulator
             item.TryGetValue("index", out var indexObj)
             && Convert.ToInt32(indexObj) == optionIndex);
         return option == null ? null : new Dictionary<string, object?>(option);
+    }
+
+    private Dictionary<string, object?> ShopCardRemovalSelectionContext(int cost)
+    {
+        var vars = new Dictionary<string, object?> { ["Amount"] = 1 };
+        var promptKey = "TO_REMOVE";
+        var rawPrompt = _loc.Bilingual("card_selection", promptKey);
+        var prompt = CleanResolvedEngineText(InterpolateDynamicVars(rawPrompt, vars) ?? rawPrompt)
+                     ?? rawPrompt;
+
+        return new Dictionary<string, object?>
+        {
+            ["category"] = "card_removal",
+            ["title"] = prompt,
+            ["text_key"] = $"card_selection.{promptKey}",
+            ["cost"] = cost,
+        };
     }
 
     private (string? title, string? description)? ResolveAncientDialogueOption(string eventEntry, string? textKey)

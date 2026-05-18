@@ -230,3 +230,17 @@ class TestShopRemove:
             # Should return to shop with deck_size - 1
             if state.get("decision") == "shop":
                 assert state["player"]["deck_size"] == deck_before - 1
+
+    def test_remove_card_selection_explains_choice(self, game):
+        state = game.start(seed="sr-prompt")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+        removal_cost = state["card_removal_cost"]
+
+        state = game.act("remove_card")
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == "Choose a card to Remove."
+        assert state["source_room_option"]["category"] == "card_removal"
+        assert state["source_room_option"]["cost"] == removal_cost
