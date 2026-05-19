@@ -1314,7 +1314,12 @@ def show_player(p, show_deck=False):
 
 
 def pile_display_lines(pile_name, cards, count=None):
-    title = t("Draw Pile", "抽牌堆") if pile_name == "draw" else t("Discard Pile", "弃牌堆")
+    titles = {
+        "draw": t("Draw Pile", "抽牌堆"),
+        "discard": t("Discard Pile", "弃牌堆"),
+        "exhaust": t("Exhaust Pile", "Exhaust Pile"),
+    }
+    title = titles.get(pile_name, t("Card Pile", "Card Pile"))
     total = len(cards) if count is None else count
     lines = [c(f"{title} ({total})", "bold")]
     if not cards:
@@ -2259,6 +2264,9 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
             else:
                 print(f"""
   {c('Commands:', 'bold')}
+    {c('draw', 'cyan')}     - show draw pile
+    {c('discard', 'cyan')}  - show discard pile
+    {c('exhaust', 'cyan')}  - show exhaust pile
     {c('help', 'cyan')}     — show this help
     {c('map', 'cyan')}      — show map
     {c('deck', 'cyan')}     — show deck
@@ -2289,6 +2297,9 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
             continue
         if raw in ("discard", "discardpile", "discard_pile") and state:
             show_pile(state, "discard")
+            continue
+        if raw in ("exhaust", "exhaustpile", "exhaust_pile") and state:
+            show_pile(state, "exhaust")
             continue
         if raw == "potions" and state:
             p = state.get("player", {})

@@ -797,6 +797,26 @@ def test_pile_display_lines_include_card_descriptions():
     assert any("Deal 6 damage." in line for line in lines)
 
 
+def test_pile_display_lines_support_exhaust_pile():
+    play.LANG = "en"
+    lines = [plain(line) for line in play.pile_display_lines(
+        "exhaust",
+        [
+            {
+                "index": 0,
+                "name": "Neow's Fury",
+                "cost": 1,
+                "type": "Attack",
+                "description": "Deal 10 damage.\nExhaust.",
+            }
+        ],
+    )]
+
+    assert any("Exhaust Pile" in line for line in lines)
+    assert any("Neow's Fury" in line for line in lines)
+    assert any("Exhaust." in line for line in lines)
+
+
 def test_parse_card_sequence_accepts_ordered_indices():
     assert play.parse_card_sequence("seq 3,1,0") == [3, 1, 0]
     assert play.parse_card_sequence("play 2 0") == [2, 0]
