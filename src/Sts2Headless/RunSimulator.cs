@@ -2397,10 +2397,13 @@ public class RunSimulator
                 return cardInfo;
             }).ToList();
 
-            var prompt = CardSelectionPrompt(_pendingCardSelectionSourceCard)
-                         ?? CardSelectionPrompt(_pendingCardSelectionSourceEventOption)
+            var sourceModel = _cardSelector.PendingSourceModel;
+            var sourceCard = _pendingCardSelectionSourceCard ?? sourceModel as CardModel;
+            var sourcePower = sourceModel as PowerModel;
+            var prompt = CardSelectionPrompt(_pendingCardSelectionSourceEventOption)
                          ?? CardSelectionPrompt(_pendingCardSelectionSourceRoomOption)
-                         ?? CardSelectionPrompt(_pendingCardSelectionSourcePotion);
+                         ?? CardSelectionPrompt(_pendingCardSelectionSourcePotion)
+                         ?? CardSelectionPrompt(sourceCard);
             var state = new Dictionary<string, object?>
             {
                 ["type"] = "decision",
@@ -2415,12 +2418,16 @@ public class RunSimulator
             {
                 state["prompt"] = prompt;
             }
-            if (_pendingCardSelectionSourceCard != null)
+            if (sourceCard != null)
             {
                 state["source_card"] = CardSummary(
-                    _pendingCardSelectionSourceCard,
-                    applyCombatModifiers: ShouldExportCombatPreviewState(_pendingCardSelectionSourceCard),
-                    includeTargetRows: ShouldExportCombatCardState(_pendingCardSelectionSourceCard));
+                    sourceCard,
+                    applyCombatModifiers: ShouldExportCombatPreviewState(sourceCard),
+                    includeTargetRows: ShouldExportCombatCardState(sourceCard));
+            }
+            if (sourcePower != null)
+            {
+                state["source_power"] = PowerInfo(sourcePower);
             }
             if (_pendingCardSelectionSourceEventOption != null)
             {
@@ -4953,6 +4960,18 @@ public class RunSimulator
         if (monsterKey == "THE_KIN")
             monsterKey = "KIN_PRIEST";
         return _loc.Monster(monsterKey);
+    }
+
+    private Dictionary<string, object?> PowerInfo(PowerModel power)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["id"] = power.Id.Entry,
+            ["name"] = PowerName(power),
+            ["description"] = PowerDescription(power),
+            ["amount"] = power.Amount,
+            ["type"] = power.Type.ToString(),
+        };
     }
 
     private string PowerName(PowerModel power)
@@ -7602,6 +7621,7 @@ public class RunSimulator
         // because there's no Godot scene tree, causing the ActionExecutor to deadlock.
         PatchCmdWait();
         PatchCardPileAddVisuals();
+        PatchCardSelectContext();
         PatchTalkCmdPlay();
         PatchSoulNexusPresentation();
         PatchQueenPresentation();
@@ -7838,6 +7858,46 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch CardPileCmd.Add visuals: {ex.Message}");
+        }
+    }
+
+    private static void PatchCardSelectContext()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.cardselectcontext");
+            var prefsPrefix = typeof(YieldPatches).GetMethod(
+                nameof(YieldPatches.CardSelectionPrefsPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var sourcePrefix = typeof(YieldPatches).GetMethod(
+                nameof(YieldPatches.CardSelectionPrefsSourcePrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var finalizer = typeof(YieldPatches).GetMethod(
+                nameof(YieldPatches.CardSelectionPrefsFinalizer),
+                BindingFlags.Static | BindingFlags.Public);
+            if (prefsPrefix == null || sourcePrefix == null || finalizer == null)
+                return;
+
+            var patched = 0;
+            foreach (var method in typeof(CardSelectCmd).GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                var parameters = method.GetParameters();
+                if (!parameters.Any(p => p.ParameterType == typeof(CardSelectorPrefs)))
+                    continue;
+
+                var hasSource = parameters.Any(p => p.ParameterType == typeof(AbstractModel));
+                harmony.Patch(
+                    method,
+                    prefix: new HarmonyMethod(hasSource ? sourcePrefix : prefsPrefix),
+                    finalizer: new HarmonyMethod(finalizer));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched CardSelectCmd selection context ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch CardSelectCmd selection context: {ex.Message}");
         }
     }
 
@@ -8258,6 +8318,7 @@ public class RunSimulator
         public int PendingMinSelect { get; private set; }
         public int PendingMaxSelect { get; private set; }
         public string PendingPrompt { get; private set; } = "";
+        public AbstractModel? PendingSourceModel { get; private set; }
         private TaskCompletionSource<IEnumerable<CardModel>>? _pendingTcs;
 
         public bool HasPending => _pendingTcs != null && !_pendingTcs.Task.IsCompleted;
@@ -8273,6 +8334,9 @@ public class RunSimulator
             PendingOptions = optList;
             PendingMinSelect = minSelect;
             PendingMaxSelect = maxSelect;
+            var context = YieldPatches.ConsumeCardSelectionContext();
+            PendingPrompt = context?.Prompt ?? "";
+            PendingSourceModel = context?.Source;
             _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();
 
             Console.Error.WriteLine($"[SIM] Card selection pending: {optList.Count} options, select {minSelect}-{maxSelect}");
@@ -8285,6 +8349,8 @@ public class RunSimulator
         {
             var pendingTcs = _pendingTcs;
             PendingOptions = null;
+            PendingPrompt = "";
+            PendingSourceModel = null;
             _pendingTcs = null;
             pendingTcs?.TrySetResult(selected);
         }
@@ -8303,6 +8369,8 @@ public class RunSimulator
         {
             var pendingTcs = _pendingTcs;
             PendingOptions = null;
+            PendingPrompt = "";
+            PendingSourceModel = null;
             _pendingTcs = null;
             pendingTcs?.TrySetResult(Array.Empty<CardModel>());
         }
@@ -8356,6 +8424,7 @@ public class RunSimulator
             PendingMinSelect = 0;
             PendingMaxSelect = 0;
             PendingPrompt = "";
+            PendingSourceModel = null;
             _pendingTcs = null;
 
             _rewardChoice = -1;
@@ -8370,6 +8439,60 @@ public class RunSimulator
         // Only suppress Task.Yield() when this flag is set (during end_turn processing)
         public static volatile bool SuppressYield;
         public static CrystalSphereMinigame? ActiveCrystalSphereMinigame;
+        private static readonly object CardSelectionContextLock = new();
+        private static PendingCardSelectionContext? _pendingCardSelectionContext;
+
+        public sealed class PendingCardSelectionContext
+        {
+            public string? Prompt { get; init; }
+            public AbstractModel? Source { get; init; }
+        }
+
+        public static void CardSelectionPrefsPrefix(CardSelectorPrefs prefs)
+        {
+            SetCardSelectionContext(prefs, null);
+        }
+
+        public static void CardSelectionPrefsSourcePrefix(CardSelectorPrefs prefs, AbstractModel source)
+        {
+            SetCardSelectionContext(prefs, source);
+        }
+
+        public static void CardSelectionPrefsFinalizer()
+        {
+            ClearCardSelectionContext();
+        }
+
+        private static void SetCardSelectionContext(CardSelectorPrefs prefs, AbstractModel? source)
+        {
+            var prompt = EngineLocStringText(prefs.Prompt);
+            lock (CardSelectionContextLock)
+            {
+                _pendingCardSelectionContext = new PendingCardSelectionContext
+                {
+                    Prompt = prompt,
+                    Source = source,
+                };
+            }
+        }
+
+        public static PendingCardSelectionContext? ConsumeCardSelectionContext()
+        {
+            lock (CardSelectionContextLock)
+            {
+                var context = _pendingCardSelectionContext;
+                _pendingCardSelectionContext = null;
+                return context;
+            }
+        }
+
+        private static void ClearCardSelectionContext()
+        {
+            lock (CardSelectionContextLock)
+            {
+                _pendingCardSelectionContext = null;
+            }
+        }
 
         public static bool IsCompletedPrefix(ref bool __result)
         {

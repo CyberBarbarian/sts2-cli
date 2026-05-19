@@ -850,6 +850,34 @@ class TestCombatEdgeCases:
         assert state["decision"] == "card_select"
         assert state["prompt"] == "Choose a card to put on top of your Draw Pile."
 
+    def test_start_of_turn_power_card_select_exports_prompt_and_source(self, game):
+        state = game.start(character="Defect", seed="entropy-selection-source")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "ENTROPY",
+                "ENTROPY",
+                "ENTROPY",
+                "ENTROPY",
+                "ENTROPY",
+                "STRIKE_DEFECT",
+                "DEFEND_DEFECT",
+                "ZAP",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        entropy = next(card for card in state["hand"] if card["id"] == "CARD.ENTROPY")
+        state = game.act("play_card", card_index=entropy["index"])
+        state = game.act("end_turn")
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == "Choose a card to Transform."
+        assert state["source_power"]["name"] == "Entropy"
+        assert "Transform" in state["source_power"]["description"]
+
     def test_headbutt_discard_selection_keeps_preview_stats_without_target_rows(self, game):
         state = game.start(seed="headbutt-selection-preview-stats")
         game.skip_neow(state)
