@@ -817,6 +817,14 @@ def target_row_display_name(row):
     return target_name
 
 
+def target_row_has_damage_context(row):
+    if row.get("vulnerable") or row.get("block"):
+        return True
+    damage = target_row_damage(row)
+    unblocked = row.get("unblocked_damage")
+    return unblocked is not None and damage is not None and unblocked != damage
+
+
 def visible_target_rows(stats, enemies=None):
     rows = list(target_damage_rows(stats))
     if not enemies:
@@ -906,7 +914,7 @@ def card_target_damage_display_lines(card, enemies=None):
         if base_damage is None:
             base_damage = stats.get("calculateddamage")
         target_damage = target_row_damage(row)
-        if target_damage == base_damage:
+        if target_damage == base_damage and not target_row_has_damage_context(row):
             return []
 
     lines = [c(t("Target damage:", "\u76ee\u6807\u4f24\u5bb3:"), "dim")]
