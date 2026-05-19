@@ -102,6 +102,16 @@ class TestFakeMerchantEvent:
         assert bought["is_stocked"] is False
         assert bought["can_buy"] is False
 
+    def test_fake_merchant_proceed_returns_to_map(self, game):
+        state = game.start(seed="fake-merchant-proceed")
+        game.skip_neow(state)
+        game.set_player(gold=150)
+        state = game.enter_room("event", event="FAKE_MERCHANT")
+
+        state = game.act("proceed")
+
+        assert state["decision"] == "map_select"
+
 
 class TestSlipperyBridge:
     def test_slippery_bridge_random_card_var_is_card_name(self, game):

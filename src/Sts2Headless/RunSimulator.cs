@@ -2158,6 +2158,8 @@ public class RunSimulator
         }
         if (room is MerchantRoom)
             return DoLeaveRoom(player);
+        if (room is EventRoom && TryGetFakeMerchant(out _))
+            return DoLeaveRoom(player);
         if (room is TreasureRoom)
         {
             CompleteEmptyTreasureRelicSessionIfNeeded();
