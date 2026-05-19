@@ -620,6 +620,52 @@ class TestRelicTrader:
         assert "BLOCK." not in block_tip["description"]
         assert all("[" not in (tip.get("description") or "") for tip in hover_tips)
 
+    def test_trade_hover_tip_preserves_owned_counter_relic_state(self, game):
+        state = game.start(seed="relic-trader-counter-tip")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            relics=[
+                "PEN_NIB",
+                "ICE_CREAM",
+                "STRIKE_DUMMY",
+                "BURNING_BLOOD",
+                "BRONZE_SCALES",
+                "CENTENNIAL_PUZZLE",
+            ],
+            deck=["ANGER"] * 10,
+        )
+        state = game.enter_room("combat", encounter="TEST_SUBJECT_BOSS")
+
+        for _ in range(6):
+            attacks = [
+                card for card in state["hand"]
+                if card["id"] == "CARD.ANGER" and card["can_play"]
+            ]
+            if not attacks:
+                state = game.act("end_turn")
+                attacks = [
+                    card for card in state["hand"]
+                    if card["id"] == "CARD.ANGER" and card["can_play"]
+                ]
+            state = game.act(
+                "play_card",
+                card_index=attacks[0]["index"],
+                target_index=state["enemies"][0]["index"],
+            )
+
+        state = game.enter_room("event", event="RELIC_TRADER")
+        option = next(
+            option for option in state["options"]
+            if option.get("relic_trade", {}).get("owned", {}).get("id") == "PEN_NIB"
+        )
+        owned = option["relic_trade"]["owned"]
+        tip = next(tip for tip in option["hover_tips"] if tip.get("id") == "PEN_NIB")
+
+        assert owned["display_amount"] == 6
+        assert tip["display_amount"] == owned["display_amount"]
+
 
 class TestJungleMazeAdventure:
     def test_join_forces_awards_gold_and_finishes_event(self, game):

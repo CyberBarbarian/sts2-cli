@@ -3548,7 +3548,7 @@ public class RunSimulator
                 var relicTrade = BuildRelicTradePreview(eventEntry, localEvent, opt, i);
                 if (relicTrade != null)
                     exportedOption["relic_trade"] = relicTrade;
-                var hoverTips = EventOptionHoverTips(opt);
+                var hoverTips = EventOptionHoverTips(opt, relicTrade);
                 if (hoverTips != null)
                     exportedOption["hover_tips"] = hoverTips;
 
@@ -4004,7 +4004,9 @@ public class RunSimulator
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private List<Dictionary<string, object?>>? EventOptionHoverTips(EventOption option)
+    private List<Dictionary<string, object?>>? EventOptionHoverTips(
+        EventOption option,
+        Dictionary<string, object?>? relicTrade = null)
     {
         var rawTips = TryGetMember(option, "HoverTips") as System.Collections.IEnumerable;
         if (rawTips == null)
@@ -4015,9 +4017,42 @@ public class RunSimulator
         {
             var tip = EventOptionHoverTipInfo(rawTip);
             if (tip != null)
+            {
+                ApplyRelicTradeHoverTipState(tip, relicTrade);
                 tips.Add(tip);
+            }
         }
         return tips.Count > 0 ? tips : null;
+    }
+
+    private static void ApplyRelicTradeHoverTipState(
+        Dictionary<string, object?> tip,
+        Dictionary<string, object?>? relicTrade)
+    {
+        if (relicTrade == null)
+            return;
+        if (!tip.TryGetValue("kind", out var kind)
+            || !string.Equals(kind as string, "relic", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!tip.TryGetValue("id", out var idValue) || idValue is not string id)
+            return;
+
+        foreach (var key in new[] { "owned", "new" })
+        {
+            if (!relicTrade.TryGetValue(key, out var tradeValue)
+                || tradeValue is not Dictionary<string, object?> tradeRelic)
+                continue;
+            if (!tradeRelic.TryGetValue("id", out var tradeId)
+                || !string.Equals(tradeId as string, id, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var field in new[] { "name", "description", "vars", "show_counter", "display_amount" })
+            {
+                if (tradeRelic.TryGetValue(field, out var value))
+                    tip[field] = value;
+            }
+            return;
+        }
     }
 
     private Dictionary<string, object?>? EventOptionHoverTipInfo(object? rawTip)
