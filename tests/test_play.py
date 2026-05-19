@@ -196,12 +196,16 @@ def test_card_select_prompt_only_advertises_skip_when_optional():
 
     required = plain(play.card_select_input_prompt(1, 1))
     optional = plain(play.card_select_input_prompt(0, 1))
+    skippable_required_count = plain(play.card_select_input_prompt(1, 1, can_skip=True))
 
     assert "skip" not in required.lower()
     assert "(s)" not in required
     assert "pick 1 card" in required
     assert "skip" in optional.lower()
     assert "(s)" in optional
+    assert "pick 1 card" in skippable_required_count
+    assert "skip" in skippable_required_count.lower()
+    assert "(s)" in skippable_required_count
 
 
 def test_quit_save_defaults_to_save_dir(monkeypatch):

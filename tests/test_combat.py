@@ -101,7 +101,7 @@ class HeadlessSession:
             elif decision == "bundle_select":
                 state = self.send({"cmd": "action", "action": "select_bundle", "args": {"bundle_index": 0}})
             elif decision == "card_select":
-                action = "skip_select" if state.get("min_select", 0) == 0 else "select_cards"
+                action = "skip_select" if state.get("can_skip", state.get("min_select", 0) == 0) else "select_cards"
                 args = {} if action == "skip_select" else {"indices": "0"}
                 state = self.send({"cmd": "action", "action": action, "args": args})
             else:

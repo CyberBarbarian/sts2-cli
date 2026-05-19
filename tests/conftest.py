@@ -195,7 +195,7 @@ class Game:
             elif dec == "bundle_select":
                 state = self.act("select_bundle", bundle_index=0)
             elif dec == "card_select":
-                if state.get("min_select", 0) == 0:
+                if state.get("can_skip", state.get("min_select", 0) == 0):
                     state = self.act("skip_select")
                 else:
                     state = self.act("select_cards", indices="0")

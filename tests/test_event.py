@@ -41,6 +41,12 @@ class TestNeowEvent:
         state = game.act("choose_option", option_index=pomander["index"])
 
         assert state["decision"] == "card_select"
+        assert state["min_select"] == 1
+        assert state["max_select"] == 1
+        assert state["can_skip"] is False
+        skipped = game.act("skip_select")
+        assert skipped["type"] == "error"
+        assert "cannot be skipped" in skipped["message"]
         bash = next(c for c in state["cards"] if c["name"] == "Bash")
 
         state = game.act("select_cards", indices=str(bash["index"]))
@@ -73,6 +79,17 @@ class TestNeowEvent:
         source = state["source_event_option"]
         assert source["title"] == lead_paperweight["title"]
         assert source["description"] == lead_paperweight["description"]
+
+    def test_neow_hefty_tablet_card_select_exports_engine_skip_affordance(self, game):
+        state = game.start(character="Defect", seed="manual-functional-defect-20260519-2")
+        hefty_tablet = next(o for o in state["options"] if o["title"] == "Hefty Tablet")
+
+        state = game.act("choose_option", option_index=hefty_tablet["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 0
+        assert state["max_select"] == 1
+        assert state["can_skip"] is True
 
 
 class TestEventDescriptions:

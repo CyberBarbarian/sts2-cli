@@ -20,7 +20,7 @@ def _resolve_to_map(game, state):
         elif decision == "bundle_select":
             state = game.act("select_bundle", bundle_index=0)
         elif decision == "card_select":
-            if state.get("min_select", 0) == 0:
+            if state.get("can_skip", state.get("min_select", 0) == 0):
                 state = game.act("skip_select")
             else:
                 state = game.act("select_cards", indices="0")

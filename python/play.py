@@ -1911,23 +1911,32 @@ def card_select_should_show_upgrade_summary(state):
     return not bool((state or {}).get("combat"))
 
 
-def card_pick_quantity_hint(mn, mx):
-    """Short hint for prompts / help (N–M cards)."""
+def card_pick_quantity_hint(mn, mx, can_skip=None):
+    """Short hint for prompts / help."""
+    if can_skip is None:
+        can_skip = mn == 0
     if mn == mx:
         if mn == 1:
-            return t("pick 1 card", "选 1 张")
-        return t(f"pick exactly {mn} cards", f"须选 {mn} 张")
-    if mn == 0:
-        return t(f"pick 0–{mx} cards (or s to skip)", f"可选 0–{mx} 张（或 s 跳过）")
-    return t(f"pick {mn}–{mx} cards", f"须选 {mn}–{mx} 张")
+            hint = t("pick 1 card", "pick 1 card")
+        else:
+            hint = t(f"pick exactly {mn} cards", f"pick exactly {mn} cards")
+    elif mn == 0:
+        hint = t(f"pick 0-{mx} cards", f"pick 0-{mx} cards")
+    else:
+        hint = t(f"pick {mn}-{mx} cards", f"pick {mn}-{mx} cards")
+    if can_skip:
+        return t(f"{hint} (or s to skip)", f"{hint} (or s to skip)")
+    return hint
 
 
-def card_select_input_prompt(min_select, max_select):
-    qhint = card_pick_quantity_hint(min_select, max_select)
-    if min_select == 0:
+def card_select_input_prompt(min_select, max_select, can_skip=None):
+    if can_skip is None:
+        can_skip = min_select == 0
+    qhint = card_pick_quantity_hint(min_select, max_select, can_skip=False)
+    if can_skip:
         return t(
-            f"Card indices, comma - {qhint} or (s)kip",
-            f"Card indices, comma - {qhint} or (s)kip",
+            f"Card indices, comma - {qhint} or skip (s)",
+            f"Card indices, comma - {qhint} or skip (s)",
         )
     return t(
         f"Card indices, comma - {qhint}",
@@ -2572,7 +2581,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
 
         if valid_options:
             if multi_select and multi_max > 1:
-                if multi_min == 0 and raw == "s" and "s" in valid_options:
+                if raw == "s" and "s" in valid_options:
                     return raw
                 parts = [p.strip() for p in raw.split(",") if p.strip()]
                 if not parts:
@@ -3136,7 +3145,8 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
                 min_sel = state.get("min_select", 1)
                 max_sel = state.get("max_select", 1)
-                print(f"  {c(t('Choose cards','选择卡牌'), 'bold')} — {card_pick_quantity_hint(min_sel, max_sel)}")
+                can_skip = bool(state.get("can_skip", min_sel == 0))
+                print(f"  {c(t('Choose cards','选择卡牌'), 'bold')} — {card_pick_quantity_hint(min_sel, max_sel, can_skip=can_skip)}")
                 print_card_select_context(state)
                 print_card_select_combat_context(state)
                 show_player(state.get("player", {}))
@@ -3157,14 +3167,14 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     )
 
                 valid = {str(cd["index"]): cd for cd in cards}
-                if min_sel == 0:
+                if can_skip:
                     valid["s"] = None
 
                 old_state = state
 
                 if auto:
                     if not cards:
-                        choice = "s" if min_sel == 0 else "0"
+                        choice = "s" if can_skip else "0"
                     else:
                         n_pick = min(max_sel, len(cards))
                         n_pick = max(n_pick, min(min_sel, len(cards)))
@@ -3172,7 +3182,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 else:
                     multi = max_sel > 1 or min_sel > 1
                     choice = get_input(
-                        card_select_input_prompt(min_sel, max_sel),
+                        card_select_input_prompt(min_sel, max_sel, can_skip=can_skip),
                         set(valid.keys()),
                         state=state,
                         multi_select=multi,

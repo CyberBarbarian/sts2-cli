@@ -1069,7 +1069,10 @@ public class RunSimulator
             && action != "skip_select"
             && action != "end_turn")
         {
-            return "Cannot execute action while card selection is pending; use select_cards, skip_select, or end_turn";
+            var actions = _cardSelector.PendingCanSkip
+                ? "select_cards, skip_select, or end_turn"
+                : "select_cards or end_turn";
+            return $"Cannot execute action while card selection is pending; use {actions}";
         }
 
         if (_cardSelector.HasPendingReward
@@ -1821,6 +1824,11 @@ public class RunSimulator
             return Error("select_cards requires 'indices' (comma-separated card indices)");
 
         var indices = ParseSelectionIndices(args["indices"]);
+        var selectedCount = _cardSelector.CountValidSelectedIndices(indices);
+        if (selectedCount < _cardSelector.PendingMinSelect)
+            return Error($"Current card selection requires at least {_cardSelector.PendingMinSelect} card(s)");
+        if (selectedCount > _cardSelector.PendingMaxSelect)
+            return Error($"Current card selection allows at most {_cardSelector.PendingMaxSelect} card(s)");
 
         Log($"Card selection: indices [{string.Join(",", indices)}]");
         _cardSelector.ResolvePendingByIndices(indices);
@@ -1886,6 +1894,8 @@ public class RunSimulator
     {
         if (_cardSelector.HasPending)
         {
+            if (!_cardSelector.PendingCanSkip)
+                return Error("Current card selection cannot be skipped");
             Log("Skipping card selection");
             _cardSelector.CancelPending();
             _pendingCardSelectionSourceCard = null;
@@ -2491,6 +2501,7 @@ public class RunSimulator
                 ["cards"] = opts,
                 ["min_select"] = _cardSelector.PendingMinSelect,
                 ["max_select"] = _cardSelector.PendingMaxSelect,
+                ["can_skip"] = _cardSelector.PendingCanSkip,
                 ["player"] = PlayerSummary(player),
             };
             if (prompt != null)
@@ -8534,6 +8545,7 @@ public class RunSimulator
         public List<CardModel>? PendingOptions { get; private set; }
         public int PendingMinSelect { get; private set; }
         public int PendingMaxSelect { get; private set; }
+        public bool PendingCanSkip { get; private set; }
         public string PendingPrompt { get; private set; } = "";
         public AbstractModel? PendingSourceModel { get; private set; }
         private TaskCompletionSource<IEnumerable<CardModel>>? _pendingTcs;
@@ -8549,9 +8561,10 @@ public class RunSimulator
 
             // Store pending selection and wait
             PendingOptions = optList;
-            PendingMinSelect = minSelect;
-            PendingMaxSelect = maxSelect;
             var context = YieldPatches.ConsumeCardSelectionContext();
+            PendingMinSelect = context?.MinSelect ?? minSelect;
+            PendingMaxSelect = context?.MaxSelect ?? maxSelect;
+            PendingCanSkip = PendingMinSelect == 0 || context?.Cancelable == true;
             PendingPrompt = context?.Prompt ?? "";
             PendingSourceModel = context?.Source;
             _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();
@@ -8566,10 +8579,20 @@ public class RunSimulator
         {
             var pendingTcs = _pendingTcs;
             PendingOptions = null;
+            PendingMinSelect = 0;
+            PendingMaxSelect = 0;
+            PendingCanSkip = false;
             PendingPrompt = "";
             PendingSourceModel = null;
             _pendingTcs = null;
             pendingTcs?.TrySetResult(selected);
+        }
+
+        public int CountValidSelectedIndices(int[] indices)
+        {
+            if (PendingOptions == null)
+                return 0;
+            return indices.Count(i => i >= 0 && i < PendingOptions.Count);
         }
 
         public void ResolvePendingByIndices(int[] indices)
@@ -8586,6 +8609,9 @@ public class RunSimulator
         {
             var pendingTcs = _pendingTcs;
             PendingOptions = null;
+            PendingMinSelect = 0;
+            PendingMaxSelect = 0;
+            PendingCanSkip = false;
             PendingPrompt = "";
             PendingSourceModel = null;
             _pendingTcs = null;
@@ -8640,6 +8666,7 @@ public class RunSimulator
             PendingOptions = null;
             PendingMinSelect = 0;
             PendingMaxSelect = 0;
+            PendingCanSkip = false;
             PendingPrompt = "";
             PendingSourceModel = null;
             _pendingTcs = null;
@@ -8663,6 +8690,9 @@ public class RunSimulator
         {
             public string? Prompt { get; init; }
             public AbstractModel? Source { get; init; }
+            public int MinSelect { get; init; }
+            public int MaxSelect { get; init; }
+            public bool Cancelable { get; init; }
         }
 
         public static void CardSelectionPrefsPrefix(CardSelectorPrefs prefs)
@@ -8689,6 +8719,9 @@ public class RunSimulator
                 {
                     Prompt = prompt,
                     Source = source,
+                    MinSelect = prefs.MinSelect,
+                    MaxSelect = prefs.MaxSelect,
+                    Cancelable = prefs.Cancelable,
                 };
             }
         }

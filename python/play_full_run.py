@@ -301,8 +301,10 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
                 if cards:
                     state = send({"cmd": "action", "action": "select_cards",
                                  "args": {"indices": "0"}})
-                else:
+                elif state.get("can_skip", state.get("min_select", 0) == 0):
                     state = send({"cmd": "action", "action": "skip_select"})
+                else:
+                    raise RuntimeError("card_select requires a card but no options were exported")
 
             elif decision == "shop":
                 state = send({"cmd": "action", "action": "leave_room"})
