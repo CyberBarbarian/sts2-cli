@@ -628,6 +628,19 @@ ROOM_TYPE_ZH = {
 
 # ─── Game display ───
 
+def card_type_rarity_suffix(card):
+    """Return compact type/rarity text without repeating equivalent labels."""
+    ctype = card.get("type") or ""
+    rarity = card.get("rarity") or ""
+    parts = []
+    if ctype:
+        ctype_label = t(ctype, CARD_TYPE_ZH.get(ctype, ctype))
+        parts.append(c(ctype_label, "dim"))
+    if rarity and str(rarity).casefold() != str(ctype).casefold():
+        rarity_label = t(rarity, RARITY_ZH.get(rarity, rarity))
+        parts.append(c(rarity_label, "dim"))
+    return f" {' '.join(parts)}" if parts else ""
+
 SPECIAL_VARS = {
     "energyprefix": "能量" if True else "E",  # placeholder, overridden by LANG
     "energy": "能量",
@@ -1322,11 +1335,9 @@ def show_player(p, show_deck=False):
             print(f"  {c(t('Deck:','牌组:'), 'bold')}")
             for cd in cards:
                 up = c("+", "green") if cd.get("upgraded") else ""
-                ctype_zh = CARD_TYPE_ZH.get(cd.get("type",""), cd.get("type",""))
                 suf_part = format_card_suffix_keywords_for_card(cd)
-                rare = cd.get("rarity")
-                rare_part = f" {c(t(rare, RARITY_ZH.get(rare, rare)), 'dim')}" if rare else ""
-                print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(t(cd.get('type',''), ctype_zh), 'dim')}{rare_part}{suf_part}")
+                type_rarity = card_type_rarity_suffix(cd)
+                print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}){type_rarity}{suf_part}")
                 print_card_detail_extension(cd, indent="      ")
 
 
@@ -2952,12 +2963,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 include_upgrade_description = card_select_should_show_upgrade_description(state)
                 for cd in cards:
                     up = c("+", "green") if cd.get("upgraded") else ""
-                    ctype_zh = CARD_TYPE_ZH.get(cd.get("type", ""), cd.get("type", ""))
-                    ctype_label = t(cd.get("type", ""), ctype_zh)
-                    rare = cd.get("rarity")
-                    rare_part = f" {c(t(rare, RARITY_ZH.get(rare, rare)), 'dim')}" if rare else ""
                     sp = format_card_suffix_keywords_for_card(cd)
-                    print(f"  [{cd['index']}] {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(ctype_label, 'dim')}{rare_part}{sp}")
+                    type_rarity = card_type_rarity_suffix(cd)
+                    print(f"  [{cd['index']}] {n(cd['name'])}{up} ({cd.get('cost','?')}){type_rarity}{sp}")
                     print_card_detail_extension(
                         cd,
                         indent="      ",

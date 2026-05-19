@@ -26,6 +26,29 @@ def plain(text: str) -> str:
     return ANSI_RE.sub("", text)
 
 
+def test_card_type_rarity_suffix_does_not_repeat_matching_labels():
+    play.LANG = "en"
+
+    rendered = plain(play.card_type_rarity_suffix({
+        "type": "Status",
+        "rarity": "Status",
+    }))
+
+    assert rendered == " Status"
+    assert "Status Status" not in rendered
+
+
+def test_card_type_rarity_suffix_keeps_distinct_labels():
+    play.LANG = "en"
+
+    rendered = plain(play.card_type_rarity_suffix({
+        "type": "Attack",
+        "rarity": "Basic",
+    }))
+
+    assert rendered == " Attack Basic"
+
+
 def test_quit_save_defaults_to_save_dir(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
 
