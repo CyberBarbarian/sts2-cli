@@ -5193,6 +5193,17 @@ public class RunSimulator
         return CleanResolvedEngineText(interpolated);
     }
 
+    private static string? LocalizedTableText(
+        string table,
+        string key,
+        Dictionary<string, object?>? vars = null)
+    {
+        var text = _loc.Bilingual(table, key);
+        if (text == key)
+            return null;
+        return CleanResolvedEngineText(InterpolateDynamicVars(text, vars));
+    }
+
     private static string? PreferDisplayVarInterpolation(
         LocString? locString,
         Dictionary<string, object?>? vars,
@@ -6577,12 +6588,14 @@ public class RunSimulator
         {
             var entry = card.Enchantment.Id.Entry;
             cardInfo["enchantment"] =
-                EngineLocStringText(card.Enchantment.Title) ?? _loc.Bilingual("enchantments", entry + ".title");
+                EngineLocStringText(card.Enchantment.Title)
+                ?? LocalizedTableText("enchantments", entry + ".title")
+                ?? entry;
             cardInfo["enchantment_id"] = entry;
             var vars = ExportEnhancementVars(card.Enchantment);
             cardInfo["enchantment_description"] =
-                EngineLocStringText(card.Enchantment.DynamicDescription)
-                ?? InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
+                EngineLocStringText(card.Enchantment.DynamicDescription, vars)
+                ?? LocalizedTableText("enchantments", entry + ".description", vars);
             cardInfo["enchantment_vars"] = vars;
             try
             {
@@ -6596,12 +6609,14 @@ public class RunSimulator
         {
             var entry = card.Affliction.Id.Entry;
             cardInfo["affliction"] =
-                EngineLocStringText(card.Affliction.Title) ?? _loc.Bilingual("afflictions", entry + ".title");
+                EngineLocStringText(card.Affliction.Title)
+                ?? LocalizedTableText("afflictions", entry + ".title")
+                ?? entry;
             cardInfo["affliction_id"] = entry;
             var vars = ExportEnhancementVars(card.Affliction);
             cardInfo["affliction_description"] =
-                EngineLocStringText(card.Affliction.DynamicDescription)
-                ?? InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
+                EngineLocStringText(card.Affliction.DynamicDescription, vars)
+                ?? LocalizedTableText("afflictions", entry + ".description", vars);
             cardInfo["affliction_vars"] = vars;
             try
             {
@@ -7008,8 +7023,8 @@ public class RunSimulator
             {
                 var entry = sourceCard.Enchantment.Id.Entry;
                 var vars = ExportEnhancementVars(sourceCard.Enchantment);
-                var text = EngineLocStringText(sourceCard.Enchantment.DynamicDescription)
-                           ?? InterpolateDynamicVars(_loc.Bilingual("enchantments", entry + ".description"), vars);
+                var text = EngineLocStringText(sourceCard.Enchantment.DynamicDescription, vars)
+                           ?? LocalizedTableText("enchantments", entry + ".description", vars);
                 if (!string.IsNullOrWhiteSpace(text))
                     yield return text;
             }
@@ -7021,8 +7036,8 @@ public class RunSimulator
             {
                 var entry = sourceCard.Affliction.Id.Entry;
                 var vars = ExportEnhancementVars(sourceCard.Affliction);
-                var text = EngineLocStringText(sourceCard.Affliction.DynamicDescription)
-                           ?? InterpolateDynamicVars(_loc.Bilingual("afflictions", entry + ".description"), vars);
+                var text = EngineLocStringText(sourceCard.Affliction.DynamicDescription, vars)
+                           ?? LocalizedTableText("afflictions", entry + ".description", vars);
                 if (!string.IsNullOrWhiteSpace(text))
                     yield return text;
             }

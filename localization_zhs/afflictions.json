@@ -2,6 +2,8 @@
   "BOUND.description": "每回合只能打出[blue]1[/blue]张[gold]魂缚[/gold]卡牌。卡牌会在回合结束时失去[gold]魂缚[/gold]。",
   "BOUND.extraCardText": "魂缚",
   "BOUND.title": "魂缚",
+  "DEVOURED.description": "为这张牌添加[gold]消耗[/gold]。",
+  "DEVOURED.title": "吞噬",
   "ENTANGLED.description": "{Amount:energyIcons()}费用增加1。",
   "ENTANGLED.extraCardText": "缠身",
   "ENTANGLED.title": "缠身",

@@ -1019,6 +1019,25 @@ class TestCombatEdgeCases:
         assert state["decision"] == "combat_play"
         assert state["player"]["hp"] > 0
 
+    def test_doormaker_devoured_affliction_exports_localized_text(self, game):
+        state = game.start(character="Defect", seed="doormaker-devoured-affliction")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999)
+        state = game.enter_room("combat", encounter="DOORMAKER_BOSS")
+
+        state = game.act("end_turn")
+
+        afflicted_cards = [
+            card for card in state["hand"]
+            if card.get("affliction_id") == "DEVOURED"
+        ]
+        assert afflicted_cards
+        for card in afflicted_cards:
+            assert card["affliction"] == "Devoured"
+            assert card["affliction_description"] == "Add Exhaust to this card."
+            assert card["affliction"] != "DEVOURED.title"
+            assert card["affliction_description"] != "DEVOURED.description"
+
     def test_act_three_queen_win_enters_architect_victory_room_first(self, tmp_path):
         game = Game()
         try:
