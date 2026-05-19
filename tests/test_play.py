@@ -102,6 +102,48 @@ def test_zh_enemy_intent_labels_are_localized_text():
     assert "\u8d1f\u9762\u6548\u679c" in rendered
 
 
+def test_card_description_keeps_exported_keyword_lines_without_prefix_duplication():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_description_display_lines({
+        "name": "Ascender's Bane",
+        "description": "Unplayable.\nEthereal.\nEternal.",
+        "keywords": ["Eternal", "Unplayable", "Ethereal"],
+    })]
+
+    assert lines == ["Unplayable.", "Ethereal.", "Eternal."]
+
+
+def test_combat_view_does_not_duplicate_keyword_lines_in_title(capsys):
+    play.LANG = "en"
+
+    play.show_combat({
+        "round": 1,
+        "energy": 0,
+        "max_energy": 3,
+        "draw_pile_count": 0,
+        "discard_pile_count": 0,
+        "player": {"name": "The Silent", "hp": 56, "max_hp": 70, "gold": 99, "deck_size": 13},
+        "enemies": [],
+        "hand": [{
+            "index": 0,
+            "name": "Ascender's Bane",
+            "cost": 0,
+            "type": "Curse",
+            "can_play": False,
+            "target_type": "None",
+            "description": "Unplayable.\nEthereal.\nEternal.",
+            "keywords": ["Eternal", "Unplayable", "Ethereal"],
+        }],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "[Unplayable Eternal]" not in text
+    assert "Unplayable.\n" in text
+    assert "Ethereal.\n" in text
+    assert "Eternal.\n" in text
+
+
 def test_event_option_detail_lines_include_hover_tip_effects():
     play.LANG = "en"
 

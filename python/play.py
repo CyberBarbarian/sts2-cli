@@ -712,10 +712,25 @@ def format_card_prefix_tag(prefix_list):
     return "[" + "/".join(_card_kw_label(k) for k in prefix_list) + "]"
 
 
+def _description_mentions_keyword(text, keyword):
+    label = _card_kw_label(keyword)
+    if not label:
+        return False
+    return label.lower() in (text or "").lower()
+
+
+def format_card_suffix_keywords_for_card(card):
+    _prefix, suffix = split_card_keywords(card.get("keywords"))
+    cd_d = card_desc(card)
+    suffix = [kw for kw in suffix if not _description_mentions_keyword(cd_d, kw)]
+    return format_card_suffix_keywords(suffix)
+
+
 def card_description_display_lines(card):
     """Lines under the title row; [前缀词条] merges into first line, then remaining loc lines."""
     cd_d = card_desc(card)
     prefix, _suf = split_card_keywords(card.get("keywords"))
+    prefix = [kw for kw in prefix if not _description_mentions_keyword(cd_d, kw)]
     tag = format_card_prefix_tag(prefix)
     if not cd_d:
         return [tag] if tag else []
@@ -725,11 +740,11 @@ def card_description_display_lines(card):
         return [tag] if tag else []
 
     if len(lines) == 1:
-        return [f"{tag}{lines[0]}" if tag else lines[0]]
+        return [f"{tag} {lines[0]}" if tag else lines[0]]
 
     out = []
     if tag:
-        out.append(f"{tag}{lines[0]}")
+        out.append(f"{tag} {lines[0]}")
         out.extend(lines[1:])
     else:
         out.extend(lines)
@@ -1282,8 +1297,7 @@ def show_player(p, show_deck=False):
             for cd in cards:
                 up = c("+", "green") if cd.get("upgraded") else ""
                 ctype_zh = CARD_TYPE_ZH.get(cd.get("type",""), cd.get("type",""))
-                _pre, suf = split_card_keywords(cd.get("keywords"))
-                suf_part = format_card_suffix_keywords(suf)
+                suf_part = format_card_suffix_keywords_for_card(cd)
                 rare = cd.get("rarity")
                 rare_part = f" {c(t(rare, RARITY_ZH.get(rare, rare)), 'dim')}" if rare else ""
                 print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(t(cd.get('type',''), ctype_zh), 'dim')}{rare_part}{suf_part}")
@@ -1572,8 +1586,7 @@ def show_combat(state):
             card.get("stats") or {}, card=card, osty=state.get("osty"), enemies=state.get("enemies")
         )
 
-        _pre, suf = split_card_keywords(card.get("keywords"))
-        suf_part = format_card_suffix_keywords(suf)
+        suf_part = format_card_suffix_keywords_for_card(card)
         ench = card.get("enchantment")
         ench_str = f" {c(n(ench), 'magenta')}" if ench else ""
 
@@ -1724,8 +1737,7 @@ def show_card_reward(state):
         rarity_zh = RARITY_ZH.get(rarity, rarity)
         rarity_label = t(rarity, rarity_zh)
         rarity_color = {"Rare": "yellow", "Uncommon": "cyan"}.get(rarity, "dim")
-        _pre, suf = split_card_keywords(card.get("keywords"))
-        suf_part = format_card_suffix_keywords(suf)
+        suf_part = format_card_suffix_keywords_for_card(card)
         print(f"  [{card['index']}] {c(n(card['name']), type_color)} ({cost}) {c(rarity_label, rarity_color)}{suf_part}")
         print_card_detail_extension(card, indent="      ")
 
@@ -1780,8 +1792,7 @@ def show_shop(state):
         sale = c(t(" SALE"," 打折"), "yellow") if card.get("on_sale") else ""
         ctype_zh = CARD_TYPE_ZH.get(card.get("type",""), card.get("type",""))
         cc = card.get("cost", card.get("card_cost", "?"))
-        _pre, suf = split_card_keywords(card.get("keywords"))
-        suf_part = format_card_suffix_keywords(suf)
+        suf_part = format_card_suffix_keywords_for_card(card)
         print(f"  [{card['index']}] {n(card['name'])} ({cc}) {c(t(card.get('type','?'), ctype_zh), 'dim')}{suf_part} — {affordable}{t('g','金')}{sale}")
         print_card_detail_extension(card, indent="      ")
 
@@ -2871,8 +2882,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     bidx = b["index"]
                     print(f"  {c(f'Pack [{bidx}]:', 'yellow')}")
                     for cd in b.get("cards", []):
-                        _p, sf = split_card_keywords(cd.get("keywords"))
-                        sp = format_card_suffix_keywords(sf)
+                        sp = format_card_suffix_keywords_for_card(cd)
                         print(f"    {n(cd['name'])} ({cd.get('cost','?')}) {c(cd.get('type',''), 'dim')}{sp}")
                         print_card_detail_extension(cd, indent="      ")
                 valid = {str(b["index"]): b for b in bundles}
@@ -2903,8 +2913,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     ctype_label = t(cd.get("type", ""), ctype_zh)
                     rare = cd.get("rarity")
                     rare_part = f" {c(t(rare, RARITY_ZH.get(rare, rare)), 'dim')}" if rare else ""
-                    _p, sf = split_card_keywords(cd.get("keywords"))
-                    sp = format_card_suffix_keywords(sf)
+                    sp = format_card_suffix_keywords_for_card(cd)
                     print(f"  [{cd['index']}] {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(ctype_label, 'dim')}{rare_part}{sp}")
                     print_card_detail_extension(
                         cd,
