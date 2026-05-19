@@ -67,6 +67,41 @@ class TestEventDescriptions:
         assert "Obtain the {relicText}" not in text
 
 
+class TestFakeMerchantEvent:
+    def test_fake_merchant_exposes_shop_inventory(self, game):
+        state = game.start(seed="fake-merchant-shop")
+        game.skip_neow(state)
+        game.set_player(gold=150)
+
+        state = game.enter_room("event", event="FAKE_MERCHANT")
+
+        assert state["decision"] == "fake_merchant_shop"
+        assert state["event_name"] == "The Merchant???"
+        assert state.get("description") is None
+        assert len(state["relics"]) == 6
+        for relic in state["relics"]:
+            assert relic["name"]
+            assert relic["description"]
+            assert relic["cost"] > 0
+            assert relic["is_stocked"] is True
+        assert state["can_leave"] is True
+
+    def test_fake_merchant_buy_relic_uses_inventory_entry(self, game):
+        state = game.start(seed="fake-merchant-buy")
+        game.skip_neow(state)
+        game.set_player(gold=150)
+        state = game.enter_room("event", event="FAKE_MERCHANT")
+        relic = next(item for item in state["relics"] if item["can_buy"])
+
+        state = game.act("buy_relic", relic_index=relic["index"])
+
+        assert state["decision"] == "fake_merchant_shop"
+        assert state["player"]["gold"] == 150 - relic["cost"]
+        assert any(owned["id"] == relic["id"] for owned in state["player"]["relics"])
+        bought = next(item for item in state["relics"] if item["index"] == relic["index"])
+        assert bought["is_stocked"] is False
+
+
 class TestSlipperyBridge:
     def test_slippery_bridge_random_card_var_is_card_name(self, game):
         state = game.start(seed="bridge-vars")

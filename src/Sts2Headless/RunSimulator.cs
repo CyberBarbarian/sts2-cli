@@ -16,6 +16,8 @@ using MegaCrit.Sts2.Core.Map;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Characters;
+using MegaCrit.Sts2.Core.Models.Events;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
@@ -1596,13 +1598,25 @@ public class RunSimulator
 
     private Dictionary<string, object?> DoBuyRelic(Player player, Dictionary<string, object?>? args)
     {
-        if (_runState?.CurrentRoom is not MerchantRoom merchantRoom)
-            return Error("Not in a shop");
         if (args == null || !args.ContainsKey("relic_index"))
             return Error("buy_relic requires 'relic_index'");
 
         var idx = Convert.ToInt32(args["relic_index"]);
-        var entries = merchantRoom.Inventory.RelicEntries;
+        if (_runState?.CurrentRoom is MerchantRoom merchantRoom)
+            return DoBuyRelicEntry(player, merchantRoom.Inventory, merchantRoom.Inventory.RelicEntries, idx);
+
+        if (TryGetFakeMerchant(out var fakeMerchant))
+            return DoBuyRelicEntry(player, fakeMerchant.Inventory, fakeMerchant.Inventory.RelicEntries, idx);
+
+        return Error("Not in a shop");
+    }
+
+    private Dictionary<string, object?> DoBuyRelicEntry(
+        Player player,
+        MerchantInventory inventory,
+        IReadOnlyList<MerchantRelicEntry> entries,
+        int idx)
+    {
         if (idx < 0 || idx >= entries.Count) return Error($"Invalid relic index {idx}");
 
         var entry = entries[idx];
@@ -1611,7 +1625,7 @@ public class RunSimulator
 
         try
         {
-            var task = Task.Run(() => entry.OnTryPurchaseWrapper(merchantRoom.Inventory));
+            var task = Task.Run(() => entry.OnTryPurchaseWrapper(inventory));
             _pendingShopPurchaseTask = task;
             for (int i = 0; i < 100; i++)
             {
@@ -3339,6 +3353,9 @@ public class RunSimulator
         var localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
         _syncCtx.Pump();
 
+        if (localEvent is FakeMerchant fakeMerchant && fakeMerchant.Inventory != null && !fakeMerchant.StartedFight)
+            return FakeMerchantShopState(fakeMerchant);
+
         // If an event option leaves us on an interactive page, keep exposing it.
         // Same-count options are not proof of a stuck event.
         if (_eventOptionChosen && localEvent != null && !localEvent.IsFinished)
@@ -3564,6 +3581,70 @@ public class RunSimulator
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    private bool TryGetFakeMerchant(out FakeMerchant fakeMerchant)
+    {
+        fakeMerchant = null!;
+        if (_runState?.CurrentRoom is not EventRoom)
+            return false;
+
+        if (RunManager.Instance.EventSynchronizer?.GetLocalEvent() is not FakeMerchant localEvent)
+            return false;
+
+        if (localEvent.Inventory == null || localEvent.StartedFight)
+            return false;
+
+        fakeMerchant = localEvent;
+        return true;
+    }
+
+    private Dictionary<string, object?> FakeMerchantShopState(FakeMerchant fakeMerchant)
+    {
+        var player = _runState!.Players[0];
+        var eventEntry = fakeMerchant.Id?.Entry ?? "FAKE_MERCHANT";
+        var eventVars = ExportEventVars(eventEntry, fakeMerchant);
+        var description = EventDescription(fakeMerchant, eventVars);
+        if (description == "Placeholder")
+            description = null;
+        var foulPotion = player.Potions?
+            .Select((p, i) => new { potion = p, index = i })
+            .FirstOrDefault(item => item.potion is FoulPotion);
+
+        var relics = fakeMerchant.Inventory.RelicEntries.Select((e, i) =>
+        {
+            var exported = e.Model != null
+                ? RelicInfo(e.Model, index: i)
+                : new Dictionary<string, object?> { ["index"] = i, ["name"] = "?", ["description"] = null };
+            exported["cost"] = e.Cost;
+            exported["gold_cost"] = e.Cost;
+            exported["is_stocked"] = e.IsStocked;
+            exported["can_buy"] = e.IsStocked && player.Gold >= e.Cost;
+            return ShopItemState(e, exported, e.Model != null);
+        }).ToList();
+
+        var state = new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "fake_merchant_shop",
+            ["context"] = RunContext(),
+            ["event_name"] = EventDisplayName(eventEntry),
+            ["description"] = description,
+            ["vars"] = eventVars?.Count > 0 ? eventVars : null,
+            ["relics"] = relics,
+            ["can_leave"] = true,
+            ["can_throw_foul_potion"] = foulPotion != null,
+            ["player"] = PlayerSummary(player),
+        };
+
+        if (foulPotion != null)
+            state["foul_potion_action"] = new Dictionary<string, object?>
+            {
+                ["action"] = "use_potion",
+                ["potion_index"] = foulPotion.index,
+            };
+
+        return state;
     }
 
     private Dictionary<string, object?>? EventOptionSelectionContext(EventRoom eventRoom, int optionIndex)
