@@ -2310,6 +2310,7 @@ public class RunSimulator
                     };
                     AddCardVars(cardInfo, card);
                     AddEnergyCostDetails(cardInfo, card);
+                    AddStarCostDetails(cardInfo, card);
                     AddCardEnhancements(cardInfo, card);
                     return cardInfo;
                 }).ToList(),
@@ -2349,6 +2350,7 @@ public class RunSimulator
                 };
                 AddCardVars(cardInfo, cr.Card);
                 AddEnergyCostDetails(cardInfo, cr.Card);
+                AddStarCostDetails(cardInfo, cr.Card);
                 AddCardEnhancements(cardInfo, cr.Card);
                 return cardInfo;
             }).ToList();
@@ -2401,6 +2403,7 @@ public class RunSimulator
                 };
                 AddCardVars(cardInfo, card, includePreviewStats: includeCombatPreview);
                 AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeTargetRows);
+                AddStarCostDetails(cardInfo, card);
                 AddCardEnhancements(cardInfo, card);
                 return cardInfo;
             }).ToList();
@@ -2725,9 +2728,9 @@ public class RunSimulator
             };
             AddCardVars(cardInfo, c, includePreviewStats: true);
             AddEnergyCostDetails(cardInfo, c, includeCurrentXValue: true);
+            AddStarCostDetails(cardInfo, c);
             if (starCost > 0)
             {
-                cardInfo["star_cost"] = starCost;
                 // BUG-007: Override can_play for star-cost cards when player lacks stars
                 if (pcs != null && pcs.Stars < starCost)
                     cardInfo["can_play"] = false;
@@ -2936,8 +2939,17 @@ public class RunSimulator
                 result["orb_slots"] = orbQueue.Capacity;
             }
 
-            // Regent: Stars
-            if (pcs != null && pcs.Stars >= 0 && player.Character?.Id.Entry == "REGENT")
+            // Stars can matter when off-color Regent cards enter another character's deck.
+            var shouldExportStars = player.Character?.Id.Entry == "REGENT";
+            if (pcs != null && pcs.Stars > 0)
+                shouldExportStars = true;
+            try
+            {
+                if (pcs?.Hand?.Cards?.Any(c => c != null && TryGetCurrentStarCost(c) > 0) == true)
+                    shouldExportStars = true;
+            }
+            catch { }
+            if (pcs != null && pcs.Stars >= 0 && shouldExportStars)
             {
                 result["stars"] = pcs.Stars;
             }
@@ -3071,6 +3083,7 @@ public class RunSimulator
             summary["stats"] = stats;
         AddCardVars(summary, card, includePreviewStats: applyCombatModifiers);
         AddEnergyCostDetails(summary, card, includeCurrentXValue: applyCombatModifiers);
+        AddStarCostDetails(summary, card);
         return summary;
     }
 
@@ -3361,6 +3374,7 @@ public class RunSimulator
             info["index"] = index.Value;
         AddCardVars(info, card);
         AddEnergyCostDetails(info, card);
+        AddStarCostDetails(info, card);
         AddCardEnhancements(info, card);
         return info;
     }
@@ -3390,6 +3404,7 @@ public class RunSimulator
             };
             AddCardVars(cardInfo, c);
             AddEnergyCostDetails(cardInfo, c);
+            AddStarCostDetails(cardInfo, c);
             AddCardEnhancements(cardInfo, c);
             return cardInfo;
         }).ToList();
@@ -5747,6 +5762,7 @@ public class RunSimulator
                 {
                     AddCardVars(exported, card);
                     AddEnergyCostDetails(exported, card);
+                    AddStarCostDetails(exported, card);
                     AddCardEnhancements(exported, card);
                 }
                 return ShopItemState(e, exported, card != null);
@@ -6234,6 +6250,17 @@ public class RunSimulator
 
             cardInfo["energy_cost"] = GetEnergyAmountToSpend(card);
             cardInfo["x_value"] = GetEnergyXValue(card);
+        }
+        catch { }
+    }
+
+    private static void AddStarCostDetails(Dictionary<string, object?> cardInfo, CardModel card)
+    {
+        try
+        {
+            var starCost = TryGetCurrentStarCost(card);
+            if (starCost > 0)
+                cardInfo["star_cost"] = starCost;
         }
         catch { }
     }
@@ -7181,6 +7208,7 @@ public class RunSimulator
             };
             AddCardVars(info, clone, includePreviewStats: applyCombatModifiers);
             AddEnergyCostDetails(info, clone);
+            AddStarCostDetails(info, clone);
             AddCardEnhancements(info, card);
             return info;
         }
@@ -7624,6 +7652,7 @@ public class RunSimulator
                 };
                 AddCardVars(cardInfo, c);
                 AddEnergyCostDetails(cardInfo, c);
+                AddStarCostDetails(cardInfo, c);
                 AddCardEnhancements(cardInfo, c);
                 return cardInfo;
             }).ToList(),
@@ -7659,6 +7688,7 @@ public class RunSimulator
             };
             AddCardVars(cardInfo, card, includePreviewStats: true);
             AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: true);
+            AddStarCostDetails(cardInfo, card);
             AddCardEnhancements(cardInfo, card);
             return cardInfo;
         }).ToList();

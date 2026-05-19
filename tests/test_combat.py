@@ -930,6 +930,34 @@ class TestCombatEdgeCases:
         assert state["source_card"]["name"] == "Hologram"
         assert "Discard Pile" in state["source_card"]["description"]
 
+    def test_off_color_star_cost_card_exports_star_resource(self, game):
+        state = game.start(character="Defect", seed="off-color-star-resource")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "DECISIONS_DECISIONS",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "STRIKE_DEFECT",
+                "STRIKE_DEFECT",
+            ],
+        )
+        game.set_draw_order([
+            "DECISIONS_DECISIONS",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+            "STRIKE_DEFECT",
+            "STRIKE_DEFECT",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        decisions = next(card for card in state["hand"] if card["id"] == "CARD.DECISIONS_DECISIONS")
+        assert decisions["star_cost"] == 6
+        assert state["stars"] == 0
+        assert decisions["can_play"] is False
+
     def test_start_of_turn_power_card_select_exports_prompt_and_source(self, game):
         state = game.start(character="Defect", seed="entropy-selection-source")
         game.skip_neow(state)
