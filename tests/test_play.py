@@ -660,6 +660,53 @@ def test_player_state_change_lines_include_reward_relic_upgrade_details():
     assert any("Relic: Whetstone" in line for line in lines)
 
 
+def test_player_state_change_lines_include_added_potion_details():
+    play.LANG = "en"
+
+    old_state = {
+        "player": {
+            "hp": 29,
+            "max_hp": 70,
+            "gold": 46,
+            "deck_size": 18,
+            "relics": [],
+            "deck": [],
+            "potions": [
+                {"id": "FRUIT_JUICE", "name": "Fruit Juice", "description": "Gain 5 Max HP."},
+            ],
+        }
+    }
+    new_state = {
+        "player": {
+            "hp": 29,
+            "max_hp": 70,
+            "gold": 14,
+            "deck_size": 18,
+            "relics": [],
+            "deck": [],
+            "potions": [
+                {"id": "FRUIT_JUICE", "name": "Fruit Juice", "description": "Gain 5 Max HP."},
+                {
+                    "id": "POWER_POTION",
+                    "name": "Power Potion",
+                    "description": "Choose 1 of 3 random Power cards to add into your Hand.",
+                },
+                {"id": "REGEN_POTION", "name": "Regen Potion", "description": "Gain 5 Regen."},
+            ],
+        }
+    }
+
+    lines = [plain(line) for line in play.player_state_change_lines(old_state, new_state)]
+
+    assert any("Potion details:" in line for line in lines)
+    assert any("+Power Potion" in line for line in lines)
+    assert any("Choose 1 of 3 random Power cards" in line for line in lines)
+    assert any("+Regen Potion" in line for line in lines)
+    assert any("Gain 5 Regen." in line for line in lines)
+    assert any("Potions: +Power Potion +Regen Potion" in line for line in lines)
+    assert any("Gold: -32" in line for line in lines)
+
+
 def test_prompt_start_options_lets_player_choose_character_and_ascension():
     play.LANG = "en"
     answers = iter(["2", "3", "7"])
