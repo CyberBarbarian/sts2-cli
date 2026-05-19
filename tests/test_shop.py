@@ -61,6 +61,18 @@ class TestShopStructure:
             assert isinstance(card["price"], int)
             assert card["price"] > 0
             assert card["price"] != card["cost"]
+            assert isinstance(card["can_buy"], bool)
+
+    def test_shop_relics_and_potions_have_gold_price_and_affordance(self, game):
+        state = game.start(seed="ss-shop-affordance")
+        game.skip_neow(state)
+        state = game.enter_room("shop")
+
+        for item in state["relics"] + state["potions"]:
+            assert isinstance(item["price"], int)
+            assert item["price"] > 0
+            assert item["gold_cost"] == item["price"]
+            assert isinstance(item["can_buy"], bool)
 
     def test_shop_cards_have_upgrade_preview(self, game):
         state = game.start(seed="ss3")

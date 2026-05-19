@@ -5556,6 +5556,8 @@ public class RunSimulator
         else
         {
             restored["cost"] = current.GetValueOrDefault("cost");
+            restored["price"] = current.GetValueOrDefault("price");
+            restored["gold_cost"] = current.GetValueOrDefault("gold_cost");
         }
         restored["is_stocked"] = current.GetValueOrDefault("is_stocked");
         if (current.ContainsKey("can_buy"))
@@ -5606,6 +5608,7 @@ public class RunSimulator
                     ["gold_cost"] = e.Cost,
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
+                    ["can_buy"] = e.IsStocked && player.Gold >= e.Cost,
                 };
                 if (card != null)
                 {
@@ -5622,7 +5625,10 @@ public class RunSimulator
                 ? RelicInfo(e.Model, index: i)
                 : new Dictionary<string, object?> { ["index"] = i, ["name"] = "?", ["description"] = null };
             exported["cost"] = e.Cost;
+            exported["price"] = e.Cost;
+            exported["gold_cost"] = e.Cost;
             exported["is_stocked"] = e.IsStocked;
+            exported["can_buy"] = e.IsStocked && player.Gold >= e.Cost;
             return ShopItemState(e, exported, e.Model != null);
         }).ToList();
 
@@ -5632,7 +5638,10 @@ public class RunSimulator
                 ? PotionInfo(e.Model, index: i)
                 : new Dictionary<string, object?> { ["index"] = i, ["name"] = "?", ["description"] = null };
             exported["cost"] = e.Cost;
+            exported["price"] = e.Cost;
+            exported["gold_cost"] = e.Cost;
             exported["is_stocked"] = e.IsStocked;
+            exported["can_buy"] = e.IsStocked && player.Gold >= e.Cost;
             return ShopItemState(e, exported, e.Model != null);
         }).ToList();
 
