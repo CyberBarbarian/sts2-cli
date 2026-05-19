@@ -779,6 +779,32 @@ class TestCombatEdgeCases:
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         assert state["decision"] == "combat_play"
 
+    def test_combat_hand_exports_stable_card_instance_ids(self, game):
+        state = game.start(seed="hand-instance-id-export")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        initial_ids = [card["instance_id"] for card in state["hand"]]
+        assert len(initial_ids) == len(set(initial_ids))
+
+        strike = next(card for card in state["hand"] if card["target_type"] == "AnyEnemy")
+        state = game.act("play_card", card_index=strike["index"], target_index=0)
+
+        remaining_ids = [card["instance_id"] for card in state["hand"]]
+        assert strike["instance_id"] not in remaining_ids
+        assert set(remaining_ids).issubset(set(initial_ids))
+
     def test_checkpoint_reports_pre_room_scope_for_pending_card_reward(self, game, tmp_path):
         state = game.start(seed="checkpoint-pending-card-reward")
         game.skip_neow(state)

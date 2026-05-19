@@ -325,6 +325,8 @@ public class RunSimulator
     private Dictionary<string, object?>? _pendingCardSelectionSourceRoomOption;
     private Dictionary<string, object?>? _pendingCardSelectionSourcePotion;
     private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object, int> _cardRuntimeIds = new(ReferenceEqualityComparer.Instance);
+    private int _nextCardRuntimeId = 1;
     private string? _preCurrentRoomSaveJson;
     private object? _starSpendTrackerCombatState;
     private int? _starSpendObservedRound;
@@ -2657,6 +2659,16 @@ public class RunSimulator
         };
     }
 
+    private int CardRuntimeId(CardModel card)
+    {
+        if (!_cardRuntimeIds.TryGetValue(card, out var id))
+        {
+            id = _nextCardRuntimeId++;
+            _cardRuntimeIds[card] = id;
+        }
+        return id;
+    }
+
     private Dictionary<string, object?> CombatPlayState(Player player)
     {
         var pcs = player.PlayerCombatState;
@@ -2675,6 +2687,7 @@ public class RunSimulator
             var cardInfo = new Dictionary<string, object?>
             {
                 ["index"] = i,
+                ["instance_id"] = CardRuntimeId(c),
                 ["id"] = c.Id.ToString(),
                 ["name"] = _loc.Card(c.Id.Entry),
                 ["cost"] = GetEnergyCostDisplay(c),
@@ -9344,6 +9357,8 @@ public class RunSimulator
         _pendingCardSelectionSourceRoomOption = null;
         _pendingCardSelectionSourcePotion = null;
         _shopItemSnapshots.Clear();
+        _cardRuntimeIds.Clear();
+        _nextCardRuntimeId = 1;
         _preCurrentRoomSaveJson = null;
         _pendingBundles = null;
         _pendingBundleTcs = null;

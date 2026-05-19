@@ -1231,9 +1231,43 @@ def _sequence_step_indices(step):
     return card_index, target_index
 
 
+def _card_sequence_plan(initial_state, indices):
+    initial_hand = initial_state.get("hand", [])
+    initial_by_index = {card.get("index"): card for card in initial_hand}
+    exports_instances = any("instance_id" in card for card in initial_hand)
+    plan = []
+    for step in indices:
+        card_index, target_index = _sequence_step_indices(step)
+        initial_card = initial_by_index.get(card_index)
+        if initial_card is None and exports_instances:
+            return None, f"Queued play stopped: card index {card_index} is not in the current hand."
+        plan.append(
+            {
+                "initial_card_index": card_index,
+                "target_index": target_index,
+                "instance_id": initial_card.get("instance_id") if initial_card is not None else None,
+            }
+        )
+    return plan, None
+
+
+def _find_sequence_card(current_hand, step):
+    instance_id = step.get("instance_id")
+    if instance_id is not None:
+        return next((card for card in current_hand if card.get("instance_id") == instance_id), None)
+
+    card_index = step.get("initial_card_index")
+    return next((card for card in current_hand if card.get("index") == card_index), None)
+
+
 def execute_card_sequence(state, indices, send_fn, output_fn=print):
     current = state
-    for step in indices:
+    plan, plan_error = _card_sequence_plan(state, indices)
+    if plan_error:
+        output_fn(plan_error)
+        return current
+
+    for step in plan:
         if current.get("decision") != "combat_play":
             output_fn("Queued play stopped: manual decision is required.")
             return current
@@ -1241,8 +1275,9 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
         hand = current.get("hand", [])
         energy = current.get("energy", 0)
         enemies = current.get("enemies", [])
-        card_index, target_index = _sequence_step_indices(step)
-        card = next((item for item in hand if item.get("index") == card_index), None)
+        card_index = step.get("initial_card_index")
+        target_index = step.get("target_index")
+        card = _find_sequence_card(hand, step)
         if card is None:
             output_fn(f"Queued play stopped: card index {card_index} is no longer in hand.")
             return current
@@ -1999,7 +2034,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
   {c('Actions:', 'bold')}
     Map:     path number (0, 1, 2)
     Combat:  card index / {c('e', 'yellow')} end turn / {c('p0', 'yellow')} use potion
-    Queue:   {c('seq 0 2 1', 'yellow')} plays several cards; use {c('seq 0@1 2@0', 'yellow')} to target multi-enemy fights
+    Queue:   {c('seq 0 2 1', 'yellow')} plays cards by the hand snapshot shown now; use {c('seq 0@1 2@0', 'yellow')} to target multi-enemy fights
     Reward:  card index / {c('s', 'yellow')} skip
     Multi:   when prompted for N–M cards (or 0–M optional), comma-separate indices, e.g. {c('0,1,2', 'yellow')}
     Rest:    option index
@@ -2447,7 +2482,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 else:
                     choice = get_input(t("Play card [index/seq], (e)nd turn, (p0) potion", "\u51fa\u724c [\u7f16\u53f7/seq], (e)\u7ed3\u675f\u56de\u5408, (p0)\u836f\u6c34"), set(valid.keys()) | {"help"}, state=state)
                     if choice == "help":
-                        print(f"  {t('Enter card index, seq 0 2 1, seq 0@1 2@0, e=end turn, p0=use potion 0', '\u8f93\u5165\u5361\u724c\u7f16\u53f7\u3001seq 0 2 1\u3001seq 0@1 2@0\u3001e=\u7ed3\u675f\u56de\u5408\u3001p0=\u4f7f\u7528\u836f\u6c340')}")
+                        print(f"  {t('Enter card index, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn, p0=use potion 0', '\u8f93\u5165\u5361\u724c\u7f16\u53f7\u3001seq 0 2 1\u3001seq 0@1 2@0\u3001e=\u7ed3\u675f\u56de\u5408\u3001p0=\u4f7f\u7528\u836f\u6c340')}")
                         continue
 
                 sequence = parse_card_sequence(choice)

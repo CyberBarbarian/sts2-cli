@@ -542,6 +542,53 @@ def test_execute_card_sequence_uses_explicit_targets_with_multiple_enemies():
     assert result["decision"] == "combat_play"
 
 
+def test_execute_card_sequence_binds_indices_to_initial_hand_instances():
+    state = {
+        "decision": "combat_play",
+        "energy": 5,
+        "hand": [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "b", "name": "B", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 2, "instance_id": "c", "name": "C", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 3, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 4, "instance_id": "e", "name": "E", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+        ],
+        "enemies": [],
+    }
+    hands_after = [
+        [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "c", "name": "C", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 2, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 3, "instance_id": "e", "name": "E", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+        ],
+        [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 2, "instance_id": "e", "name": "E", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+        ],
+        [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+        ],
+    ]
+    sent = []
+
+    def send(cmd):
+        sent.append(cmd)
+        return {
+            "decision": "combat_play",
+            "energy": 5,
+            "hand": hands_after[len(sent) - 1],
+            "enemies": [],
+        }
+
+    result = play.execute_card_sequence(state, [1, 2, 4], send)
+
+    assert [cmd["args"]["card_index"] for cmd in sent] == [1, 1, 2]
+    assert result["decision"] == "combat_play"
+
+
 def test_execute_card_sequence_stops_when_state_requires_manual_choice():
     state = {
         "decision": "combat_play",
