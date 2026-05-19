@@ -1642,8 +1642,12 @@ def _format_upgrade_preview(stats, aug, current_cost=None):
     # Compare all stats, show changed values with readable names
     all_keys = set(list(stats.keys()) + list(aug_stats.keys()))
     for k in sorted(all_keys):
+        if k.endswith("_by_target"):
+            continue
         old = stats.get(k, 0)
         new_val = aug_stats.get(k, old)
+        if isinstance(old, (dict, list, tuple)) or isinstance(new_val, (dict, list, tuple)):
+            continue
         if new_val != old:
             if k == "damage":
                 parts.append(c(f"{t('dmg','伤害')} {old}→{new_val}", "red"))

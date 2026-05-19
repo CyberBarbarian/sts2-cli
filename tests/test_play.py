@@ -212,6 +212,37 @@ def test_card_detail_extension_can_print_full_upgrade_description(capsys):
     assert "Upgrade preview: Deal 9 damage." in text
 
 
+def test_card_detail_extension_omits_target_rows_from_upgrade_summary(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension({
+        "name": "Strike",
+        "cost": 1,
+        "description": "Deal 6 damage.",
+        "stats": {
+            "damage": 6,
+            "damage_by_target": [
+                {"target_index": 0, "target_name": "Mawler", "damage": 6, "unblocked_damage": 6}
+            ],
+        },
+        "after_upgrade": {
+            "cost": 1,
+            "description": "Deal 9 damage.",
+            "stats": {
+                "damage": 9,
+                "damage_by_target": [
+                    {"target_index": 0, "target_name": "Mawler", "damage": 9, "unblocked_damage": 9}
+                ],
+            },
+        },
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "dmg 6" in text
+    assert "target_index" not in text
+    assert "Mawler" not in text
+
+
 def test_card_select_context_lines_include_source_event_hover_tip():
     play.LANG = "en"
 
