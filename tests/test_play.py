@@ -296,6 +296,56 @@ def test_deck_change_detail_lines_include_added_card_descriptions():
     assert any("Apply 2 Vulnerable." in line for line in lines)
 
 
+def test_player_state_change_lines_include_reward_relic_upgrade_details():
+    play.LANG = "en"
+
+    old_state = {
+        "player": {
+            "hp": 70,
+            "max_hp": 70,
+            "gold": 99,
+            "deck_size": 1,
+            "relics": [],
+            "deck": [
+                {
+                    "id": "CARD.STRIKE",
+                    "name": "Strike",
+                    "cost": 1,
+                    "type": "Attack",
+                    "upgraded": False,
+                    "description": "Deal 6 damage.",
+                }
+            ],
+        }
+    }
+    new_state = {
+        "player": {
+            "hp": 70,
+            "max_hp": 70,
+            "gold": 99,
+            "deck_size": 1,
+            "relics": [{"name": "Whetstone"}],
+            "deck": [
+                {
+                    "id": "CARD.STRIKE",
+                    "name": "Strike",
+                    "cost": 1,
+                    "type": "Attack",
+                    "upgraded": True,
+                    "description": "Deal 9 damage.",
+                }
+            ],
+        }
+    }
+
+    lines = [plain(line) for line in play.player_state_change_lines(old_state, new_state)]
+
+    assert any("Card details:" in line for line in lines)
+    assert any("+Strike+" in line and "Attack" in line for line in lines)
+    assert any("Deal 9 damage." in line for line in lines)
+    assert any("Relic: Whetstone" in line for line in lines)
+
+
 def test_prompt_start_options_lets_player_choose_character_and_ascension():
     play.LANG = "en"
     answers = iter(["2", "3", "7"])

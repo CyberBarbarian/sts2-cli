@@ -1190,6 +1190,72 @@ def deck_change_detail_lines(old_cards, new_cards):
                 lines.append(f"  {desc_line}")
     return lines
 
+
+def player_state_change_lines(old_state, new_state):
+    old_player = (old_state or {}).get("player", {})
+    new_player = (new_state or {}).get("player", {})
+    if not new_player:
+        return []
+
+    old_relics = set(n(r.get("name", "?")) for r in old_player.get("relics", []))
+    new_relics = set(n(r.get("name", "?")) for r in new_player.get("relics", []))
+    old_cards = list(old_player.get("deck", []))
+    new_cards = list(new_player.get("deck", []))
+    old_deck_names = [n(cd.get("name", "?")) for cd in old_cards]
+    new_deck_names = [n(cd.get("name", "?")) for cd in new_cards]
+    old_deck_size = old_player.get("deck_size", 0)
+    new_deck_size = new_player.get("deck_size", 0)
+    old_hp = old_player.get("hp", 0)
+    old_max_hp = old_player.get("max_hp", 0)
+    new_hp = new_player.get("hp", 0)
+    new_max_hp = new_player.get("max_hp", 0)
+    old_gold = old_player.get("gold", 0)
+    new_gold = new_player.get("gold", 0)
+
+    changes = []
+    gained_relics = new_relics - old_relics
+    if gained_relics:
+        changes.append(f"{t('Relic', 'Relic')}: {', '.join(sorted(gained_relics))}")
+
+    from collections import Counter
+
+    old_counts = Counter(old_deck_names)
+    new_counts = Counter(new_deck_names)
+    added = new_counts - old_counts
+    removed = old_counts - new_counts
+    if added or removed:
+        parts = []
+        for card_name, cnt in removed.items():
+            parts.append(c(f"-{card_name}" + (f"x{cnt}" if cnt > 1 else ""), "red"))
+        for card_name, cnt in added.items():
+            parts.append(c(f"+{card_name}" + (f"x{cnt}" if cnt > 1 else ""), "green"))
+        changes.append(f"{t('Deck', 'Deck')}: {' '.join(parts)}")
+    elif new_deck_size != old_deck_size:
+        changes.append(f"{t('Deck', 'Deck')}: {old_deck_size} -> {new_deck_size}")
+    if new_hp != old_hp or new_max_hp != old_max_hp:
+        changes.append(f"{t('HP', 'HP')}: {old_hp}/{old_max_hp} -> {new_hp}/{new_max_hp}")
+    if new_gold != old_gold:
+        diff = new_gold - old_gold
+        changes.append(f"{t('Gold', 'Gold')}: {'+' if diff > 0 else ''}{diff}")
+
+    lines = []
+    card_detail_lines = deck_change_detail_lines(old_cards, new_cards)
+    if card_detail_lines:
+        lines.append(c(t("Card details:", "Card details:"), "yellow"))
+        lines.extend(f"  {line}" for line in card_detail_lines)
+    if changes:
+        lines.append(f"{c(t('Changes:', 'Changes:'), 'yellow')} {'; '.join(changes)}")
+    return lines
+
+
+def print_player_state_changes(old_state, new_state):
+    lines = player_state_change_lines(old_state, new_state)
+    if lines:
+        print()
+        for line in lines:
+            print(f"  {line}")
+
+
 def show_player(p, show_deck=False):
     hp, mhp = p.get("hp", 0), p.get("max_hp", 1)
     blk = p.get("block", 0)
@@ -2672,11 +2738,15 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     )
 
                 if choice.startswith("s"):
+                    old_state = state
                     state = send({"cmd": "action", "action": "skip_reward",
                                   "args": {"reward_index": int(choice[1:])}})
+                    print_player_state_changes(old_state, state)
                 else:
+                    old_state = state
                     state = send({"cmd": "action", "action": "claim_reward",
                                   "args": {"reward_index": int(choice)}})
+                    print_player_state_changes(old_state, state)
 
             elif dec == "card_reward":
                 show_card_reward(state)
