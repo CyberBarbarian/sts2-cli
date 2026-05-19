@@ -1712,19 +1712,40 @@ def show_combat(state):
         for line in card_target_damage_display_lines(card, enemies=state.get("enemies")):
             print(f"      {line}")
 
+def map_display_choices(choices, map_data):
+    visible_coords = set()
+    for row in (map_data or {}).get("rows", []):
+        for nd in row:
+            visible_coords.add((nd.get("col"), nd.get("row")))
+
+    boss = (map_data or {}).get("boss") or {}
+    if "col" in boss and "row" in boss:
+        visible_coords.add((boss.get("col"), boss.get("row")))
+
+    if not visible_coords:
+        return choices
+
+    filtered = [
+        ch for ch in choices
+        if (ch.get("col"), ch.get("row")) in visible_coords
+    ]
+    return filtered or choices
+
+
 def show_map(state, send_fn=None):
     """Show map at map_select. Fetches full map if send_fn available."""
     choices = state.get("choices", [])
-    choice_set = {(ch["col"], ch["row"]) for ch in choices}
 
     # Try to fetch full map for richer display
     if send_fn:
         map_data = send_fn({"cmd": "get_map"})
         if map_data and map_data.get("type") == "map":
+            choices = map_display_choices(choices, map_data)
+            choice_set = {(ch["col"], ch["row"]) for ch in choices}
             # Build index map: (col,row) → choice index
             choice_indices = {(ch["col"], ch["row"]): i for i, ch in enumerate(choices)}
             _render_map(map_data, choice_set, choice_indices)
-            return
+            return choices
 
     # Fallback: simple list
     ctx = state.get("context", {})
@@ -1743,6 +1764,7 @@ def show_map(state, send_fn=None):
         icon = type_icons.get(ch["type"], "?")
         ntype = t(ch["type"], NODE_TYPE_ZH.get(ch["type"], ch["type"]))
         print(f"  [{i}] {icon} {ntype}")
+    return choices
 
 def _format_upgrade_preview(stats, aug, current_cost=None):
     """Format upgrade preview string."""
@@ -2819,8 +2841,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
 
             elif dec == "map_select":
                 _writeback_continue_save(send, native_save_path)
-                show_map(state, send_fn=send)
-                choices = state.get("choices", [])
+                choices = show_map(state, send_fn=send) or state.get("choices", [])
 
                 if auto:
                     if len(choices) == 1:

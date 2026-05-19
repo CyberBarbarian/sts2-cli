@@ -115,6 +115,49 @@ def test_render_map_lists_boss_choice(capsys):
     assert "0=Boss" in rendered
 
 
+def test_show_map_renumbers_visible_choices_when_start_choice_is_hidden(capsys):
+    play.LANG = "en"
+
+    state = {
+        "choices": [
+            {"col": 3, "row": 0, "type": "Start"},
+            {"col": 1, "row": 1, "type": "Monster"},
+            {"col": 5, "row": 1, "type": "Monster"},
+        ]
+    }
+    map_data = {
+        "type": "map",
+        "context": {"act_name": "Hive", "floor": 0},
+        "current_coord": {"col": 3, "row": 0},
+        "rows": [
+            [
+                {"col": 1, "row": 1, "type": "Monster", "children": [{"col": 1, "row": 2}], "visited": False},
+                {"col": 5, "row": 1, "type": "Monster", "children": [{"col": 5, "row": 2}], "visited": False},
+            ],
+            [
+                {"col": 1, "row": 2, "type": "Event", "children": [], "visited": False},
+                {"col": 5, "row": 2, "type": "Event", "children": [], "visited": False},
+            ]
+        ],
+        "boss": {"col": 3, "row": 15, "type": "Boss"},
+    }
+
+    def send_fn(cmd):
+        assert cmd == {"cmd": "get_map"}
+        return map_data
+
+    visible_choices = play.show_map(state, send_fn=send_fn)
+    rendered = plain(capsys.readouterr().out)
+
+    assert visible_choices == state["choices"][1:]
+    assert "[0]" in rendered
+    assert "[1]" in rendered
+    assert "[2]" not in rendered
+    assert "0=Monster" in rendered
+    assert "1=Monster" in rendered
+    assert "2=Monster" not in rendered
+
+
 def test_card_select_prompt_only_advertises_skip_when_optional():
     play.LANG = "en"
 
