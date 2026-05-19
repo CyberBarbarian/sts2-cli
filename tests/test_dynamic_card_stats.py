@@ -491,6 +491,50 @@ class TestDynamicCardStats:
         assert target["unblocked_total_damage"] == 0
         assert "unblocked_damage" not in target
 
+    def test_radiate_export_matches_throne_on_play_star_gain(self, game):
+        state = game.start(character="Regent", seed="radiate-repro-seed-1")
+        game.skip_neow(state)
+        game.set_player(
+            relics=["DIVINE_RIGHT"],
+            deck=[
+                "THE_SEALED_THRONE",
+                "RADIATE",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "DEFEND_REGENT",
+                "STRIKE_REGENT",
+                "STRIKE_REGENT",
+                "STRIKE_REGENT",
+                "STRIKE_REGENT",
+                "STRIKE_REGENT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        game.set_draw_order(["RADIATE"])
+
+        throne = next(c for c in state["hand"] if c["name"] == "The Sealed Throne")
+        state = game.act("play_card", card_index=throne["index"])
+
+        defend = next(c for c in state["hand"] if c["name"] == "Defend")
+        state = game.act("play_card", card_index=defend["index"])
+        state = game.act("end_turn")
+
+        strike = next(c for c in state["hand"] if c["name"] == "Strike")
+        state = game.act("play_card", card_index=strike["index"], target_index=0)
+
+        radiate = next(c for c in state["hand"] if c["name"] == "Radiate")
+        target = radiate["stats"]["damage_by_target"][0]
+        hp_before = state["enemies"][0]["hp"]
+
+        state = game.act("play_card", card_index=radiate["index"])
+
+        hp_after = state["enemies"][0]["hp"]
+        exported_unblocked = target.get(
+            "unblocked_total_damage",
+            target.get("unblocked_damage"),
+        )
+        assert hp_before - hp_after == exported_unblocked
+
     def test_star_spend_strength_relic_updates_target_damage_export(self, game):
         state = game.start(character="Regent", seed="mini-regent-comet-stats")
         game.skip_neow(state)

@@ -6105,6 +6105,7 @@ public class RunSimulator
             var repeat = GetStatInt(stats, "repeat", 1);
             var usesRepeatAsAttackHits = UsesRepeatAsAttackHits(card);
             var pendingStrengthDelta = GetPendingStarSpendStrengthDelta(card, player);
+            var pendingRepeatDelta = GetPendingOnPlayAttackRepeatDelta(card, player);
             for (int i = 0; i < enemies.Count; i++)
             {
                 var enemy = enemies[i];
@@ -6131,7 +6132,7 @@ public class RunSimulator
                     previewRepeat = GetStatInt(stats, "calculatedhits", previewRepeat);
                 if (HasCardSpecificOverride(stats, card, "repeat"))
                     previewRepeat = repeat;
-                var targetRepeat = GetTargetAttackRepeat(card, enemy, previewRepeat);
+                var targetRepeat = GetTargetAttackRepeat(card, enemy, previewRepeat + pendingRepeatDelta);
                 var totalDamage = targetDamage * targetRepeat;
                 var slippery = GetCreaturePowerAmount(enemy, "SLIPPERY", "Slippery");
                 if (!intangible
@@ -6162,6 +6163,10 @@ public class RunSimulator
                 if (pendingStrengthDelta > 0)
                 {
                     row["pre_attack_strength_delta"] = pendingStrengthDelta;
+                }
+                if (pendingRepeatDelta > 0)
+                {
+                    row["pending_on_play_repeat_delta"] = pendingRepeatDelta;
                 }
                 if (targetRepeat != 1)
                 {
@@ -6300,6 +6305,19 @@ public class RunSimulator
         catch { }
 
         return delta;
+    }
+
+    private int GetPendingOnPlayAttackRepeatDelta(CardModel card, Player? player)
+    {
+        if (card.Type != CardType.Attack || player?.Creature == null)
+            return 0;
+        if (!string.Equals(card.Id.Entry, "RADIATE", StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        return GetCreaturePowerAmount(
+            player.Creature,
+            "THE_SEALED_THRONE_POWER",
+            "The Sealed Throne");
     }
 
     private void AddCalculatedDamageByTarget(Dictionary<string, object?> stats, CardModel card, Player? player)
