@@ -84,6 +84,37 @@ def test_show_rest_site_uses_titles_and_descriptions(capsys):
     assert "LiftRestSiteOption" not in rendered
 
 
+def test_render_map_lists_boss_choice(capsys):
+    play.LANG = "en"
+
+    play._render_map(
+        {
+            "context": {"act_name": "Overgrowth", "floor": 16},
+            "current_coord": {"col": 2, "row": 15},
+            "rows": [
+                [
+                    {
+                        "col": 2,
+                        "row": 15,
+                        "type": "RestSite",
+                        "children": [{"col": 2, "row": 16}],
+                        "visited": True,
+                        "current": True,
+                    }
+                ]
+            ],
+            "boss": {"col": 2, "row": 16, "type": "Boss"},
+        },
+        choice_set={(2, 16)},
+        choice_indices={(2, 16): 0},
+    )
+
+    rendered = plain(capsys.readouterr().out)
+
+    assert "[0]" in rendered
+    assert "0=Boss" in rendered
+
+
 def test_quit_save_defaults_to_save_dir(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
 

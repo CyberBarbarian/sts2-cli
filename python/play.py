@@ -2211,11 +2211,23 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
     boss = map_data.get("boss", {})
     boss_col = boss.get("col", 0)
     boss_row = boss.get("row", -1)
+    boss_choice_idx = choice_indices.get((boss_col, boss_row))
     buf = list(" " * (W * total_cols))
     buf[boss_col * W + W // 2] = "B"
     line = "".join(buf)
-    line = line[:boss_col * W + W // 2] + c("B", "red") + line[boss_col * W + W // 2 + 1:]
+    boss_color = "yellow" if boss_choice_idx is not None else "red"
+    line = line[:boss_col * W + W // 2] + c("B", boss_color) + line[boss_col * W + W // 2 + 1:]
     print(f"  {c('B','dim')} | {line}")
+    if boss_choice_idx is not None:
+        ann = list(" " * (W * total_cols))
+        label = f"[{boss_choice_idx}]"
+        start = boss_col * W + W // 2 - 1
+        for j, ch in enumerate(label):
+            if 0 <= start + j < len(ann):
+                ann[start + j] = ch
+        ann_line = "".join(ann)
+        ann_line = ann_line[:start] + c(label, "yellow") + ann_line[start + len(label):]
+        print(f"    | {ann_line}")
 
     # Connection from top row to boss
     top_rn = row_numbers[-1] if row_numbers else -1
@@ -2320,6 +2332,8 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
         for i in sorted(inv.keys()):
             col, row = inv[i]
             nd = node_map.get((col, row))
+            if not nd and col == boss_col and row == boss_row:
+                nd = boss
             if nd:
                 ntype = t(nd.get("type", "?"), NODE_TYPE_ZH.get(nd.get("type", ""), nd.get("type", "?")))
                 parts.append(f"{c(str(i), 'yellow')}={ntype}")
