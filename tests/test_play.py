@@ -177,6 +177,40 @@ def test_player_positive_debuff_powers_are_labeled_as_debuffs(capsys):
     assert "Buff Double Damage 1" in text
 
 
+def test_enemy_power_descriptions_are_visible_in_combat(capsys):
+    play.LANG = "en"
+
+    play.show_combat({
+        "round": 1,
+        "energy": 3,
+        "max_energy": 3,
+        "draw_pile_count": 0,
+        "discard_pile_count": 0,
+        "player": {"name": "The Silent", "hp": 56, "max_hp": 70, "gold": 99, "deck_size": 13},
+        "enemies": [
+            {
+                "index": 0,
+                "name": "Phrog Parasite",
+                "hp": 61,
+                "max_hp": 61,
+                "intents": [{"type": "StatusCard"}],
+                "powers": [
+                    {
+                        "name": "Infested",
+                        "amount": 4,
+                        "description": "Upon dying, summons... something.",
+                    }
+                ],
+            }
+        ],
+        "hand": [],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Infested 4" in text
+    assert "Upon dying, summons... something." in text
+
+
 def test_event_option_detail_lines_include_hover_tip_effects():
     play.LANG = "en"
 
@@ -423,7 +457,13 @@ def test_print_card_select_combat_context_shows_live_fight(capsys):
                     "max_hp": 127,
                     "block": 0,
                     "intents": [{"type": "Attack", "damage": 23}],
-                    "powers": [{"name": "Strength", "amount": 10}],
+                    "powers": [
+                        {
+                            "name": "Strength",
+                            "amount": 10,
+                            "description": "Strength adds additional damage to Attacks.",
+                        }
+                    ],
                 }
             ],
             "orbs": [
@@ -440,6 +480,7 @@ def test_print_card_select_combat_context_shows_live_fight(capsys):
     assert "Round 4" in text
     assert "Bygone Effigy" in text
     assert "Attack 23" in text
+    assert "Strength adds additional damage to Attacks." in text
     assert "Lightning" in text
     assert "Hand" in text
 

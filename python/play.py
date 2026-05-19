@@ -955,6 +955,17 @@ def power_is_debuff(power):
     return isinstance(amount, (int, float)) and amount < 0
 
 
+def power_display_text(power, include_description=False):
+    amount = power.get("amount")
+    suffix = f" {amount}" if amount not in (None, 0) else ""
+    text = f"{n(power.get('name', '?'))}{suffix}"
+    if include_description:
+        description = resolved_description(power)
+        if description:
+            text = f"{text}: {description}"
+    return text
+
+
 def enemy_intent_display_parts(intents):
     """Return text-only monster intent labels; colors are terminal styling only."""
     parts = []
@@ -1148,9 +1159,7 @@ def card_select_combat_context_lines(state):
         intent = ", ".join(enemy_intent_display_parts(enemy.get("intents"))) or t("No intent")
         powers = []
         for power in enemy.get("powers") or []:
-            amount = power.get("amount")
-            suffix = f" {amount}" if amount not in (None, 0) else ""
-            powers.append(f"{n(power.get('name', '?'))}{suffix}")
+            powers.append(power_display_text(power, include_description=True))
         power_text = f"  {', '.join(powers)}" if powers else ""
         block_text = f"  {t('Block')} {block}" if block else ""
         lines.append(f"Enemy [{idx}] {n(enemy.get('name', '?'))}: HP {hp}/{max_hp}{block_text}  {intent}{power_text}")
@@ -1573,7 +1582,7 @@ def show_combat(state):
         powers = e.get("powers") or []
         power_str = ""
         if powers:
-            pw_parts = [f"{n(pw['name'])} {pw.get('amount','')}" for pw in powers]
+            pw_parts = [power_display_text(pw, include_description=True) for pw in powers]
             power_str = "  " + c(", ".join(pw_parts), "dim")
 
         print(f"  [{e['index']}] {n(e['name'])}  {bar(hp, mhp)} {hp}/{mhp}"
