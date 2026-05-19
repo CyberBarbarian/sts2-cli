@@ -1646,7 +1646,20 @@ def _format_upgrade_preview(stats, aug, current_cost=None):
     return parts
 
 
-def print_card_detail_extension(card, indent="      "):
+def upgrade_description_display_lines(card):
+    aug = (card or {}).get("after_upgrade")
+    if not isinstance(aug, dict):
+        return []
+    text = card_desc(aug)
+    if not text:
+        return []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return []
+    return [f"Upgrade preview: {lines[0]}"] + [f"  {line}" for line in lines[1:]]
+
+
+def print_card_detail_extension(card, indent="      ", include_upgrade_description=False):
     """Description (with [prefix/keywords]) + upgrade preview; indent matches title row spacing."""
     for line in card_description_display_lines(card):
         if line:
@@ -1654,10 +1667,33 @@ def print_card_detail_extension(card, indent="      "):
     for line in card_modifier_detail_lines(card):
         if line:
             print(f"{indent}{c(line, 'dim')}")
+    if include_upgrade_description:
+        for line in upgrade_description_display_lines(card):
+            if line:
+                print(f"{indent}{c(line, 'dim')}")
     stats = card.get("stats") or {}
     aug_parts = _format_upgrade_preview(stats, card.get("after_upgrade"), card.get("cost"))
     if aug_parts:
         print(f"{indent}{c(t('upgrade:','升级:'), 'green')} {', '.join(aug_parts)}")
+
+
+def card_select_should_show_upgrade_description(state):
+    if (state or {}).get("decision") != "card_select":
+        return False
+    source_room_option = (state or {}).get("source_room_option") or {}
+    if source_room_option.get("option_id") == "SMITH":
+        return True
+    text_parts = [
+        (state or {}).get("prompt"),
+        source_room_option.get("title"),
+        source_room_option.get("description"),
+    ]
+    source_event_option = (state or {}).get("source_event_option") or {}
+    text_parts.extend([
+        source_event_option.get("title"),
+        source_event_option.get("description"),
+    ])
+    return any(isinstance(text, str) and "upgrade" in text.lower() for text in text_parts)
 
 
 def card_pick_quantity_hint(mn, mx):
@@ -2860,6 +2896,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 show_player(state.get("player", {}))
                 print()
                 cards = state.get("cards", [])
+                include_upgrade_description = card_select_should_show_upgrade_description(state)
                 for cd in cards:
                     up = c("+", "green") if cd.get("upgraded") else ""
                     ctype_zh = CARD_TYPE_ZH.get(cd.get("type", ""), cd.get("type", ""))
@@ -2869,7 +2906,11 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     _p, sf = split_card_keywords(cd.get("keywords"))
                     sp = format_card_suffix_keywords(sf)
                     print(f"  [{cd['index']}] {n(cd['name'])}{up} ({cd.get('cost','?')}) {c(ctype_label, 'dim')}{rare_part}{sp}")
-                    print_card_detail_extension(cd, indent="      ")
+                    print_card_detail_extension(
+                        cd,
+                        indent="      ",
+                        include_upgrade_description=include_upgrade_description,
+                    )
 
                 valid = {str(cd["index"]): cd for cd in cards}
                 if min_sel == 0:

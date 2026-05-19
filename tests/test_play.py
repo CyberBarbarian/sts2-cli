@@ -148,6 +148,28 @@ def test_card_detail_extension_prints_enchantment_effect(capsys):
     assert "Sown: The first time you play this card each combat, gain [E]." in text
 
 
+def test_card_detail_extension_can_print_full_upgrade_description(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension(
+        {
+            "name": "Strike",
+            "cost": 1,
+            "description": "Deal 6 damage.",
+            "stats": {"damage": 6},
+            "after_upgrade": {
+                "cost": 1,
+                "description": "Deal 9 damage.",
+                "stats": {"damage": 9},
+            },
+        },
+        include_upgrade_description=True,
+    )
+
+    text = plain(capsys.readouterr().out)
+    assert "Upgrade preview: Deal 9 damage." in text
+
+
 def test_card_select_context_lines_include_source_event_hover_tip():
     play.LANG = "en"
 
@@ -194,6 +216,13 @@ def test_card_select_context_lines_include_source_room_option_description():
     })]
 
     assert lines == ["Smith: Upgrade a card in your Deck."]
+
+
+def test_card_select_upgrade_description_is_enabled_for_smith():
+    assert play.card_select_should_show_upgrade_description({
+        "decision": "card_select",
+        "source_room_option": {"option_id": "SMITH"},
+    })
 
 
 def test_card_select_context_lines_include_source_power_description():
