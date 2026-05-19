@@ -47,3 +47,16 @@ class TestMapNavigation:
         state = game.act("select_map_node", col=pick["col"], row=pick["row"])
         assert state.get("decision") is not None
         assert state["decision"] != "map_select"  # should be in a room now
+
+    def test_invalid_node_does_not_enter_engine_or_mutate_position(self, game):
+        state = game.start(seed="mn-invalid")
+        state = game.skip_neow(state)
+        before = game.get_map()["current_coord"]
+
+        result = game.act("select_map_node", col=99, row=99)
+        after = game.get_map()["current_coord"]
+
+        assert result["type"] == "error"
+        assert "Invalid map node" in result["message"]
+        assert "NullReferenceException" not in result["message"]
+        assert after == before

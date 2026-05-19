@@ -1109,6 +1109,16 @@ public class RunSimulator
         if (args == null || !args.ContainsKey("col") || !args.ContainsKey("row"))
             return Error("select_map_node requires 'col' and 'row'");
 
+        var col = Convert.ToInt32(args["col"]);
+        var row = Convert.ToInt32(args["row"]);
+        var coord = new MapCoord((byte)col, (byte)row);
+        var legalCoords = CurrentMapChoiceCoords();
+        if (!legalCoords.Any(c => c.col == coord.col && c.row == coord.row))
+        {
+            var legalText = string.Join(", ", legalCoords.Select(c => $"({(int)c.col},{(int)c.row})"));
+            return Error($"Invalid map node ({col},{row}); legal choices: {legalText}");
+        }
+
         // Reset tracking for new room
         _rewardsProcessed = false;
         _pendingCardReward = null;
@@ -1125,10 +1135,6 @@ public class RunSimulator
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
         YieldPatches.ActiveCrystalSphereMinigame = null;
 
-        var col = Convert.ToInt32(args["col"]);
-        var row = Convert.ToInt32(args["row"]);
-        var coord = new MapCoord((byte)col, (byte)row);
-
         Log($"Moving to map coord ({col},{row})");
 
         // BUG-013: Wait for any pending actions (relic sessions, etc.) to complete before entering new room
@@ -1143,6 +1149,28 @@ public class RunSimulator
         WaitForActionExecutor();
 
         return DetectDecisionPoint();
+    }
+
+    private List<MapCoord> CurrentMapChoiceCoords()
+    {
+        var map = _runState?.Map;
+        if (map == null)
+            return new List<MapCoord>();
+
+        var currentCoord = _runState!.CurrentMapCoord;
+        if (currentCoord.HasValue)
+        {
+            var currentPoint = map.GetPoint(currentCoord.Value);
+            return (currentPoint?.Children ?? Enumerable.Empty<MapPoint>())
+                .Select(child => child.coord)
+                .ToList();
+        }
+
+        var startPoint = map.StartingMapPoint;
+        var choices = new List<MapCoord> { startPoint.coord };
+        if (startPoint.Children != null)
+            choices.AddRange(startPoint.Children.Select(child => child.coord));
+        return choices;
     }
 
     private string? CapturePreRoomCheckpoint()
