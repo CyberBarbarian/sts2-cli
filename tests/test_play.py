@@ -49,6 +49,41 @@ def test_card_type_rarity_suffix_keeps_distinct_labels():
     assert rendered == " Attack Basic"
 
 
+def test_show_rest_site_uses_titles_and_descriptions(capsys):
+    play.LANG = "en"
+
+    play.show_rest_site({
+        "context": {"act_name": "Overgrowth", "floor": 16},
+        "player": {"name": "The Silent", "hp": 70, "max_hp": 70, "gold": 99, "deck_size": 10},
+        "options": [
+            {
+                "index": 0,
+                "option_id": "HEAL",
+                "name": "HealRestSiteOption",
+                "title": "Rest",
+                "description": "Heal for 30% of your Max HP (21).",
+                "is_enabled": True,
+            },
+            {
+                "index": 2,
+                "option_id": "LIFT",
+                "name": "LiftRestSiteOption",
+                "title": "Train",
+                "description": "Start battles with +1 Strength. (3 Left)",
+                "is_enabled": True,
+            },
+        ],
+    })
+
+    rendered = plain(capsys.readouterr().out)
+    assert "[0] Rest" in rendered
+    assert "Heal for 30% of your Max HP (21)." in rendered
+    assert "[2] Train" in rendered
+    assert "Start battles with +1 Strength. (3 Left)" in rendered
+    assert "HealRestSiteOption" not in rendered
+    assert "LiftRestSiteOption" not in rendered
+
+
 def test_quit_save_defaults_to_save_dir(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
 

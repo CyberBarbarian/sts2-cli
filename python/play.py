@@ -1904,8 +1904,10 @@ def show_rest_site(state):
         enabled = opt.get("is_enabled", True)
         mark = c("●", "green") if enabled else c("○", "dim")
         opt_id = opt.get("option_id", "?")
-        opt_name = t(opt_id, REST_OPTIONS_ZH.get(opt_id, opt_id))
-        opt_desc = opt.get("name", "")
+        opt_title = n(opt.get("title") or t(opt_id, REST_OPTIONS_ZH.get(opt_id, opt_id)))
+        opt_desc = n(opt.get("description") or "")
+        opt_name = opt_title + (f" - {opt_desc}" if opt_desc else "")
+        opt_desc = ""
         print(f"  {mark} [{opt['index']}] {opt_name}" + (f" — {opt_desc}" if opt_desc and opt_desc != opt_id else ""))
 
 def _load_loc():
