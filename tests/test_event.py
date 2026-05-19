@@ -57,6 +57,16 @@ class TestEventDescriptions:
             d = opt.get("description") or ""
             assert "IsMultiplayer" not in d
 
+    def test_zero_energy_icon_event_option_text_is_preserved(self, game):
+        state = game.start(character="Regent", seed="tanx-crossbow-5")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="TANX")
+
+        crossbow = next(option for option in state["options"] if option["title"] == "Crossbow")
+
+        assert "It costs 0[E] this turn." in crossbow["description"]
+        assert "It costs this turn." not in crossbow["description"]
+
     def test_event_export_does_not_use_hardcoded_semantic_descriptions(self):
         source = Path(__file__).resolve().parents[1] / "src" / "Sts2Headless" / "RunSimulator.cs"
         text = source.read_text(encoding="utf-8")

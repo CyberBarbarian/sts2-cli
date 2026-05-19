@@ -5416,14 +5416,14 @@ public class RunSimulator
             text,
             @"(?<count>\d+)(?:[A-Za-z0-9_]*energy_icon\.png)",
             match => int.TryParse(match.Groups["count"].Value, out var count)
-                ? CliEnergyTokens(count)
+                ? count == 0 ? $"0{CliEnergyToken}" : CliEnergyTokens(count)
                 : match.Value,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
             @"(?<count>\d+)(?:[A-Za-z0-9_]*star_icon\.png)",
             match => int.TryParse(match.Groups["count"].Value, out var count)
-                ? CliStarTokens(count)
+                ? count == 0 ? $"0{CliStarToken}" : CliStarTokens(count)
                 : match.Value,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         text = System.Text.RegularExpressions.Regex.Replace(
