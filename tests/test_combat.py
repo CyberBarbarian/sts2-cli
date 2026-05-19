@@ -1038,6 +1038,30 @@ class TestCombatEdgeCases:
             assert card["affliction"] != "DEVOURED.title"
             assert card["affliction_description"] != "DEVOURED.description"
 
+    def test_doormaker_weighted_affliction_exports_localized_text(self, game):
+        state = game.start(character="Defect", seed="doormaker-weighted-affliction")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999)
+        state = game.enter_room("combat", encounter="DOORMAKER_BOSS")
+
+        weighted_cards = []
+        for _ in range(6):
+            state = game.act("end_turn")
+            weighted_cards = [
+                card for card in state["hand"]
+                if card.get("affliction_id") == "WEIGHTED"
+            ]
+            if weighted_cards:
+                break
+
+        assert weighted_cards
+        for card in weighted_cards:
+            assert "WEIGHTED.extraCardText" not in card["description"]
+            assert card["affliction"] == "Weighted"
+            assert card["affliction_description"] == "Lose [E] when this card is played."
+            assert card["affliction"] != "WEIGHTED.title"
+            assert card["affliction_description"] != "WEIGHTED.description"
+
     def test_act_three_queen_win_enters_architect_victory_room_first(self, tmp_path):
         game = Game()
         try:

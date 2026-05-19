@@ -22,5 +22,8 @@
   "RINGING.extraCardText": "Ringing.",
   "RINGING.title": "Ringing",
   "SMOG.description": "You cannot play additional [gold]Skills[/gold] this turn. Clears at the end of the turn.",
-  "SMOG.title": "Smog"
+  "SMOG.title": "Smog",
+  "WEIGHTED.description": "Lose {Amount:energyIcons()} when this card is played.",
+  "WEIGHTED.extraCardText": "Lose {Amount:energyIcons()}.",
+  "WEIGHTED.title": "Weighted"
 }

@@ -19,5 +19,8 @@
   "RINGING.extraCardText": "昏眩。",
   "RINGING.title": "昏眩",
   "SMOG.description": "你在本回合无法再打出更多[gold]技能[/gold]牌。回合结束时消除。",
-  "SMOG.title": "烟雾"
+  "SMOG.title": "烟雾",
+  "WEIGHTED.description": "打出这张牌时失去{Amount:energyIcons()}。",
+  "WEIGHTED.extraCardText": "失去{Amount:energyIcons()}。",
+  "WEIGHTED.title": "沉重"
 }
