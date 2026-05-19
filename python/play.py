@@ -1658,12 +1658,14 @@ def _format_upgrade_preview(stats, aug, current_cost=None):
     for k in sorted(all_keys):
         if k.endswith("_by_target"):
             continue
+        if k in ("calculationbase", "extradamage"):
+            continue
         old = stats.get(k, 0)
         new_val = aug_stats.get(k, old)
         if isinstance(old, (dict, list, tuple)) or isinstance(new_val, (dict, list, tuple)):
             continue
         if new_val != old:
-            if k == "damage":
+            if k in ("damage", "calculateddamage"):
                 parts.append(c(f"{t('dmg','伤害')} {old}→{new_val}", "red"))
             elif k == "block":
                 parts.append(c(f"{t('blk','格挡')} {old}→{new_val}", "blue"))

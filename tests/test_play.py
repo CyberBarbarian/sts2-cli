@@ -276,6 +276,34 @@ def test_card_detail_extension_omits_target_rows_from_upgrade_summary(capsys):
     assert "Mawler" not in text
 
 
+def test_card_detail_extension_omits_internal_dynamic_upgrade_stats(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension({
+        "name": "Precise Cut",
+        "cost": 0,
+        "description": "Deal 9 damage.\nDeals 2 less damage for each other card in your Hand.",
+        "stats": {
+            "calculationbase": 13,
+            "extradamage": 2,
+            "calculateddamage": 9,
+        },
+        "after_upgrade": {
+            "cost": 0,
+            "description": "Deal 16 damage.\nDeals 2 less damage for each other card in your Hand.",
+            "stats": {
+                "calculationbase": 16,
+                "extradamage": 2,
+                "calculateddamage": 16,
+            },
+        },
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "dmg 9" in text
+    assert "13" not in text
+
+
 def test_card_select_context_lines_include_source_event_hover_tip():
     play.LANG = "en"
 
