@@ -407,6 +407,12 @@ public class RunSimulator
         return field?.GetValue(obj) as List<T>;
     }
 
+    private static System.Collections.IList? GetPotionSlots(Player player)
+    {
+        var field = player.GetType().GetField("_potionSlots", NonPublic);
+        return field?.GetValue(player) as System.Collections.IList;
+    }
+
     private static void SetField(object obj, string fieldName, object? value)
     {
         var field = obj.GetType().GetField(fieldName, NonPublic);
@@ -469,8 +475,7 @@ public class RunSimulator
             }
             if (args.TryGetValue("potions", out var potionsEl))
             {
-                var slots = GetBackingList<PotionModel>(player, "_potionSlots")
-                         ?? GetBackingList<PotionModel?>(player, "_potionSlots") as System.Collections.IList;
+                var slots = GetPotionSlots(player);
                 if (slots != null)
                 {
                     for (int i = 0; i < slots.Count; i++) slots[i] = null;
@@ -1555,8 +1560,7 @@ public class RunSimulator
 
     private static bool HasOpenPotionSlot(Player player)
     {
-        System.Collections.IList? slots = GetBackingList<PotionModel>(player, "_potionSlots");
-        slots ??= GetBackingList<PotionModel?>(player, "_potionSlots");
+        var slots = GetPotionSlots(player);
         if (slots == null)
             return true;
 
@@ -7490,6 +7494,14 @@ public class RunSimulator
 
     private Dictionary<string, object?> PlayerSummary(Player player)
     {
+        var potions = player.Potions?
+            .Select((p, i) => p == null ? null : PotionInfo(p, i))
+            .Where(x => x != null)
+            .Cast<Dictionary<string, object?>>()
+            .ToList()
+            ?? new List<Dictionary<string, object?>>();
+        var potionSlotCount = GetPotionSlots(player)?.Count ?? potions.Count;
+
         return new Dictionary<string, object?>
         {
             ["name"] = _loc.Bilingual("characters", (player.Character?.Id.Entry ?? "IRONCLAD") + ".title"),
@@ -7498,11 +7510,9 @@ public class RunSimulator
             ["block"] = player.Creature?.Block ?? 0,
             ["gold"] = player.Gold,
             ["relics"] = player.Relics?.Select(r => RelicInfo(r)).ToList(),
-            ["potions"] = player.Potions?.Select((p, i) =>
-            {
-                if (p == null) return null;
-                return PotionInfo(p, i);
-            }).Where(x => x != null).ToList(),
+            ["potions"] = potions,
+            ["potion_slots"] = potionSlotCount,
+            ["potion_empty_slots"] = Math.Max(0, potionSlotCount - potions.Count),
             ["deck_size"] = player.Deck?.Cards?.Count(c => c != null) ?? 0,
             ["deck"] = player.Deck?.Cards?.Where(c => c != null).Select(c =>
             {

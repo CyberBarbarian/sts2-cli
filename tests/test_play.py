@@ -333,6 +333,29 @@ def test_zh_combat_rewards_are_localized(capsys):
     assert any("\u4e00" <= ch <= "\u9fff" for ch in text)
 
 
+def test_show_player_includes_potion_slot_capacity(capsys):
+    play.LANG = "en"
+
+    play.show_player({
+        "name": "The Defect",
+        "hp": 70,
+        "max_hp": 70,
+        "gold": 99,
+        "deck_size": 10,
+        "relics": [],
+        "potion_slots": 4,
+        "potion_empty_slots": 2,
+        "potions": [
+            {"index": 0, "name": "Lucky Tonic", "description": "Gain 1 Buffer."},
+            {"index": 1, "name": "Vulnerable Potion", "description": "Apply 3 Vulnerable."},
+        ],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Potions 2/4" in text
+    assert "2 empty" in text
+
+
 def test_zh_crystal_sphere_labels_are_localized(capsys):
     play.LANG = "zh"
 

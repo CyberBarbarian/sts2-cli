@@ -901,6 +901,26 @@ def potion_str(p):
     return n(p)
 
 
+def potion_slot_summary(player):
+    if not isinstance(player, dict):
+        return None
+    slots = player.get("potion_slots")
+    if slots is None:
+        return None
+    potions = [p for p in player.get("potions", []) if p]
+    try:
+        slot_count = int(slots)
+    except (TypeError, ValueError):
+        return None
+    empty = player.get("potion_empty_slots")
+    try:
+        empty_count = int(empty) if empty is not None else max(0, slot_count - len(potions))
+    except (TypeError, ValueError):
+        empty_count = max(0, slot_count - len(potions))
+    suffix = f" ({empty_count} empty)" if empty_count else ""
+    return f"{t('Potions', 'Potions')} {len(potions)}/{slot_count}{suffix}"
+
+
 def resolved_description(obj):
     """Resolve an exported description string with its own vars."""
     d = desc(obj.get("description", "")) if isinstance(obj, dict) else desc(obj)
@@ -1098,7 +1118,11 @@ def show_player(p, show_deck=False):
           + f"  {t('Gold','金')} {c(str(gold), 'yellow')}  {t('Deck','牌组')} {deck}")
     for r in p.get("relics", []):
         print(f"    🔶 {relic_str(r)}")
-    for pot in p.get("potions", []):
+    potions = [pot for pot in p.get("potions", []) if pot]
+    potion_slots = potion_slot_summary(p)
+    if potion_slots:
+        print(f"    {potion_slots}")
+    for pot in potions:
         if pot:
             print(f"    🧪 {potion_str(pot)}")
     if show_deck:
@@ -1996,10 +2020,13 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
         if raw == "potions" and state:
             p = state.get("player", {})
             pots = p.get("potions", [])
+            slot_line = potion_slot_summary(p)
+            if slot_line:
+                print(f"  {slot_line}")
             if pots:
                 for pot in pots:
                     if pot: print(f"  🧪 {potion_str(pot)}")
-            else:
+            elif not slot_line:
                 print(f"  {t('No potions.','没有药水。')}")
             continue
         if raw == "relics" and state:

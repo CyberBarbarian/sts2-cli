@@ -288,3 +288,22 @@ class TestPotionActions:
         state = game.act("claim_reward", reward_index=potion_reward["index"])
 
         assert any(p["name"] == "Orobic Acid" for p in state["player"]["potions"])
+
+    def test_player_export_includes_empty_potion_slots_after_potion_belt(self, game):
+        state = game.start(seed="potion-belt-slot-export")
+        game.skip_neow(state)
+
+        baseline = game.set_player(
+            potions=["STRENGTH_POTION", "FIRE_POTION"],
+        )
+        base_slots = baseline["player"]["potion_slots"]
+
+        state = game.set_player(
+            relics=["POTION_BELT"],
+            potions=["STRENGTH_POTION", "FIRE_POTION"],
+        )
+
+        player = state["player"]
+        assert player["potion_slots"] == base_slots + 2
+        assert player["potion_empty_slots"] == player["potion_slots"] - 2
+        assert [p["index"] for p in player["potions"]] == [0, 1]
