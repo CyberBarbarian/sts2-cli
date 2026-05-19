@@ -1061,6 +1061,17 @@ def card_select_context_lines(state):
         elif description:
             lines.append(description)
 
+    source_power = state.get("source_power") or {}
+    if source_power:
+        name = n(source_power.get("name"))
+        description = resolved_description(source_power)
+        if name and description:
+            lines.append(f"{name}: {description}")
+        elif name:
+            lines.append(name)
+        elif description:
+            lines.append(description)
+
     deduped = []
     seen = set()
     for line in lines:

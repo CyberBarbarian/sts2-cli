@@ -955,6 +955,9 @@ class TestCombatEdgeCases:
         state = game.act("end_turn")
 
         assert state["decision"] == "card_select"
+        assert state["prompt"] == "Choose a card to add into your Hand."
+        assert state["source_power"]["name"] == "Stratagem"
+        assert "shuffle your Draw Pile" in state["source_power"]["description"]
         combat = state["combat"]
         assert combat["enemies"][0]["name"] == "Shrinker Beetle"
         assert combat["enemies"][0]["intents"]

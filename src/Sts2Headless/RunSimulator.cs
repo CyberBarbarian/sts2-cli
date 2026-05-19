@@ -2408,10 +2408,19 @@ public class RunSimulator
             var sourceModel = _cardSelector.PendingSourceModel;
             var sourceCard = _pendingCardSelectionSourceCard ?? sourceModel as CardModel;
             var sourcePower = sourceModel as PowerModel;
+            if (sourceCard == null
+                && sourcePower == null
+                && _pendingCardSelectionSourceEventOption == null
+                && _pendingCardSelectionSourceRoomOption == null
+                && _pendingCardSelectionSourcePotion == null)
+            {
+                sourcePower = InferPendingCardSelectionSourcePower(player);
+            }
             var prompt = CardSelectionPrompt(_pendingCardSelectionSourceEventOption)
                          ?? CardSelectionPrompt(_pendingCardSelectionSourceRoomOption)
                          ?? CardSelectionPrompt(_pendingCardSelectionSourcePotion)
-                         ?? CardSelectionPrompt(sourceCard);
+                         ?? CardSelectionPrompt(sourceCard)
+                         ?? CardSelectionPrompt(sourcePower);
             var state = new Dictionary<string, object?>
             {
                 ["type"] = "decision",
@@ -2982,6 +2991,48 @@ public class RunSimulator
         var raw = _loc.Bilingual("cards", key);
         var interpolated = InterpolateDynamicVars(raw, ExportDynamicVars(sourceCard)) ?? raw;
         return CleanResolvedEngineText(interpolated);
+    }
+
+    private PowerModel? InferPendingCardSelectionSourcePower(Player player)
+    {
+        var powers = player.Creature?.Powers;
+        if (powers == null)
+            return null;
+
+        var candidates = powers
+            .Where(power => CardSelectionPrompt(power) != null)
+            .Take(2)
+            .ToList();
+        return candidates.Count == 1 ? candidates[0] : null;
+    }
+
+    private string? CardSelectionPrompt(PowerModel? sourcePower)
+    {
+        if (sourcePower == null)
+            return null;
+
+        string? raw = null;
+        foreach (var key in PowerLocKeyCandidates(sourcePower.Id.Entry, "selectionScreenPrompt"))
+        {
+            var candidate = _loc.Bilingual("powers", key);
+            if (candidate != key)
+            {
+                raw = candidate;
+                break;
+            }
+        }
+        if (raw == null)
+            return null;
+
+        var interpolated = InterpolateDynamicVars(raw, PowerDescriptionVars(sourcePower)) ?? raw;
+        return CleanResolvedEngineText(interpolated);
+    }
+
+    private static IEnumerable<string> PowerLocKeyCandidates(string entry, string suffix)
+    {
+        yield return entry + "." + suffix;
+        if (!entry.EndsWith("_POWER", StringComparison.Ordinal))
+            yield return entry + "_POWER." + suffix;
     }
 
     private static string? CardSelectionPrompt(Dictionary<string, object?>? sourceOption)

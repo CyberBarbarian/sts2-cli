@@ -196,6 +196,23 @@ def test_card_select_context_lines_include_source_room_option_description():
     assert lines == ["Smith: Upgrade a card in your Deck."]
 
 
+def test_card_select_context_lines_include_source_power_description():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_select_context_lines({
+        "prompt": "Choose a card to add into your Hand.",
+        "source_power": {
+            "name": "Stratagem",
+            "description": "Whenever you shuffle your Draw Pile, choose 1 card from it to put into your Hand.",
+        },
+    })]
+
+    assert lines == [
+        "Choose a card to add into your Hand.",
+        "Stratagem: Whenever you shuffle your Draw Pile, choose 1 card from it to put into your Hand.",
+    ]
+
+
 def test_print_card_select_context_shows_source_prompt(capsys):
     play.LANG = "en"
 
