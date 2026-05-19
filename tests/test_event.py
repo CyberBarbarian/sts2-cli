@@ -49,6 +49,31 @@ class TestNeowEvent:
         assert deck_bash["upgraded"] is True
         assert state["decision"] == "map_select"
 
+    def test_neow_relic_card_select_carries_source_option_context(self, game):
+        state = game.start(character="Defect", ascension=5, seed="manual-functional-defect-a5-20260519")
+        lead_paperweight = next(o for o in state["options"] if o["title"] == "Lead Paperweight")
+
+        state = game.act("choose_option", option_index=lead_paperweight["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == f"{lead_paperweight['title']}: {lead_paperweight['description']}"
+        source = state["source_event_option"]
+        assert source["title"] == lead_paperweight["title"]
+        assert source["description"] == lead_paperweight["description"]
+
+    def test_neow_relic_card_select_keeps_context_after_debug_player_update(self, game):
+        state = game.start(character="Defect", ascension=5, seed="manual-functional-defect-a5-20260519")
+        lead_paperweight = next(o for o in state["options"] if o["title"] == "Lead Paperweight")
+        game.set_player(hp=5000, max_hp=5000, gold=999)
+
+        state = game.act("choose_option", option_index=lead_paperweight["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == f"{lead_paperweight['title']}: {lead_paperweight['description']}"
+        source = state["source_event_option"]
+        assert source["title"] == lead_paperweight["title"]
+        assert source["description"] == lead_paperweight["description"]
+
 
 class TestEventDescriptions:
     def test_no_ismultiplayer_tag(self, game):

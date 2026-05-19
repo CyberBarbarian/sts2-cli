@@ -1071,6 +1071,11 @@ def card_select_context_lines(state):
     return deduped
 
 
+def print_card_select_context(state):
+    for line in card_select_context_lines(state):
+        print(f"      {c(line, 'dim')}")
+
+
 def _deck_card_key(card):
     if not isinstance(card, dict):
         return (n(card), "", False)
@@ -2684,6 +2689,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 min_sel = state.get("min_select", 1)
                 max_sel = state.get("max_select", 1)
                 print(f"  {c(t('Choose cards','选择卡牌'), 'bold')} — {card_pick_quantity_hint(min_sel, max_sel)}")
+                print_card_select_context(state)
                 show_player(state.get("player", {}))
                 print()
                 cards = state.get("cards", [])

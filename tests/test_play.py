@@ -196,6 +196,17 @@ def test_card_select_context_lines_include_source_room_option_description():
     assert lines == ["Smith: Upgrade a card in your Deck."]
 
 
+def test_print_card_select_context_shows_source_prompt(capsys):
+    play.LANG = "en"
+
+    play.print_card_select_context({
+        "prompt": "Lead Paperweight: Choose 1 of 2 Colorless cards to add to your Deck.",
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Lead Paperweight: Choose 1 of 2 Colorless cards to add to your Deck." in text
+
+
 def test_deck_change_detail_lines_include_added_card_descriptions():
     play.LANG = "en"
 
