@@ -326,7 +326,9 @@ public class RunSimulator
     private Dictionary<string, object?>? _pendingCardSelectionSourcePotion;
     private readonly Dictionary<object, Dictionary<string, object?>> _shopItemSnapshots = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, int> _cardRuntimeIds = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<object, int> _creatureRuntimeIds = new(ReferenceEqualityComparer.Instance);
     private int _nextCardRuntimeId = 1;
+    private int _nextCreatureRuntimeId = 1;
     private string? _preCurrentRoomSaveJson;
     private object? _starSpendTrackerCombatState;
     private int? _starSpendObservedRound;
@@ -2669,6 +2671,16 @@ public class RunSimulator
         return id;
     }
 
+    private int CreatureRuntimeId(object creature)
+    {
+        if (!_creatureRuntimeIds.TryGetValue(creature, out var id))
+        {
+            id = _nextCreatureRuntimeId++;
+            _creatureRuntimeIds[creature] = id;
+        }
+        return id;
+    }
+
     private Dictionary<string, object?> CombatPlayState(Player player)
     {
         var pcs = player.PlayerCombatState;
@@ -2775,6 +2787,7 @@ public class RunSimulator
                 var enemyInfo = new Dictionary<string, object?>
                 {
                     ["index"] = i,
+                    ["instance_id"] = CreatureRuntimeId(e),
                     ["combat_index"] = allEnemies.IndexOf(e),
                     ["name"] = enemyName,
                     ["hp"] = e.CurrentHp,
@@ -2816,6 +2829,7 @@ public class RunSimulator
 
                 var enemyInfo = new Dictionary<string, object?>
                 {
+                    ["instance_id"] = CreatureRuntimeId(e),
                     ["combat_index"] = entry.CombatIndex,
                     ["name"] = MonsterDisplayName(e.Monster, e),
                     ["hp"] = e.CurrentHp,
@@ -9358,7 +9372,9 @@ public class RunSimulator
         _pendingCardSelectionSourcePotion = null;
         _shopItemSnapshots.Clear();
         _cardRuntimeIds.Clear();
+        _creatureRuntimeIds.Clear();
         _nextCardRuntimeId = 1;
+        _nextCreatureRuntimeId = 1;
         _preCurrentRoomSaveJson = null;
         _pendingBundles = null;
         _pendingBundleTcs = null;

@@ -1235,17 +1235,24 @@ def _card_sequence_plan(initial_state, indices):
     initial_hand = initial_state.get("hand", [])
     initial_by_index = {card.get("index"): card for card in initial_hand}
     exports_instances = any("instance_id" in card for card in initial_hand)
+    initial_enemies = initial_state.get("enemies", [])
+    initial_enemy_by_index = {enemy.get("index"): enemy for enemy in initial_enemies}
+    exports_enemy_instances = any("instance_id" in enemy for enemy in initial_enemies)
     plan = []
     for step in indices:
         card_index, target_index = _sequence_step_indices(step)
         initial_card = initial_by_index.get(card_index)
         if initial_card is None and exports_instances:
             return None, f"Queued play stopped: card index {card_index} is not in the current hand."
+        initial_target = initial_enemy_by_index.get(target_index) if target_index is not None else None
+        if target_index is not None and initial_target is None and exports_enemy_instances:
+            return None, f"Queued play stopped: enemy target {target_index} is not in the current enemy list."
         plan.append(
             {
                 "initial_card_index": card_index,
                 "target_index": target_index,
                 "instance_id": initial_card.get("instance_id") if initial_card is not None else None,
+                "target_instance_id": initial_target.get("instance_id") if initial_target is not None else None,
             }
         )
     return plan, None
@@ -1258,6 +1265,20 @@ def _find_sequence_card(current_hand, step):
 
     card_index = step.get("initial_card_index")
     return next((card for card in current_hand if card.get("index") == card_index), None)
+
+
+def _sequence_target_index(current_enemies, step):
+    target_instance_id = step.get("target_instance_id")
+    if target_instance_id is not None:
+        target = next(
+            (
+                enemy for enemy in current_enemies
+                if enemy.get("instance_id") == target_instance_id and enemy.get("hp", 0) > 0
+            ),
+            None,
+        )
+        return target.get("index") if target is not None else None
+    return step.get("target_index")
 
 
 def execute_card_sequence(state, indices, send_fn, output_fn=print):
@@ -1276,7 +1297,9 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
         energy = current.get("energy", 0)
         enemies = current.get("enemies", [])
         card_index = step.get("initial_card_index")
-        target_index = step.get("target_index")
+        requested_target_index = step.get("target_index")
+        target_index = _sequence_target_index(enemies, step)
+        has_explicit_target = requested_target_index is not None
         card = _find_sequence_card(hand, step)
         if card is None:
             output_fn(f"Queued play stopped: card index {card_index} is no longer in hand.")
@@ -1288,10 +1311,10 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
         args = {"card_index": card["index"]}
         if card.get("target_type") == "AnyEnemy":
             live_enemies = [enemy for enemy in enemies if enemy.get("hp", 0) > 0]
-            if target_index is not None:
+            if has_explicit_target:
                 target = next((enemy for enemy in live_enemies if enemy.get("index") == target_index), None)
                 if target is None:
-                    output_fn(f"Queued play stopped: enemy target {target_index} is not available.")
+                    output_fn(f"Queued play stopped: enemy target {requested_target_index} is not available.")
                     return current
                 args["target_index"] = target_index
             elif len(live_enemies) == 1:
@@ -1299,7 +1322,7 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
             else:
                 output_fn(f"Queued play stopped: {n(card.get('name', '?'))} needs a target. Use seq {card_index}@<enemy_index>.")
                 return current
-        elif target_index is not None:
+        elif has_explicit_target:
             output_fn(f"Queued play stopped: {n(card.get('name', '?'))} does not take an enemy target.")
             return current
 

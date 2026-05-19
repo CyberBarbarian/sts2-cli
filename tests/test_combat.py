@@ -174,10 +174,31 @@ class TestCombatStructure:
         game.skip_neow(state)
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         for e in state["enemies"]:
+            assert "instance_id" in e
             assert isinstance(e["name"], str)
             assert e["hp"] > 0
             assert e["max_hp"] > 0
             assert "block" in e
+
+    def test_enemy_instance_ids_survive_target_reindexing(self, game):
+        state = game.start(seed="enemy-instance-id-export")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 5)
+        state = game.enter_room("combat", encounter="SLIMES_WEAK")
+
+        initial_ids = [enemy["instance_id"] for enemy in state["enemies"]]
+        assert len(initial_ids) >= 2
+        assert len(initial_ids) == len(set(initial_ids))
+
+        target = state["enemies"][0]
+        bludgeon = next(card for card in state["hand"] if card["name"] == "Bludgeon")
+        state = game.act("play_card", card_index=bludgeon["index"], target_index=target["index"])
+
+        assert state["decision"] == "combat_play"
+        remaining_ids = [enemy["instance_id"] for enemy in state["enemies"]]
+        assert target["instance_id"] not in remaining_ids
+        assert set(remaining_ids).issubset(set(initial_ids))
+        assert [enemy["index"] for enemy in state["enemies"]] == list(range(len(state["enemies"])))
 
     def test_enemy_name_interpolates_dynamic_vars(self, game):
         state = game.start(seed="test-subject-enemy-name")

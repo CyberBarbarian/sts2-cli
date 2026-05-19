@@ -589,6 +589,83 @@ def test_execute_card_sequence_binds_indices_to_initial_hand_instances():
     assert result["decision"] == "combat_play"
 
 
+def test_execute_card_sequence_binds_targets_to_initial_enemy_instances():
+    state = {
+        "decision": "combat_play",
+        "energy": 5,
+        "hand": [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "b", "name": "B", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "AnyEnemy"},
+            {"index": 2, "instance_id": "c", "name": "C", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 3, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 4, "instance_id": "e", "name": "E", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "AnyEnemy"},
+            {"index": 5, "instance_id": "f", "name": "F", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "AnyEnemy"},
+        ],
+        "enemies": [
+            {"index": 0, "instance_id": "enemy-a", "name": "A", "hp": 7},
+            {"index": 1, "instance_id": "enemy-b", "name": "B", "hp": 28},
+            {"index": 2, "instance_id": "enemy-c", "name": "C", "hp": 12},
+        ],
+    }
+    hands_after = [
+        [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "c", "name": "C", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 2, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 3, "instance_id": "e", "name": "E", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "AnyEnemy"},
+            {"index": 4, "instance_id": "f", "name": "F", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "AnyEnemy"},
+        ],
+        [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "c", "name": "C", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 2, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 3, "instance_id": "f", "name": "F", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "AnyEnemy"},
+        ],
+        [
+            {"index": 0, "instance_id": "a", "name": "A", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 1, "instance_id": "c", "name": "C", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+            {"index": 2, "instance_id": "d", "name": "D", "cost": 0, "energy_cost": 0, "can_play": True, "target_type": "None"},
+        ],
+    ]
+    enemies_after = [
+        state["enemies"],
+        [
+            {"index": 0, "instance_id": "enemy-b", "name": "B", "hp": 28},
+            {"index": 1, "instance_id": "enemy-c", "name": "C", "hp": 12},
+        ],
+        [
+            {"index": 0, "instance_id": "enemy-b", "name": "B", "hp": 28},
+        ],
+    ]
+    sent = []
+
+    def send(cmd):
+        sent.append(cmd)
+        return {
+            "decision": "combat_play",
+            "energy": 5,
+            "hand": hands_after[len(sent) - 1],
+            "enemies": enemies_after[len(sent) - 1],
+        }
+
+    result = play.execute_card_sequence(
+        state,
+        [
+            {"card_index": 1, "target_index": 0},
+            {"card_index": 4, "target_index": 0},
+            {"card_index": 5, "target_index": 2},
+        ],
+        send,
+    )
+
+    assert [cmd["args"] for cmd in sent] == [
+        {"card_index": 1, "target_index": 0},
+        {"card_index": 3, "target_index": 0},
+        {"card_index": 3, "target_index": 1},
+    ]
+    assert result["decision"] == "combat_play"
+
+
 def test_execute_card_sequence_stops_when_state_requires_manual_choice():
     state = {
         "decision": "combat_play",
