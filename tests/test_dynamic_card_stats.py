@@ -953,6 +953,21 @@ class TestDynamicCardStats:
         assert "0[E]" in unrelenting["after_upgrade"]["description"]
         assert "{energyPrefix" not in unrelenting["after_upgrade"]["description"]
 
+    def test_relic_description_falls_back_when_engine_hover_text_is_mojibake(self, game):
+        state = game.start(seed="strike-dummy-relic-text")
+        state = game.skip_neow(state)
+        state = game.set_player(relics=["STRIKE_DUMMY"])
+
+        strike_dummy = next(
+            relic for relic in state["player"]["relics"]
+            if relic["id"] == "STRIKE_DUMMY"
+        )
+
+        assert "Strike" in strike_dummy["description"]
+        assert "3 additional damage" in strike_dummy["description"]
+        assert "鈥" not in strike_dummy["description"]
+        assert "{" not in strike_dummy["description"]
+
     def test_block_stats_include_player_frail(self, game):
         state = game.start(seed="codex-frail-block")
         game.skip_neow(state)

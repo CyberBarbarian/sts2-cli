@@ -5631,9 +5631,20 @@ public class RunSimulator
     private static string? CleanResolvedEngineText(string? text)
     {
         var cleaned = CleanEngineText(text);
-        return LooksLikeUnresolvedLocKey(cleaned) || LooksLikeUnresolvedFormatterToken(cleaned)
+        return LooksLikeMojibake(cleaned)
+               || LooksLikeUnresolvedLocKey(cleaned)
+               || LooksLikeUnresolvedFormatterToken(cleaned)
             ? null
             : cleaned;
+    }
+
+    private static bool LooksLikeMojibake(string? text)
+    {
+        return !string.IsNullOrWhiteSpace(text)
+               && (text.Contains('\uFFFD')
+                   || text.Contains("鈥", StringComparison.Ordinal)
+                   || text.Contains("馃", StringComparison.Ordinal)
+                   || text.Contains("锛", StringComparison.Ordinal));
     }
 
     private static bool LooksLikeUnresolvedLocKey(string? text)
