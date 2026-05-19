@@ -2437,6 +2437,10 @@ public class RunSimulator
             {
                 state["source_power"] = PowerInfo(sourcePower);
             }
+            if (CombatManager.Instance.IsInProgress)
+            {
+                state["combat"] = CombatSelectionContext(player);
+            }
             if (_pendingCardSelectionSourceEventOption != null)
             {
                 state["source_event_option"] = _pendingCardSelectionSourceEventOption;
@@ -2953,6 +2957,16 @@ public class RunSimulator
         }
 
         return result;
+    }
+
+    private Dictionary<string, object?> CombatSelectionContext(Player player)
+    {
+        var combat = CombatPlayState(player);
+        combat.Remove("type");
+        combat.Remove("decision");
+        combat.Remove("context");
+        combat.Remove("player");
+        return combat;
     }
 
     private string? CardSelectionPrompt(CardModel? sourceCard)

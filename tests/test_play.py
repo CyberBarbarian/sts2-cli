@@ -207,6 +207,46 @@ def test_print_card_select_context_shows_source_prompt(capsys):
     assert "Lead Paperweight: Choose 1 of 2 Colorless cards to add to your Deck." in text
 
 
+def test_print_card_select_combat_context_shows_live_fight(capsys):
+    play.LANG = "en"
+
+    play.print_card_select_combat_context({
+        "combat": {
+            "round": 4,
+            "energy": 2,
+            "max_energy": 3,
+            "draw_pile_count": 3,
+            "discard_pile_count": 9,
+            "exhaust_pile_count": 2,
+            "enemies": [
+                {
+                    "index": 0,
+                    "name": "Bygone Effigy",
+                    "hp": 67,
+                    "max_hp": 127,
+                    "block": 0,
+                    "intents": [{"type": "Attack", "damage": 23}],
+                    "powers": [{"name": "Strength", "amount": 10}],
+                }
+            ],
+            "orbs": [
+                {"name": "Lightning", "passive": 3, "evoke": 8, "is_next_to_evoke": True},
+            ],
+            "hand": [
+                {"index": 0, "name": "Defend", "cost": 1, "stats": {"block": 6}},
+            ],
+        }
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Combat context" in text
+    assert "Round 4" in text
+    assert "Bygone Effigy" in text
+    assert "Attack 23" in text
+    assert "Lightning" in text
+    assert "Hand" in text
+
+
 def test_deck_change_detail_lines_include_added_card_descriptions():
     play.LANG = "en"
 

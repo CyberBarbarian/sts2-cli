@@ -1076,6 +1076,63 @@ def print_card_select_context(state):
         print(f"      {c(line, 'dim')}")
 
 
+def card_select_combat_context_lines(state):
+    combat = state.get("combat") or {}
+    if not isinstance(combat, dict):
+        return []
+
+    lines = []
+    round_no = combat.get("round", "?")
+    energy = combat.get("energy", "?")
+    max_energy = combat.get("max_energy", "?")
+    draw = combat.get("draw_pile_count", "?")
+    discard = combat.get("discard_pile_count", "?")
+    exhaust = combat.get("exhaust_pile_count", "?")
+    lines.append(
+        f"{t('Combat context')}: {t('Round')} {round_no}  "
+        f"{t('Energy')} {energy}/{max_energy}  "
+        f"{t('Draw')} {draw}  {t('Discard')} {discard}  {t('Exhaust')} {exhaust}"
+    )
+
+    for enemy in combat.get("enemies") or []:
+        idx = enemy.get("index", "?")
+        hp = enemy.get("hp", "?")
+        max_hp = enemy.get("max_hp", "?")
+        block = enemy.get("block", 0)
+        intent = ", ".join(enemy_intent_display_parts(enemy.get("intents"))) or t("No intent")
+        powers = []
+        for power in enemy.get("powers") or []:
+            amount = power.get("amount")
+            suffix = f" {amount}" if amount not in (None, 0) else ""
+            powers.append(f"{n(power.get('name', '?'))}{suffix}")
+        power_text = f"  {', '.join(powers)}" if powers else ""
+        block_text = f"  {t('Block')} {block}" if block else ""
+        lines.append(f"Enemy [{idx}] {n(enemy.get('name', '?'))}: HP {hp}/{max_hp}{block_text}  {intent}{power_text}")
+
+    orb_parts = orb_display_parts(combat.get("orbs") or [])
+    if orb_parts:
+        lines.append(f"{t('Orbs')}: " + " | ".join(orb_parts))
+
+    hand = combat.get("hand") or []
+    if hand:
+        enemies = combat.get("enemies") or []
+        hand_parts = []
+        for card in hand[:6]:
+            stat = combat_hand_inline_stat_str(card.get("stats") or {}, card=card, enemies=enemies)
+            stat_text = f" {stat}" if stat else ""
+            hand_parts.append(f"[{card.get('index', '?')}] {n(card.get('name', '?'))} ({card.get('cost', '?')}){stat_text}")
+        if len(hand) > 6:
+            hand_parts.append(f"+{len(hand) - 6} more")
+        lines.append(f"{t('Hand')}: " + "; ".join(hand_parts))
+
+    return lines
+
+
+def print_card_select_combat_context(state):
+    for line in card_select_combat_context_lines(state):
+        print(f"      {c(line, 'dim')}")
+
+
 def _deck_card_key(card):
     if not isinstance(card, dict):
         return (n(card), "", False)
@@ -2690,6 +2747,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 max_sel = state.get("max_select", 1)
                 print(f"  {c(t('Choose cards','选择卡牌'), 'bold')} — {card_pick_quantity_hint(min_sel, max_sel)}")
                 print_card_select_context(state)
+                print_card_select_combat_context(state)
                 show_player(state.get("player", {}))
                 print()
                 cards = state.get("cards", [])

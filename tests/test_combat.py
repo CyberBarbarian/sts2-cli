@@ -925,6 +925,43 @@ class TestCombatEdgeCases:
         assert state["source_power"]["name"] == "Entropy"
         assert "Transform" in state["source_power"]["description"]
 
+    def test_combat_card_select_exports_current_combat_context(self, game):
+        state = game.start(character="Defect", seed="stratagem-selection-combat-context")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "STRATAGEM",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "STRIKE_DEFECT",
+            ],
+        )
+        game.set_draw_order([
+            "STRATAGEM",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+            "STRIKE_DEFECT",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        stratagem = next(card for card in state["hand"] if card["id"] == "CARD.STRATAGEM")
+        state = game.act("play_card", card_index=stratagem["index"])
+        state = game.act("end_turn")
+
+        assert state["decision"] == "card_select"
+        combat = state["combat"]
+        assert combat["enemies"][0]["name"] == "Shrinker Beetle"
+        assert combat["enemies"][0]["intents"]
+        assert combat["hand"]
+        assert combat["draw_pile_count"] >= 0
+        assert combat["discard_pile_count"] >= 0
+
     def test_headbutt_discard_selection_keeps_preview_stats_without_target_rows(self, game):
         state = game.start(seed="headbutt-selection-preview-stats")
         game.skip_neow(state)
