@@ -952,7 +952,8 @@ def potion_str(p):
         vars_dict = p.get("vars") or {}
         d = resolve_template(d, vars_dict) if vars_dict else d
         idx = p.get("index", "?")
-        return f"[{idx}] {name}" + (f": {c(d, 'dim')}" if d else "")
+        target_hint = " -> target enemy" if p.get("target_type") == "AnyEnemy" else ""
+        return f"[{idx}] {name}{target_hint}" + (f": {c(d, 'dim')}" if d else "")
     return n(p)
 
 

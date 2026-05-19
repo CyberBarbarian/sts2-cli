@@ -795,6 +795,30 @@ def test_show_player_includes_potion_slot_capacity(capsys):
     assert "2 empty" in text
 
 
+def test_show_player_marks_targeted_potions(capsys):
+    play.LANG = "en"
+
+    play.show_player({
+        "name": "The Silent",
+        "hp": 70,
+        "max_hp": 70,
+        "gold": 99,
+        "deck_size": 10,
+        "relics": [],
+        "potions": [
+            {
+                "index": 0,
+                "name": "Beetle Juice",
+                "description": "Enemy's attacks deal 30% less damage for the next 4 turns.",
+                "target_type": "AnyEnemy",
+            },
+        ],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "[0] Beetle Juice -> target enemy:" in text
+
+
 def test_zh_crystal_sphere_labels_are_localized(capsys):
     play.LANG = "zh"
 
