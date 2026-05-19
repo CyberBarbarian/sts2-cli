@@ -1026,6 +1026,28 @@ class TestDynamicCardStats:
         assert body_slam["stats"]["calculateddamage"] == 16
         assert "(Deals 16 damage)" in body_slam["description"]
 
+    def test_no_escape_exports_target_specific_calculated_doom(self, game):
+        state = game.start(character="Necrobinder", seed="no-escape-target-doom")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "NO_ESCAPE",
+            "NO_ESCAPE",
+            "DEFEND_NECROBINDER",
+            "DEFEND_NECROBINDER",
+            "DEFEND_NECROBINDER",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        first = next(c for c in state["hand"] if c["name"] == "No Escape")
+        state = game.act("play_card", card_index=first["index"], target_index=0)
+
+        second = next(c for c in state["hand"] if c["name"] == "No Escape")
+        target_stats = second["stats"]["calculateddoom_by_target"][0]
+
+        assert target_stats["target_index"] == 0
+        assert second["stats"]["calculateddoom"] == 10
+        assert target_stats["calculateddoom"] == 15
+
     def test_spite_exports_single_hit_before_hp_loss(self, game):
         state = game.start(seed="spite-repeat-no-hp-loss")
         game.skip_neow(state)

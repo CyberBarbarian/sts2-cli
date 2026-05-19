@@ -5931,6 +5931,7 @@ public class RunSimulator
             if (includeTargetRows)
             {
                 AddCalculatedDamageByTarget(stats, card, player);
+                AddCalculatedDynamicVarsByTarget(stats, card);
                 AddAttackDamageByTarget(stats, card, player);
             }
         }
@@ -6420,6 +6421,79 @@ public class RunSimulator
 
         if (rows.Count > 0)
             stats["calculateddamage_by_target"] = rows;
+    }
+
+    private void AddCalculatedDynamicVarsByTarget(Dictionary<string, object?> stats, CardModel card)
+    {
+        List<string> statKeys;
+        try
+        {
+            statKeys = card.DynamicVars.Values
+                .Select(dv => dv.Name)
+                .Where(name => name.StartsWith("Calculated", StringComparison.OrdinalIgnoreCase)
+                               && !string.Equals(name, "CalculatedDamage", StringComparison.OrdinalIgnoreCase))
+                .Select(name => name.ToLowerInvariant())
+                .Distinct()
+                .ToList();
+        }
+        catch
+        {
+            return;
+        }
+
+        if (statKeys.Count == 0)
+            return;
+
+        try
+        {
+            var combatState = CombatManager.Instance.DebugOnlyGetState();
+            var enemies = combatState?.Enemies?
+                .Where(e => e != null && e.IsAlive)
+                .ToList();
+            if (enemies == null || enemies.Count == 0)
+                return;
+
+            foreach (var statKey in statKeys)
+            {
+                var rows = new List<Dictionary<string, object?>>();
+                for (int i = 0; i < enemies.Count; i++)
+                {
+                    var enemy = enemies[i];
+                    var previewStats = TryGetCardPreviewStats(card, CardPreviewMode.MultiCreatureTargeting, enemy);
+                    if (previewStats == null || !previewStats.TryGetValue(statKey, out var value))
+                        continue;
+
+                    if (string.Equals(statKey, "calculateddoom", StringComparison.OrdinalIgnoreCase))
+                        value = GetTargetCalculatedDoom(card, enemy, value);
+
+                    rows.Add(new Dictionary<string, object?>
+                    {
+                        ["target_index"] = i,
+                        ["target_name"] = MonsterDisplayName(enemy.Monster, enemy),
+                        [statKey] = value,
+                    });
+                }
+
+                if (rows.Count > 0)
+                    stats[$"{statKey}_by_target"] = rows;
+            }
+        }
+        catch
+        {
+            return;
+        }
+    }
+
+    private int GetTargetCalculatedDoom(CardModel card, Creature target, int previewValue)
+    {
+        var baseDoom = GetCardDynamicVarInt(card, "CalculationBase");
+        var threshold = GetCardDynamicVarInt(card, "DoomThreshold");
+        var extra = GetCardDynamicVarInt(card, "CalculationExtra");
+        if (!baseDoom.HasValue || !threshold.HasValue || threshold.Value <= 0 || !extra.HasValue)
+            return previewValue;
+
+        var currentDoom = GetCreaturePowerAmount(target, "DOOM", "Doom");
+        return baseDoom.Value + extra.Value * (currentDoom / threshold.Value);
     }
 
     private static int GetTargetAttackRepeat(CardModel card, Creature target, int baseRepeat)
