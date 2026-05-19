@@ -796,6 +796,14 @@ def target_row_damage_label(row):
     return f"{damage}{t('dmg','\u4f24')}"
 
 
+def target_row_display_name(row):
+    target_index = row.get("target_index")
+    target_name = row.get("target_name") or f"{t('Target', 'Target')} {target_index if target_index is not None else '?'}"
+    if target_index is not None:
+        return f"[{target_index}] {target_name}"
+    return target_name
+
+
 def visible_target_rows(stats, enemies=None):
     rows = list(target_damage_rows(stats))
     if not enemies:
@@ -882,7 +890,7 @@ def card_target_damage_display_lines(card, enemies=None):
         label = target_row_damage_label(row)
         if not label:
             continue
-        target_name = row.get("target_name") or f"{t('Target', '\u76ee\u6807')} {row.get('target_index', '?')}"
+        target_name = target_row_display_name(row)
         extra = []
         if row.get("vulnerable"):
             extra.append(f"{t('Vulnerable', '\u6613\u4f24')} {row['vulnerable']}")

@@ -823,6 +823,28 @@ def test_target_damage_detail_lines_show_multiple_targets():
     assert any("Other Nibbit: 6dmg" in line for line in lines)
 
 
+def test_target_damage_detail_lines_include_indices_for_duplicate_names():
+    play.LANG = "en"
+    lines = [plain(line) for line in play.card_target_damage_display_lines(
+        {
+            "stats": {
+                "damage": 4,
+                "damage_by_target": [
+                    {"target_index": 0, "target_name": "Wriggler", "damage": 4},
+                    {"target_index": 1, "target_name": "Wriggler", "damage": 4},
+                ],
+            }
+        },
+        enemies=[
+            {"index": 0, "name": "Wriggler", "hp": 21},
+            {"index": 1, "name": "Wriggler", "hp": 19},
+        ],
+    )]
+
+    assert any("[0] Wriggler: 4dmg" in line for line in lines)
+    assert any("[1] Wriggler: 4dmg" in line for line in lines)
+
+
 def test_zh_target_damage_detail_lines_are_localized():
     play.LANG = "zh"
     lines = [plain(line) for line in play.card_target_damage_display_lines(
