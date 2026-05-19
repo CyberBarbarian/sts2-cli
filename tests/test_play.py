@@ -1076,10 +1076,87 @@ def test_combat_inline_stat_hides_unplayable_status_damage():
     assert rendered == ""
 
 
+def test_combat_inline_stat_hides_playable_status_self_damage():
+    play.LANG = "en"
+    rendered = plain(play.combat_hand_inline_stat_str(
+        {"damage": 5},
+        card={
+            "id": "CARD.TOXIC",
+            "name": "Toxic",
+            "type": "Status",
+            "rarity": "Status",
+            "can_play": True,
+            "target_type": "None",
+            "description": "At the end of your turn, if this is in your Hand, take 5 damage.",
+        },
+        enemies=[
+            {"index": 0, "name": "Myte", "hp": 13},
+            {"index": 1, "name": "Myte", "hp": 13},
+        ],
+    ))
+
+    assert rendered == ""
+
+
+def test_target_damage_detail_lines_hide_random_enemy_rows():
+    play.LANG = "en"
+    lines = [plain(line) for line in play.card_target_damage_display_lines(
+        {
+            "id": "CARD.RICOCHET",
+            "type": "Attack",
+            "target_type": "None",
+            "description": "Deal 3 damage to a random enemy 4 times.",
+            "stats": {
+                "damage": 3,
+                "damage_by_target": [
+                    {"target_index": 0, "target_name": "Myte", "damage": 3, "repeat": 4, "total_damage": 12},
+                    {"target_index": 1, "target_name": "Myte", "damage": 3, "repeat": 4, "total_damage": 12},
+                ],
+            },
+        },
+        enemies=[
+            {"index": 0, "name": "Myte", "hp": 13},
+            {"index": 1, "name": "Myte", "hp": 13},
+        ],
+    )]
+
+    assert lines == []
+
+
+def test_target_damage_detail_lines_label_all_enemy_rows_as_damage_by_enemy():
+    play.LANG = "en"
+    lines = [plain(line) for line in play.card_target_damage_display_lines(
+        {
+            "id": "CARD.SHIV",
+            "type": "Attack",
+            "target_type": "AllEnemies",
+            "description": "Deal 4 damage to ALL enemies.",
+            "stats": {
+                "damage": 4,
+                "damage_by_target": [
+                    {"target_index": 0, "target_name": "Myte", "damage": 4},
+                    {"target_index": 1, "target_name": "Myte", "damage": 4},
+                ],
+            },
+        },
+        enemies=[
+            {"index": 0, "name": "Myte", "hp": 13},
+            {"index": 1, "name": "Myte", "hp": 13},
+        ],
+    )]
+    rendered = "\n".join(lines)
+
+    assert "Damage by enemy:" in rendered
+    assert "Target damage:" not in rendered
+    assert "[0] Myte: 4dmg" in rendered
+    assert "[1] Myte: 4dmg" in rendered
+
+
 def test_target_damage_detail_lines_show_multiple_targets():
     play.LANG = "en"
     lines = [plain(line) for line in play.card_target_damage_display_lines(
         {
+            "target_type": "AnyEnemy",
             "stats": {
                 "damage": 6,
                 "damage_by_target": [
@@ -1102,6 +1179,7 @@ def test_target_damage_detail_lines_include_indices_for_duplicate_names():
     play.LANG = "en"
     lines = [plain(line) for line in play.card_target_damage_display_lines(
         {
+            "target_type": "AnyEnemy",
             "stats": {
                 "damage": 4,
                 "damage_by_target": [
@@ -1124,6 +1202,7 @@ def test_target_damage_detail_lines_show_single_target_block_context():
     play.LANG = "en"
     lines = [plain(line) for line in play.card_target_damage_display_lines(
         {
+            "target_type": "AnyEnemy",
             "stats": {
                 "damage": 10,
                 "damage_by_target": [
@@ -1147,6 +1226,7 @@ def test_zh_target_damage_detail_lines_are_localized():
     play.LANG = "zh"
     lines = [plain(line) for line in play.card_target_damage_display_lines(
         {
+            "target_type": "AnyEnemy",
             "stats": {
                 "damage": 6,
                 "damage_by_target": [

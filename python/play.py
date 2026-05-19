@@ -849,6 +849,43 @@ def suppress_combat_inline_stats(card):
     return card.get("can_play") is False
 
 
+def card_deals_direct_enemy_damage(card):
+    if not card:
+        return True
+    ctype = str(card.get("type") or "")
+    if ctype in ("Status", "Curse"):
+        return False
+    target_type = str(card.get("target_type") or "")
+    if ctype == "Attack":
+        return True
+    return target_type in ("AnyEnemy", "AllEnemies", "AllEnemy")
+
+
+def card_hits_all_enemies(card):
+    if not card:
+        return False
+    target_type = str(card.get("target_type") or "")
+    if target_type in ("AllEnemies", "AllEnemy"):
+        return True
+    text = desc(card.get("description", "")).lower()
+    return "all enemies" in text or "all enemy" in text
+
+
+def card_target_rows_should_display(card, rows):
+    if not rows or not card_deals_direct_enemy_damage(card):
+        return False
+    if not card or "target_type" not in card:
+        return True
+    target_type = str(card.get("target_type") or "")
+    return target_type == "AnyEnemy" or card_hits_all_enemies(card)
+
+
+def card_target_damage_label(card):
+    if not card or str(card.get("target_type") or "") == "AnyEnemy":
+        return t("Target damage:", "\u76ee\u6807\u4f24\u5bb3:")
+    return t("Damage by enemy:", "\u9010\u654c\u4f24\u5bb3:")
+
+
 def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
     """Title-row 伤/挡 from RunSimulator ``stats`` (DynamicVars, keys lowercased).
 
@@ -865,35 +902,36 @@ def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
     osty_ok = bool(osty and osty.get("alive"))
 
     dmg = None
-    if cid == "CARD.UNLEASH" and osty_ok:
-        base = stats.get("calculateddamage")
-        if base is None:
-            base = stats.get("damage")
-        if base is not None:
-            hp = osty.get("hp")
-            dmg = int(base) + int(hp) if isinstance(hp, (int, float)) else int(base)
-    elif cid == "CARD.PROTECTOR" and osty_ok:
-        base = stats.get("calculateddamage")
-        if base is None:
-            base = stats.get("damage")
-        if base is not None:
-            mhp = osty.get("max_hp")
-            dmg = int(base) + int(mhp) if isinstance(mhp, (int, float)) else int(base)
+    if card_deals_direct_enemy_damage(card):
+        if cid == "CARD.UNLEASH" and osty_ok:
+            base = stats.get("calculateddamage")
+            if base is None:
+                base = stats.get("damage")
+            if base is not None:
+                hp = osty.get("hp")
+                dmg = int(base) + int(hp) if isinstance(hp, (int, float)) else int(base)
+        elif cid == "CARD.PROTECTOR" and osty_ok:
+            base = stats.get("calculateddamage")
+            if base is None:
+                base = stats.get("damage")
+            if base is not None:
+                mhp = osty.get("max_hp")
+                dmg = int(base) + int(mhp) if isinstance(mhp, (int, float)) else int(base)
 
-    target_row = single_visible_target_row(stats, enemies)
-    if target_row:
-        target_damage = target_row_damage(target_row)
-        if target_damage is not None:
-            dmg = int(target_damage)
+        target_row = single_visible_target_row(stats, enemies)
+        if target_row:
+            target_damage = target_row_damage(target_row)
+            if target_damage is not None:
+                dmg = int(target_damage)
 
-    if dmg is None:
-        v = stats.get("damage")
-        if v is None:
-            v = stats.get("calculateddamage")
-        if v is None:
-            v = stats.get("ostydamage")
-        if v is not None:
-            dmg = int(v)
+        if dmg is None:
+            v = stats.get("damage")
+            if v is None:
+                v = stats.get("calculateddamage")
+            if v is None:
+                v = stats.get("ostydamage")
+            if v is not None:
+                dmg = int(v)
 
     if dmg is not None:
         parts.append(c(f"{dmg}{t('dmg','伤')}", "red"))
@@ -906,7 +944,7 @@ def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
 def card_target_damage_display_lines(card, enemies=None):
     stats = (card or {}).get("stats") or {}
     rows = visible_target_rows(stats, enemies)
-    if not rows:
+    if not card_target_rows_should_display(card, rows):
         return []
     if len(rows) == 1:
         row = rows[0]
@@ -917,7 +955,7 @@ def card_target_damage_display_lines(card, enemies=None):
         if target_damage == base_damage and not target_row_has_damage_context(row):
             return []
 
-    lines = [c(t("Target damage:", "\u76ee\u6807\u4f24\u5bb3:"), "dim")]
+    lines = [c(card_target_damage_label(card), "dim")]
     for row in rows:
         label = target_row_damage_label(row)
         if not label:
