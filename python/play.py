@@ -1740,7 +1740,12 @@ def upgrade_description_display_lines(card):
     return [f"Upgrade preview: {lines[0]}"] + [f"  {line}" for line in lines[1:]]
 
 
-def print_card_detail_extension(card, indent="      ", include_upgrade_description=False):
+def print_card_detail_extension(
+    card,
+    indent="      ",
+    include_upgrade_description=False,
+    include_upgrade_summary=True,
+):
     """Description (with [prefix/keywords]) + upgrade preview; indent matches title row spacing."""
     for line in card_description_display_lines(card):
         if line:
@@ -1752,6 +1757,8 @@ def print_card_detail_extension(card, indent="      ", include_upgrade_descripti
         for line in upgrade_description_display_lines(card):
             if line:
                 print(f"{indent}{c(line, 'dim')}")
+    if not include_upgrade_summary:
+        return
     stats = card.get("stats") or {}
     aug_parts = _format_upgrade_preview(stats, card.get("after_upgrade"), card.get("cost"))
     if aug_parts:
@@ -1775,6 +1782,14 @@ def card_select_should_show_upgrade_description(state):
         source_event_option.get("description"),
     ])
     return any(isinstance(text, str) and "upgrade" in text.lower() for text in text_parts)
+
+
+def card_select_should_show_upgrade_summary(state):
+    if (state or {}).get("decision") != "card_select":
+        return True
+    if card_select_should_show_upgrade_description(state):
+        return True
+    return not bool((state or {}).get("combat"))
 
 
 def card_pick_quantity_hint(mn, mx):
@@ -2983,6 +2998,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print()
                 cards = state.get("cards", [])
                 include_upgrade_description = card_select_should_show_upgrade_description(state)
+                include_upgrade_summary = card_select_should_show_upgrade_summary(state)
                 for cd in cards:
                     up = c("+", "green") if cd.get("upgraded") else ""
                     sp = format_card_suffix_keywords_for_card(cd)
@@ -2992,6 +3008,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         cd,
                         indent="      ",
                         include_upgrade_description=include_upgrade_description,
+                        include_upgrade_summary=include_upgrade_summary,
                     )
 
                 valid = {str(cd["index"]): cd for cd in cards}

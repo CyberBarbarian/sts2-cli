@@ -396,6 +396,30 @@ def test_card_detail_extension_omits_internal_dynamic_upgrade_stats(capsys):
     assert "13" not in text
 
 
+def test_card_detail_extension_can_hide_upgrade_summary(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension(
+        {
+            "name": "Strike",
+            "cost": 1,
+            "description": "Deal 10 damage.",
+            "stats": {"damage": 10},
+            "after_upgrade": {
+                "cost": 1,
+                "description": "Deal 9 damage.",
+                "stats": {"damage": 9},
+            },
+        },
+        include_upgrade_summary=False,
+    )
+
+    text = plain(capsys.readouterr().out)
+    assert "Deal 10 damage." in text
+    assert "upgrade:" not in text
+    assert "10\u21929" not in text
+
+
 def test_card_select_context_lines_include_source_event_hover_tip():
     play.LANG = "en"
 
@@ -448,6 +472,23 @@ def test_card_select_upgrade_description_is_enabled_for_smith():
     assert play.card_select_should_show_upgrade_description({
         "decision": "card_select",
         "source_room_option": {"option_id": "SMITH"},
+    })
+
+
+def test_card_select_upgrade_summary_is_hidden_for_combat_effect_select():
+    assert not play.card_select_should_show_upgrade_summary({
+        "decision": "card_select",
+        "combat": {"round": 1},
+        "source_card": {"name": "Nightmare"},
+        "prompt": "Choose a Card.",
+    })
+    assert play.card_select_should_show_upgrade_summary({
+        "decision": "card_select",
+        "source_room_option": {"option_id": "SMITH"},
+    })
+    assert play.card_select_should_show_upgrade_summary({
+        "decision": "card_select",
+        "prompt": "Choose a Card.",
     })
 
 
