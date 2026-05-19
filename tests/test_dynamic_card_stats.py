@@ -922,6 +922,8 @@ class TestDynamicCardStats:
         assert "prevents damage" not in frail["description"]
         defend = next(c for c in state["hand"] if c["name"] == "Defend")
         assert defend["stats"]["block"] == 3
+        assert defend["description"] == "Gain 3 Block."
+        assert defend["vars"]["Block"] == 3
 
     def test_player_vulnerable_power_description_resolves_percent_formatter(self, game):
         state = game.start(seed="codex-player-vulnerable-description")

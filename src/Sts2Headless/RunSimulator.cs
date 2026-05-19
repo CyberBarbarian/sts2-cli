@@ -2375,7 +2375,7 @@ public class RunSimulator
                         includeTargetRows: includeTargetRows,
                         useSourceDynamicContext: useSourceDynamicContext),
                 };
-                AddCardVars(cardInfo, card);
+                AddCardVars(cardInfo, card, includePreviewStats: includeCombatPreview);
                 AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeTargetRows);
                 AddCardEnhancements(cardInfo, card);
                 return cardInfo;
@@ -2658,7 +2658,7 @@ public class RunSimulator
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["description"] = CardDescription(c, stats, includeCombatText: true),
             };
-            AddCardVars(cardInfo, c);
+            AddCardVars(cardInfo, c, includePreviewStats: true);
             AddEnergyCostDetails(cardInfo, c, includeCurrentXValue: true);
             if (starCost > 0)
             {
@@ -2932,7 +2932,7 @@ public class RunSimulator
         };
         if (stats.Count > 0)
             summary["stats"] = stats;
-        AddCardVars(summary, card);
+        AddCardVars(summary, card, includePreviewStats: applyCombatModifiers);
         AddEnergyCostDetails(summary, card, includeCurrentXValue: applyCombatModifiers);
         return summary;
     }
@@ -5950,9 +5950,12 @@ public class RunSimulator
         catch { }
     }
 
-    private static void AddCardVars(Dictionary<string, object?> cardInfo, CardModel card)
+    private static void AddCardVars(
+        Dictionary<string, object?> cardInfo,
+        CardModel card,
+        bool includePreviewStats = false)
     {
-        var vars = ExportCardDescriptionVars(card);
+        var vars = ExportCardDescriptionVars(card, includePreviewStats: includePreviewStats);
         if (vars != null && vars.Count > 0)
             cardInfo["vars"] = vars;
     }
@@ -6797,7 +6800,7 @@ public class RunSimulator
                 ["added_keywords"] = addedKws.Count > 0 ? addedKws : null,
                 ["removed_keywords"] = removedKws.Count > 0 ? removedKws : null,
             };
-            AddCardVars(info, clone);
+            AddCardVars(info, clone, includePreviewStats: applyCombatModifiers);
             AddEnergyCostDetails(info, clone);
             AddCardEnhancements(info, card);
             return info;
@@ -7269,7 +7272,7 @@ public class RunSimulator
                     applyCombatModifiers: true,
                     useSourceDynamicContext: true),
             };
-            AddCardVars(cardInfo, card);
+            AddCardVars(cardInfo, card, includePreviewStats: true);
             AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: true);
             AddCardEnhancements(cardInfo, card);
             return cardInfo;
