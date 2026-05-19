@@ -502,6 +502,12 @@ def short_n(obj):
     """Short name only."""
     return str(obj) if obj is not None else "?"
 
+def context_display_floor(ctx):
+    """Return the player-facing map floor for room titles."""
+    if not ctx:
+        return "?"
+    return ctx.get("display_floor", ctx.get("floor", "?"))
+
 def desc(obj):
     """Extract description, strip BBCode tags, clean SmartFormat vars."""
     if obj and isinstance(obj, str):
@@ -2038,7 +2044,7 @@ def show_rest_site(state):
     print(f"\n{'─' * 60}")
     ctx = state.get("context", {})
     if ctx:
-        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
     print(f"  {c(t('Rest Site','休息处'), 'bold')}")
     show_player(state.get("player", {}))
     print()
@@ -2111,7 +2117,7 @@ def show_event(state):
     ctx = state.get("context", {})
     if ctx:
         act = n(ctx.get("act_name", "?"))
-        floor = ctx.get("floor", "?")
+        floor = context_display_floor(ctx)
         print(f"  {c(act, 'dim')} {t('Floor','层')} {floor}")
     event_label = t("Event", "事件")
     print(f"  {c(f'{event_label}: {event_display}', 'bold')}")
@@ -2150,7 +2156,7 @@ def show_event_result(state):
     ctx = state.get("context", {})
     if ctx:
         act = n(ctx.get("act_name", "?"))
-        floor = ctx.get("floor", "?")
+        floor = context_display_floor(ctx)
         print(f"  {c(act, 'dim')} {t('Floor', 'Floor')} {floor}")
     label = t("Event Result", "Event Result")
     print(f"  {c(f'{label}: {event_display}', 'bold')}")
@@ -2167,7 +2173,7 @@ def show_crystal_sphere(state):
     print(f"\n{'-' * 60}")
     ctx = state.get("context", {})
     if ctx:
-        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
     print(f"  {c(t('Crystal Sphere', '水晶球'), 'bold')}")
     show_player(state.get("player", {}))
     print()
@@ -2535,7 +2541,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
                     print("  Map not available.")
             elif state:
                 ctx = state.get("context", {})
-                print(f"  {c(n(ctx.get('act_name','?')), 'bold')} {t('Floor','层')} {ctx.get('floor','?')}")
+                print(f"  {c(n(ctx.get('act_name','?')), 'bold')} {t('Floor','层')} {context_display_floor(ctx)}")
             continue
         if raw == "save":
             if hasattr(get_input, '_save_fn'):
@@ -2851,7 +2857,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print()
 
                 act_name = n(ctx.get("act_name", "?"))
-                floor = state.get("floor", "?")
+                floor = context_display_floor(ctx) if ctx else state.get("floor", "?")
                 print(f"  {t('Act','幕')}: {state.get('act','?')} ({act_name})  {t('Floor','层')}: {floor}")
                 print(f"  {t('Character','角色')}: {n(p.get('name','?'))}")
                 print(f"  HP: {p.get('hp','?')}/{p.get('max_hp','?')}  {t('Gold','金')}: {p.get('gold','?')}")
@@ -3050,7 +3056,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
                 print(f"  {c(t('Choose a relic','选择遗物'), 'bold')}")
                 for line in card_select_context_lines(state):
                     print(f"      {c(line, 'dim')}")
@@ -3086,7 +3092,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
                 print(f"  {c(t('Empty treasure chest','空宝箱'), 'yellow')}")
                 msg = state.get("message")
                 if msg:
@@ -3103,7 +3109,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
                 print(f"  {c(t('Choose a card pack','选择一个卡牌包'), 'bold')}")
                 show_player(state.get("player", {}))
                 print()
@@ -3127,7 +3133,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {ctx.get('floor','?')}")
+                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
                 min_sel = state.get("min_select", 1)
                 max_sel = state.get("max_select", 1)
                 print(f"  {c(t('Choose cards','选择卡牌'), 'bold')} — {card_pick_quantity_hint(min_sel, max_sel)}")

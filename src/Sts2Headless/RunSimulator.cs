@@ -7758,13 +7758,20 @@ public class RunSimulator
     private Dictionary<string, object?> RunContext()
     {
         if (_runState == null) return new();
+        var mapFloor = _runState.CurrentMapCoord.HasValue
+            ? (int?)_runState.CurrentMapCoord.Value.row
+            : null;
         var ctx = new Dictionary<string, object?>
         {
             ["act"] = _runState.CurrentActIndex + 1,
             ["act_name"] = _loc.Act(_runState.Act?.Id.Entry ?? "OVERGROWTH"),
             ["floor"] = _runState.ActFloor,
+            ["engine_floor"] = _runState.ActFloor,
+            ["display_floor"] = mapFloor ?? _runState.ActFloor,
             ["room_type"] = _runState.CurrentRoom?.RoomType.ToString(),
         };
+        if (mapFloor.HasValue)
+            ctx["map_floor"] = mapFloor.Value;
 
         // Boss encounter info — use BossEncounter?.Id?.Entry
         try

@@ -84,6 +84,39 @@ def test_show_rest_site_uses_titles_and_descriptions(capsys):
     assert "LiftRestSiteOption" not in rendered
 
 
+def test_context_display_floor_prefers_player_facing_floor():
+    assert play.context_display_floor({"floor": 8, "display_floor": 7}) == 7
+    assert play.context_display_floor({"floor": 8}) == 8
+
+
+def test_show_event_uses_player_facing_floor(capsys):
+    play.LANG = "en"
+
+    play.show_event({
+        "context": {
+            "act_name": "Overgrowth",
+            "floor": 8,
+            "display_floor": 7,
+            "engine_floor": 8,
+            "map_floor": 7,
+        },
+        "event_name": "Unrest Site",
+        "player": {"name": "The Defect", "hp": 29, "max_hp": 75, "gold": 3, "deck_size": 16},
+        "options": [
+            {
+                "index": 0,
+                "title": "Rest Anyways",
+                "description": "Heal to full HP.",
+                "is_locked": False,
+            },
+        ],
+    })
+
+    rendered = plain(capsys.readouterr().out)
+    assert "Overgrowth Floor 7" in rendered
+    assert "Overgrowth Floor 8" not in rendered
+
+
 def test_render_map_lists_boss_choice(capsys):
     play.LANG = "en"
 
