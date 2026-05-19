@@ -824,6 +824,24 @@ def test_combat_inline_stat_prefers_single_target_damage():
     assert "6dmg" not in rendered
 
 
+def test_combat_inline_stat_hides_unplayable_status_damage():
+    play.LANG = "en"
+    rendered = plain(play.combat_hand_inline_stat_str(
+        {"damage": 3},
+        card={
+            "id": "CARD.INFECTION",
+            "name": "Infection",
+            "type": "Status",
+            "rarity": "Status",
+            "can_play": False,
+            "target_type": "None",
+        },
+        enemies=[],
+    ))
+
+    assert rendered == ""
+
+
 def test_target_damage_detail_lines_show_multiple_targets():
     play.LANG = "en"
     lines = [plain(line) for line in play.card_target_damage_display_lines(

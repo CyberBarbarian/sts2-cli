@@ -832,6 +832,15 @@ def single_visible_target_row(stats, enemies=None):
     return None
 
 
+def suppress_combat_inline_stats(card):
+    if not card:
+        return False
+    ctype = str(card.get("type") or "")
+    if ctype not in ("Status", "Curse"):
+        return False
+    return card.get("can_play") is False
+
+
 def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
     """Title-row 伤/挡 from RunSimulator ``stats`` (DynamicVars, keys lowercased).
 
@@ -839,6 +848,8 @@ def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
     or companion hits use ``ostydamage``. Some Necrobinder cards add Osty HP to the card
     total in text but only expose the base in ``stats``—merge using combat ``osty`` blob.
     """
+    if suppress_combat_inline_stats(card):
+        return ""
     if not stats:
         stats = {}
     parts = []
