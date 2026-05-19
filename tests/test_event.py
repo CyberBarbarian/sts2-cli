@@ -100,6 +100,7 @@ class TestFakeMerchantEvent:
         assert any(owned["id"] == relic["id"] for owned in state["player"]["relics"])
         bought = next(item for item in state["relics"] if item["index"] == relic["index"])
         assert bought["is_stocked"] is False
+        assert bought["can_buy"] is False
 
 
 class TestSlipperyBridge:

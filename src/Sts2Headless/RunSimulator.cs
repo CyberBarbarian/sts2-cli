@@ -5496,6 +5496,8 @@ public class RunSimulator
             restored["cost"] = current.GetValueOrDefault("cost");
         }
         restored["is_stocked"] = current.GetValueOrDefault("is_stocked");
+        if (current.ContainsKey("can_buy"))
+            restored["can_buy"] = current.GetValueOrDefault("can_buy");
         if (current.ContainsKey("on_sale"))
             restored["on_sale"] = current.GetValueOrDefault("on_sale");
         return restored;
