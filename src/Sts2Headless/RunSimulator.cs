@@ -4018,24 +4018,25 @@ public class RunSimulator
             var tip = EventOptionHoverTipInfo(rawTip);
             if (tip != null)
             {
-                ApplyRelicTradeHoverTipState(tip, relicTrade);
+                if (!ApplyRelicTradeHoverTipState(tip, relicTrade))
+                    ApplyOwnedRelicHoverTipState(tip);
                 tips.Add(tip);
             }
         }
         return tips.Count > 0 ? tips : null;
     }
 
-    private static void ApplyRelicTradeHoverTipState(
+    private static bool ApplyRelicTradeHoverTipState(
         Dictionary<string, object?> tip,
         Dictionary<string, object?>? relicTrade)
     {
         if (relicTrade == null)
-            return;
+            return false;
         if (!tip.TryGetValue("kind", out var kind)
             || !string.Equals(kind as string, "relic", StringComparison.OrdinalIgnoreCase))
-            return;
+            return false;
         if (!tip.TryGetValue("id", out var idValue) || idValue is not string id)
-            return;
+            return false;
 
         foreach (var key in new[] { "owned", "new" })
         {
@@ -4051,8 +4052,32 @@ public class RunSimulator
                 if (tradeRelic.TryGetValue(field, out var value))
                     tip[field] = value;
             }
-            return;
+            return true;
         }
+        return false;
+    }
+
+    private bool ApplyOwnedRelicHoverTipState(Dictionary<string, object?> tip)
+    {
+        if (!tip.TryGetValue("kind", out var kind)
+            || !string.Equals(kind as string, "relic", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!tip.TryGetValue("id", out var idValue) || idValue is not string id)
+            return false;
+
+        var player = _runState?.Players[0];
+        var ownedRelic = player?.Relics?.FirstOrDefault(
+            relic => string.Equals(relic.Id.Entry, id, StringComparison.OrdinalIgnoreCase));
+        if (ownedRelic == null)
+            return false;
+
+        var ownedInfo = RelicInfo(ownedRelic);
+        foreach (var field in new[] { "name", "description", "vars", "show_counter", "display_amount" })
+        {
+            if (ownedInfo.TryGetValue(field, out var value))
+                tip[field] = value;
+        }
+        return true;
     }
 
     private Dictionary<string, object?>? EventOptionHoverTipInfo(object? rawTip)

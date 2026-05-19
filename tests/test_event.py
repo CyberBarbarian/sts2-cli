@@ -543,6 +543,51 @@ class TestRanwidTheElder:
         assert potion["title"] == "Give Blood Potion"
         assert gold["title"] == "Give 100 Gold"
 
+    def test_relic_cost_hover_tip_preserves_owned_counter_state(self, game):
+        state = game.start(seed="ranwid-counter-tip")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            relics=["PEN_NIB", "WINGED_BOOTS"],
+            deck=["ANGER"] * 10,
+            potions=["ENERGY_POTION"],
+            gold=200,
+        )
+        state = game.enter_room("combat", encounter="TEST_SUBJECT_BOSS")
+
+        for _ in range(6):
+            attacks = [
+                card for card in state["hand"]
+                if card["id"] == "CARD.ANGER" and card["can_play"]
+            ]
+            if not attacks:
+                state = game.act("end_turn")
+                attacks = [
+                    card for card in state["hand"]
+                    if card["id"] == "CARD.ANGER" and card["can_play"]
+                ]
+            state = game.act(
+                "play_card",
+                card_index=attacks[0]["index"],
+                target_index=state["enemies"][0]["index"],
+            )
+
+        owned = next(
+            relic for relic in state["player"]["relics"]
+            if relic["id"] == "PEN_NIB"
+        )
+        state = game.enter_room("event", event="RANWID_THE_ELDER")
+        option = next(
+            option for option in state["options"]
+            if option["text_key"].endswith(".RELIC")
+        )
+        tip = next(tip for tip in option["hover_tips"] if tip.get("id") == "PEN_NIB")
+
+        assert option["title"] == "Give Pen Nib"
+        assert owned["display_amount"] == 6
+        assert tip["display_amount"] == owned["display_amount"]
+
 
 class TestFutureOfPotions:
     def test_potion_options_export_source_and_result_details(self, game):
