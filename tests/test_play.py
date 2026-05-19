@@ -92,6 +92,34 @@ def test_event_option_detail_lines_include_hover_tip_effects():
     assert any("Sown:" in line and "gain [E]" in line for line in lines)
 
 
+def test_card_detail_extension_prints_affliction_effect(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension({
+        "name": "Strike",
+        "description": "Deal 7 damage.\nBound",
+        "affliction": "Bound",
+        "affliction_description": "Only 1 Bound card can be played each turn. Cards are un-Bound at end of turn.",
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Bound: Only 1 Bound card can be played each turn." in text
+
+
+def test_card_detail_extension_prints_enchantment_effect(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension({
+        "name": "Strike",
+        "description": "Deal 7 damage.",
+        "enchantment": "Sown",
+        "enchantment_description": "The first time you play this card each combat, gain [E].",
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Sown: The first time you play this card each combat, gain [E]." in text
+
+
 def test_card_select_context_lines_include_source_event_hover_tip():
     play.LANG = "en"
 

@@ -736,6 +736,26 @@ def card_description_display_lines(card):
     return out
 
 
+def card_modifier_detail_lines(card):
+    """Explain card modifiers whose names are otherwise too terse in a terminal."""
+    lines = []
+    for name_key, desc_key, vars_key in (
+        ("enchantment", "enchantment_description", "enchantment_vars"),
+        ("affliction", "affliction_description", "affliction_vars"),
+    ):
+        name_value = card.get(name_key)
+        desc_value = card.get(desc_key)
+        if not name_value or not desc_value:
+            continue
+        title = n(name_value)
+        body = desc(desc_value)
+        if not body:
+            continue
+        body = resolve_template(body, card.get(vars_key) or {})
+        lines.append(f"{title}: {body}")
+    return lines
+
+
 def target_damage_rows(stats):
     if not stats:
         return []
@@ -1386,6 +1406,9 @@ def _format_upgrade_preview(stats, aug, current_cost=None):
 def print_card_detail_extension(card, indent="      "):
     """Description (with [prefix/keywords]) + upgrade preview; indent matches title row spacing."""
     for line in card_description_display_lines(card):
+        if line:
+            print(f"{indent}{c(line, 'dim')}")
+    for line in card_modifier_detail_lines(card):
         if line:
             print(f"{indent}{c(line, 'dim')}")
     stats = card.get("stats") or {}
