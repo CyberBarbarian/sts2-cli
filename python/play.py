@@ -1114,8 +1114,8 @@ def print_card_select_context(state):
 
 
 def card_select_combat_context_lines(state):
-    combat = state.get("combat") or {}
-    if not isinstance(combat, dict):
+    combat = state.get("combat")
+    if not isinstance(combat, dict) or not combat:
         return []
 
     lines = []

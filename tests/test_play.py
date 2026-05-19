@@ -352,6 +352,17 @@ def test_print_card_select_combat_context_shows_live_fight(capsys):
     assert "Hand" in text
 
 
+def test_card_select_combat_context_omits_non_combat_select():
+    play.LANG = "en"
+
+    lines = play.card_select_combat_context_lines({
+        "prompt": "Let Go: Transform a card in your Deck.",
+        "cards": [{"index": 0, "name": "Strike"}],
+    })
+
+    assert lines == []
+
+
 def test_deck_change_detail_lines_include_added_card_descriptions():
     play.LANG = "en"
 
