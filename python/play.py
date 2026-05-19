@@ -1856,6 +1856,19 @@ def card_pick_quantity_hint(mn, mx):
     return t(f"pick {mn}–{mx} cards", f"须选 {mn}–{mx} 张")
 
 
+def card_select_input_prompt(min_select, max_select):
+    qhint = card_pick_quantity_hint(min_select, max_select)
+    if min_select == 0:
+        return t(
+            f"Card indices, comma - {qhint} or (s)kip",
+            f"Card indices, comma - {qhint} or (s)kip",
+        )
+    return t(
+        f"Card indices, comma - {qhint}",
+        f"Card indices, comma - {qhint}",
+    )
+
+
 def show_card_reward(state):
     print(f"\n{'─' * 60}")
     gold_earned = state.get("gold_earned", 0)
@@ -3093,9 +3106,8 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         choice = ",".join(str(cards[i]["index"]) for i in range(n_pick))
                 else:
                     multi = max_sel > 1 or min_sel > 1
-                    qhint = card_pick_quantity_hint(min_sel, max_sel)
                     choice = get_input(
-                        t(f"Card indices, comma — {qhint} or (s)kip", f"卡牌编号逗号分隔 — {qhint}，或 (s)跳过"),
+                        card_select_input_prompt(min_sel, max_sel),
                         set(valid.keys()),
                         state=state,
                         multi_select=multi,
