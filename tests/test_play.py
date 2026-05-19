@@ -213,6 +213,23 @@ def test_card_select_context_lines_include_source_power_description():
     ]
 
 
+def test_card_select_context_lines_include_source_card_description():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_select_context_lines({
+        "prompt": "Choose a card to put back in your Hand.",
+        "source_card": {
+            "name": "Hologram",
+            "description": "Gain 3 Block.\nPut a card from your Discard Pile into your Hand.\nExhaust.",
+        },
+    })]
+
+    assert lines == [
+        "Choose a card to put back in your Hand.",
+        "Hologram: Gain 3 Block. Put a card from your Discard Pile into your Hand. Exhaust.",
+    ]
+
+
 def test_print_card_select_context_shows_source_prompt(capsys):
     play.LANG = "en"
 

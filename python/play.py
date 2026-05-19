@@ -1061,6 +1061,17 @@ def card_select_context_lines(state):
         elif description:
             lines.append(description)
 
+    source_card = state.get("source_card") or {}
+    if source_card:
+        name = n(source_card.get("name"))
+        description = " ".join(card_description_display_lines(source_card)) or resolved_description(source_card)
+        if name and description:
+            lines.append(f"{name}: {description}")
+        elif name:
+            lines.append(name)
+        elif description:
+            lines.append(description)
+
     source_power = state.get("source_power") or {}
     if source_power:
         name = n(source_power.get("name"))

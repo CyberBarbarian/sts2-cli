@@ -897,6 +897,39 @@ class TestCombatEdgeCases:
         assert state["decision"] == "card_select"
         assert state["prompt"] == "Choose a card to put on top of your Draw Pile."
 
+    def test_delayed_discard_selection_exports_played_source_card(self, game):
+        state = game.start(character="Defect", seed="hologram-selection-source")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "TURBO",
+                "HOLOGRAM",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "STRIKE_DEFECT",
+            ],
+        )
+        game.set_draw_order([
+            "TURBO",
+            "HOLOGRAM",
+            "DEFEND_DEFECT",
+            "DEFEND_DEFECT",
+            "STRIKE_DEFECT",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        turbo = next(card for card in state["hand"] if card["id"] == "CARD.TURBO")
+        state = game.act("play_card", card_index=turbo["index"])
+        hologram = next(card for card in state["hand"] if card["id"] == "CARD.HOLOGRAM")
+        state = game.act("play_card", card_index=hologram["index"])
+
+        assert state["decision"] == "card_select"
+        assert state["prompt"] == "Choose a card to put back in your Hand."
+        assert state["source_card"]["name"] == "Hologram"
+        assert "Discard Pile" in state["source_card"]["description"]
+
     def test_start_of_turn_power_card_select_exports_prompt_and_source(self, game):
         state = game.start(character="Defect", seed="entropy-selection-source")
         game.skip_neow(state)
