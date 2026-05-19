@@ -56,6 +56,34 @@ def test_enemy_intent_labels_are_text_not_symbols():
     assert all(ord(ch) < 128 for ch in rendered)
 
 
+def test_orb_labels_include_next_evoke_and_position():
+    play.LANG = "en"
+
+    parts = play.orb_display_parts([
+        {
+            "name": "Frost",
+            "type": "Frost",
+            "passive": 2,
+            "evoke": 5,
+            "position_label": "rightmost",
+            "is_next_to_evoke": True,
+        },
+        {
+            "name": "Glass",
+            "type": "Glass",
+            "passive": 4,
+            "evoke": 8,
+            "position_label": "leftmost",
+            "is_next_to_evoke": False,
+        },
+    ])
+
+    rendered = plain(" ".join(parts))
+    assert "Frost(2/5; rightmost,next)" in rendered
+    assert "Glass(4/8; leftmost)" in rendered
+    assert all(ord(ch) < 128 for ch in rendered)
+
+
 def test_zh_enemy_intent_labels_are_localized_text():
     play.LANG = "zh"
 

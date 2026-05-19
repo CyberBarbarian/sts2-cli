@@ -2863,13 +2863,31 @@ public class RunSimulator
             var orbQueue = pcs?.OrbQueue;
             if (orbQueue?.Orbs?.Count > 0)
             {
-                result["orbs"] = orbQueue.Orbs.Select((orb, i) => new Dictionary<string, object?>
+                var orbCount = orbQueue.Orbs.Count;
+                result["orbs"] = orbQueue.Orbs.Select((orb, i) =>
                 {
-                    ["index"] = i,
-                    ["name"] = _loc.Bilingual("orbs", orb.Id.Entry + ".title"),
-                    ["type"] = orb.GetType().Name.Replace("Orb", ""),
-                    ["passive"] = (int)orb.PassiveVal,
-                    ["evoke"] = (int)orb.EvokeVal,
+                    var isRightmost = i == 0;
+                    var isLeftmost = i == orbCount - 1;
+                    var positionLabel = isRightmost
+                        ? "rightmost"
+                        : isLeftmost
+                            ? "leftmost"
+                            : $"{i + 1} from right";
+                    return new Dictionary<string, object?>
+                    {
+                        ["index"] = i,
+                        ["name"] = _loc.Bilingual("orbs", orb.Id.Entry + ".title"),
+                        ["type"] = orb.GetType().Name.Replace("Orb", ""),
+                        ["passive"] = (int)orb.PassiveVal,
+                        ["evoke"] = (int)orb.EvokeVal,
+                        ["evoke_order"] = i + 1,
+                        ["is_next_to_evoke"] = isRightmost,
+                        ["is_rightmost"] = isRightmost,
+                        ["is_leftmost"] = isLeftmost,
+                        ["position_from_right"] = i,
+                        ["position_from_left"] = orbCount - 1 - i,
+                        ["position_label"] = positionLabel,
+                    };
                 }).ToList();
                 result["orb_slots"] = orbQueue.Capacity;
             }

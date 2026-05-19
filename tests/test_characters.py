@@ -11,6 +11,38 @@ class TestCharacterMechanics:
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         assert "orbs" in state or "orb_slots" in state
 
+    def test_defect_orbs_export_engine_evoke_order(self, game):
+        state = game.start(character="Defect", seed="defect-orb-order")
+        game.skip_neow(state)
+        game.set_player(
+            relics=[],
+            deck=[
+                "COOLHEADED",
+                "COOLHEADED",
+                "GLASSWORK",
+                "QUADCAST",
+                "DEFEND_DEFECT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        for name in ["Coolheaded", "Coolheaded", "Glasswork"]:
+            card = next(c for c in state["hand"] if c["name"] == name)
+            state = game.act("play_card", card_index=card["index"])
+
+        orbs = state["orbs"]
+        assert [orb["type"] for orb in orbs] == ["Frost", "Frost", "Glass"]
+        assert orbs[0]["is_next_to_evoke"] is True
+        assert orbs[0]["position_label"] == "rightmost"
+        assert orbs[-1]["is_next_to_evoke"] is False
+        assert orbs[-1]["position_label"] == "leftmost"
+
+        state = game.act("end_turn")
+        quadcast = next(c for c in state["hand"] if c["name"] == "Quadcast")
+        state = game.act("play_card", card_index=quadcast["index"])
+        assert state["player"]["block"] == 20
+        assert [orb["type"] for orb in state["orbs"]] == ["Frost", "Glass"]
+
     def test_regent_has_stars(self, game):
         state = game.start(character="Regent", seed="dm2")
         game.skip_neow(state)

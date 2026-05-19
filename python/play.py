@@ -958,6 +958,23 @@ def enemy_intent_display_parts(intents):
     return parts
 
 
+def orb_display_parts(orbs):
+    """Return text-only orb labels with engine evoke-order hints."""
+    parts = []
+    for orb in orbs or []:
+        otype = orb.get("type", "?")
+        pv, ev = orb.get("passive", 0), orb.get("evoke", 0)
+        labels = []
+        position = orb.get("position_label")
+        if position:
+            labels.append(str(position))
+        if orb.get("is_next_to_evoke"):
+            labels.append("next")
+        label_text = f"; {','.join(labels)}" if labels else ""
+        parts.append(f"{n(orb.get('name', otype))}({pv}/{ev}{label_text})")
+    return parts
+
+
 def hover_tip_display_lines(tip):
     """Render an exported hover tip without inventing game semantics."""
     if not isinstance(tip, dict):
@@ -1274,13 +1291,7 @@ def show_combat(state):
     # Character-specific: Defect's Orbs
     orbs = state.get("orbs")
     if orbs:
-        orb_icons = {"Lightning": "⚡", "Frost": "❄", "Dark": "🌑", "Plasma": "🔆", "Glass": "💠"}
-        orb_parts = []
-        for orb in orbs:
-            otype = orb.get("type", "?")
-            icon = orb_icons.get(otype, "○")
-            pv, ev = orb.get("passive", 0), orb.get("evoke", 0)
-            orb_parts.append(f"{icon}{n(orb.get('name', otype))}({pv}/{ev})")
+        orb_parts = orb_display_parts(orbs)
         slots = state.get("orb_slots", len(orbs))
         print(f"    {t('Orbs','充能球')} [{len(orbs)}/{slots}]: {' '.join(orb_parts)}")
 
