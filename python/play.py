@@ -946,6 +946,15 @@ def resolved_description(obj):
     return d
 
 
+def power_is_debuff(power):
+    """Use the exported engine power type when available; fall back only for legacy logs."""
+    power_type = str(power.get("type") or power.get("power_type") or "").lower()
+    if power_type:
+        return "debuff" in power_type
+    amount = power.get("amount", 0)
+    return isinstance(amount, (int, float)) and amount < 0
+
+
 def enemy_intent_display_parts(intents):
     """Return text-only monster intent labels; colors are terminal styling only."""
     parts = []
@@ -1516,7 +1525,7 @@ def show_combat(state):
             pw_desc = desc(pw.get("description", ""))
             if pw_desc and amt:
                 pw_desc = resolve_template(pw_desc, {"Amount": abs(amt) if isinstance(amt, (int, float)) else amt})
-            is_debuff = isinstance(amt, (int, float)) and amt < 0
+            is_debuff = power_is_debuff(pw)
             color = "red" if is_debuff else "green"
             label = t("Debuff", "减益") if is_debuff else t("Buff", "增益")
             desc_str = f": {c(pw_desc, 'dim')}" if pw_desc else ""

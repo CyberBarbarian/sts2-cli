@@ -2821,15 +2821,7 @@ public class RunSimulator
 
                 // Enemy powers
                 var enemyName = MonsterDisplayName(e.Monster, e);
-                var ePowers = e.Powers?.Select(pw =>
-                {
-                    return new Dictionary<string, object?>
-                    {
-                        ["name"] = PowerName(pw),
-                        ["description"] = PowerDescription(pw),
-                        ["amount"] = pw.Amount,
-                    };
-                }).ToList();
+                var ePowers = e.Powers?.Select(PowerInfo).ToList();
 
                 var enemyInfo = new Dictionary<string, object?>
                 {
@@ -2864,15 +2856,7 @@ public class RunSimulator
             .Select(entry =>
             {
                 var e = entry.Enemy;
-                var ePowers = e.Powers?.Select(pw =>
-                {
-                    return new Dictionary<string, object?>
-                    {
-                        ["name"] = PowerName(pw),
-                        ["description"] = PowerDescription(pw),
-                        ["amount"] = pw.Amount,
-                    };
-                }).ToList();
+                var ePowers = e.Powers?.Select(PowerInfo).ToList();
 
                 var enemyInfo = new Dictionary<string, object?>
                 {
@@ -2899,15 +2883,7 @@ public class RunSimulator
             }).ToList();
 
         // Player powers/buffs
-        var playerPowers = player.Creature?.Powers?.Select(pw =>
-        {
-            return new Dictionary<string, object?>
-            {
-                ["name"] = PowerName(pw),
-                ["description"] = PowerDescription(pw),
-                ["amount"] = pw.Amount,
-            };
-        }).ToList();
+        var playerPowers = player.Creature?.Powers?.Select(PowerInfo).ToList();
 
         var drawPile = CombatPileInfo(pcs?.DrawPile?.Cards, player);
         var discardPile = CombatPileInfo(pcs?.DiscardPile?.Cards, player);

@@ -144,6 +144,39 @@ def test_combat_view_does_not_duplicate_keyword_lines_in_title(capsys):
     assert "Eternal.\n" in text
 
 
+def test_player_positive_debuff_powers_are_labeled_as_debuffs(capsys):
+    play.LANG = "en"
+
+    play.show_combat({
+        "round": 1,
+        "energy": 3,
+        "max_energy": 3,
+        "draw_pile_count": 0,
+        "discard_pile_count": 0,
+        "player": {"name": "The Silent", "hp": 56, "max_hp": 70, "gold": 99, "deck_size": 13},
+        "player_powers": [
+            {
+                "name": "Vulnerable",
+                "description": "Vulnerable creatures take 50% more damage from Attacks.",
+                "amount": 3,
+                "type": "Debuff",
+            },
+            {
+                "name": "Double Damage",
+                "description": "This turn, Attacks deal double damage.",
+                "amount": 1,
+                "type": "Buff",
+            },
+        ],
+        "enemies": [],
+        "hand": [],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Debuff Vulnerable 3" in text
+    assert "Buff Double Damage 1" in text
+
+
 def test_event_option_detail_lines_include_hover_tip_effects():
     play.LANG = "en"
 

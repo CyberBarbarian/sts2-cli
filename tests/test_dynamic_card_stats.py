@@ -981,6 +981,7 @@ class TestDynamicCardStats:
 
         vulnerable = next(power for power in state["player_powers"] if power["name"] == "Vulnerable")
 
+        assert vulnerable["type"] == "Debuff"
         assert "{" not in vulnerable["description"]
         assert "50% more damage" in vulnerable["description"]
 
