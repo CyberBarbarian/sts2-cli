@@ -5399,6 +5399,12 @@ public class RunSimulator
                 var name = value.GetType().GetProperty("Name")?.GetValue(value)?.ToString();
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
+                if (value is StringVar)
+                {
+                    vars[name] = value.ToString();
+                    continue;
+                }
+
                 var baseValue = value.GetType().GetProperty("BaseValue")?.GetValue(value);
                 vars[name] = baseValue;
             }

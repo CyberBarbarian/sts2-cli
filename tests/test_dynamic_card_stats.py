@@ -895,6 +895,28 @@ class TestDynamicCardStats:
         assert "{Amount:plural" not in power["description"]
         assert "Exhaust the top card" in power["description"]
 
+    def test_nightmare_power_description_interpolates_selected_card(self, game):
+        state = game.start(character="Silent", seed="nightmare-power-description")
+        game.skip_neow(state)
+        game.set_player(deck=[
+            "NIGHTMARE",
+            "DEFEND_SILENT",
+            "STRIKE_SILENT",
+            "DEFEND_SILENT",
+            "DEFEND_SILENT",
+        ])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        nightmare = next(c for c in state["hand"] if c["name"] == "Nightmare")
+
+        state = game.act("play_card", card_index=nightmare["index"])
+        defend = next(c for c in state["cards"] if c["name"] == "Defend")
+        state = game.act("select_cards", indices=str(defend["index"]))
+        power = next(p for p in state["player_powers"] if p["name"] == "Nightmare")
+
+        assert "Defend" in power["description"]
+        assert "0 cards" not in power["description"]
+        assert "{" not in power["description"]
+
     def test_power_description_removes_empty_plural_spacing(self, game):
         state = game.start(character="Defect", seed="power-description-empty-plural")
         game.skip_neow(state)
