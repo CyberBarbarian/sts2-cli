@@ -1658,6 +1658,11 @@ def show_combat_reward(state):
         description = reward.get("description")
         if description:
             print(f"      {desc(description)}")
+        if reward.get("can_claim") is False:
+            reason = reward.get("blocked_reason") or "blocked"
+            print(f"      {c(t(f'Cannot claim: {reason}.', f'Cannot claim: {reason}.'), 'yellow')}")
+        if reward.get("can_skip"):
+            print(f"      {c(t(f'Type s{idx} to skip this reward.', f'Type s{idx} to skip this reward.'), 'dim')}")
 
 def show_shop(state):
     print(f"\n{'─' * 60}")
@@ -2648,18 +2653,30 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 show_combat_reward(state)
                 rewards = state.get("rewards", [])
                 valid = {str(r["index"]): r for r in rewards}
+                for r in rewards:
+                    if r.get("can_skip"):
+                        valid[f"s{r['index']}"] = r
 
                 if auto:
-                    choice = str(rewards[0]["index"]) if rewards else "0"
+                    if not rewards:
+                        choice = "0"
+                    elif rewards[0].get("can_claim") is False and rewards[0].get("can_skip"):
+                        choice = f"s{rewards[0]['index']}"
+                    else:
+                        choice = str(rewards[0]["index"])
                 else:
                     choice = get_input(
-                        "Claim reward index",
+                        "Claim reward index, or s<index> to skip an optional reward",
                         set(valid.keys()),
                         state=state,
                     )
 
-                state = send({"cmd": "action", "action": "claim_reward",
-                              "args": {"reward_index": int(choice)}})
+                if choice.startswith("s"):
+                    state = send({"cmd": "action", "action": "skip_reward",
+                                  "args": {"reward_index": int(choice[1:])}})
+                else:
+                    state = send({"cmd": "action", "action": "claim_reward",
+                                  "args": {"reward_index": int(choice)}})
 
             elif dec == "card_reward":
                 show_card_reward(state)

@@ -1020,6 +1020,8 @@ public class RunSimulator
                     return DoSkipCardReward(player);
                 case "claim_reward":
                     return DoClaimCombatReward(player, args);
+                case "skip_reward":
+                    return DoSkipCombatReward(player, args);
                 case "buy_card":
                     return DoBuyCard(player, args);
                 case "buy_relic":
@@ -1560,6 +1562,35 @@ public class RunSimulator
         }
 
         return DetectDecisionPoint();
+    }
+
+    private Dictionary<string, object?> DoSkipCombatReward(Player player, Dictionary<string, object?>? args)
+    {
+        if (_pendingRewards == null || _pendingRewards.Count == 0)
+            return Error("No pending combat rewards");
+        if (args == null || !args.ContainsKey("reward_index"))
+            return Error("skip_reward requires 'reward_index'");
+
+        var rewardIndex = Convert.ToInt32(args["reward_index"]);
+        if (rewardIndex < 0 || rewardIndex >= _pendingRewards.Count)
+            return Error($"Invalid reward_index {rewardIndex}, {_pendingRewards.Count} rewards pending");
+
+        var reward = _pendingRewards[rewardIndex];
+        if (!CanSkipCombatReward(reward))
+            return Error($"Reward {rewardIndex} ({reward.GetType().Name}) cannot be skipped");
+
+        Log($"Skipping combat reward {rewardIndex}: {reward.GetType().Name}");
+        _pendingRewards.RemoveAt(rewardIndex);
+        return DetectDecisionPoint();
+    }
+
+    private static bool CanSkipCombatReward(Reward reward)
+    {
+        if (reward is MegaCrit.Sts2.Core.Rewards.PotionReward)
+            return true;
+        if (reward is CardReward cardReward)
+            return cardReward.CanSkip;
+        return false;
     }
 
     private static bool HasOpenPotionSlot(Player player)
@@ -3195,7 +3226,7 @@ public class RunSimulator
         if (_pendingRewards != null)
         {
             var claimableRewards = _pendingRewards
-                .Select((reward, i) => CombatRewardInfo(reward, i))
+                .Select((reward, i) => CombatRewardInfo(reward, i, player))
                 .ToList();
 
             if (claimableRewards.Count > 0)
@@ -3291,7 +3322,7 @@ public class RunSimulator
         };
     }
 
-    private Dictionary<string, object?> CombatRewardInfo(Reward reward, int index)
+    private Dictionary<string, object?> CombatRewardInfo(Reward reward, int index, Player? player = null)
     {
         var kind = CombatRewardKind(reward);
         var info = new Dictionary<string, object?>
@@ -3300,6 +3331,9 @@ public class RunSimulator
             ["kind"] = kind,
             ["type_name"] = reward.GetType().Name,
         };
+        var canSkip = CanSkipCombatReward(reward);
+        info["can_skip"] = canSkip;
+        info["can_claim"] = true;
 
         if (kind == "gold")
         {
@@ -3323,6 +3357,11 @@ public class RunSimulator
             {
                 foreach (var kv in PotionInfo(potion, index))
                     info[kv.Key] = kv.Value;
+            }
+            if (player != null && !HasOpenPotionSlot(player))
+            {
+                info["can_claim"] = false;
+                info["blocked_reason"] = "potion_slots_full";
             }
         }
         else if (kind == "card")

@@ -276,6 +276,9 @@ class TestPotionActions:
                 state = game.act("end_turn")
 
         potion_reward = next(r for r in state["rewards"] if r["kind"] == "potion")
+        assert potion_reward["can_claim"] is False
+        assert potion_reward["can_skip"] is True
+        assert potion_reward["blocked_reason"] == "potion_slots_full"
 
         result = game.act("claim_reward", reward_index=potion_reward["index"])
 
@@ -288,6 +291,33 @@ class TestPotionActions:
         state = game.act("claim_reward", reward_index=potion_reward["index"])
 
         assert any(p["name"] == "Orobic Acid" for p in state["player"]["potions"])
+
+    def test_full_potion_reward_can_be_skipped_without_discarding(self, game):
+        state = game.start(seed="full-potion-reward-1", ascension=10)
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            potions=["STRENGTH_POTION", "STRENGTH_POTION"],
+            deck=["BLUDGEON"] * 8,
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        for _ in range(10):
+            if state["decision"] != "combat_play":
+                break
+            bludgeon = next(c for c in state["hand"] if c["name"] == "Bludgeon" and c["can_play"])
+            state = game.act("play_card", card_index=bludgeon["index"], target_index=0)
+            if state["decision"] == "combat_play":
+                state = game.act("end_turn")
+
+        before_potions = [p["id"] for p in state["player"]["potions"]]
+        potion_reward = next(r for r in state["rewards"] if r["kind"] == "potion")
+
+        state = game.act("skip_reward", reward_index=potion_reward["index"])
+
+        assert [p["id"] for p in state["player"]["potions"]] == before_potions
+        assert all(r["kind"] != "potion" for r in state.get("rewards", []))
 
     def test_player_export_includes_empty_potion_slots_after_potion_belt(self, game):
         state = game.start(seed="potion-belt-slot-export")

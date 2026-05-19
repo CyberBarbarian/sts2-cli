@@ -418,6 +418,37 @@ def test_zh_combat_rewards_are_localized(capsys):
     assert any("\u4e00" <= ch <= "\u9fff" for ch in text)
 
 
+def test_combat_reward_shows_optional_skip_affordance(capsys):
+    play.LANG = "en"
+
+    play.show_combat_reward({
+        "player": {
+            "name": "The Defect",
+            "hp": 70,
+            "max_hp": 70,
+            "gold": 99,
+            "deck_size": 10,
+            "relics": [],
+            "potions": [],
+        },
+        "rewards": [
+            {
+                "index": 1,
+                "kind": "potion",
+                "name": "Block Potion",
+                "description": "Gain 12 Block.",
+                "can_claim": False,
+                "can_skip": True,
+                "blocked_reason": "potion_slots_full",
+            },
+        ],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Cannot claim: potion_slots_full." in text
+    assert "Type s1 to skip this reward." in text
+
+
 def test_show_player_includes_potion_slot_capacity(capsys):
     play.LANG = "en"
 
