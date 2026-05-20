@@ -1315,6 +1315,44 @@ def _potion_key(potion):
     return potion.get("id") or potion.get("name") or str(potion)
 
 
+def _relic_key(relic):
+    if not isinstance(relic, dict):
+        return str(relic)
+    return relic.get("id") or relic.get("name") or str(relic)
+
+
+def added_relics(old_relics, new_relics):
+    from collections import Counter
+
+    remaining = Counter(_relic_key(relic) for relic in old_relics or [] if relic)
+    added = []
+    for relic in new_relics or []:
+        if not relic:
+            continue
+        key = _relic_key(relic)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+        else:
+            added.append(relic)
+    return added
+
+
+def relic_change_detail_lines(old_relics, new_relics):
+    lines = []
+    for relic in added_relics(old_relics, new_relics):
+        if not isinstance(relic, dict):
+            continue
+        lines.append(c(f"+{n(relic.get('name', '?'))}", "green"))
+        description = desc(relic.get("description", ""))
+        vars_dict = relic.get("vars") or {}
+        description = resolve_template(description, vars_dict) if vars_dict else description
+        if description:
+            for line in description.splitlines():
+                if line:
+                    lines.append(f"  {line}")
+    return lines
+
+
 def added_potions(old_potions, new_potions):
     from collections import Counter
 
@@ -1365,6 +1403,8 @@ def player_state_change_lines(old_state, new_state):
     new_max_hp = new_player.get("max_hp", 0)
     old_gold = old_player.get("gold", 0)
     new_gold = new_player.get("gold", 0)
+    old_relic_list = [r for r in old_player.get("relics", []) if r]
+    new_relic_list = [r for r in new_player.get("relics", []) if r]
     old_potions = [p for p in old_player.get("potions", []) if p]
     new_potions = [p for p in new_player.get("potions", []) if p]
 
@@ -1410,6 +1450,10 @@ def player_state_change_lines(old_state, new_state):
     if card_detail_lines:
         lines.append(c(t("Card details:", "Card details:"), "yellow"))
         lines.extend(f"  {line}" for line in card_detail_lines)
+    relic_detail_lines = relic_change_detail_lines(old_relic_list, new_relic_list)
+    if relic_detail_lines:
+        lines.append(c(t("Relic details:", "Relic details:"), "yellow"))
+        lines.extend(f"  {line}" for line in relic_detail_lines)
     potion_detail_lines = potion_change_detail_lines(old_potions, new_potions)
     if potion_detail_lines:
         lines.append(c(t("Potion details:", "Potion details:"), "yellow"))

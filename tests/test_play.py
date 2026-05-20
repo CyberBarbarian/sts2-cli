@@ -762,7 +762,7 @@ def test_player_state_change_lines_include_reward_relic_upgrade_details():
             "max_hp": 70,
             "gold": 99,
             "deck_size": 1,
-            "relics": [{"name": "Whetstone"}],
+            "relics": [{"name": "Whetstone", "description": "Upon pickup, Upgrade 2 random Attacks."}],
             "deck": [
                 {
                     "id": "CARD.STRIKE",
@@ -781,6 +781,9 @@ def test_player_state_change_lines_include_reward_relic_upgrade_details():
     assert any("Card details:" in line for line in lines)
     assert any("+Strike+" in line and "Attack" in line for line in lines)
     assert any("Deal 9 damage." in line for line in lines)
+    assert any("Relic details:" in line for line in lines)
+    assert any("+Whetstone" in line for line in lines)
+    assert any("Upon pickup, Upgrade 2 random Attacks." in line for line in lines)
     assert any("Relic: Whetstone" in line for line in lines)
 
 
