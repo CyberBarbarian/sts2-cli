@@ -3636,7 +3636,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     print(f"  {c(f'Pack [{bidx}]:', 'yellow')}")
                     for cd in b.get("cards", []):
                         sp = format_card_suffix_keywords_for_card(cd)
-                        print(f"    {n(cd['name'])} ({cd.get('cost','?')}) {c(cd.get('type',''), 'dim')}{sp}")
+                        print(f"    {n(cd['name'])} ({card_cost_label(cd)}) {c(cd.get('type',''), 'dim')}{sp}")
                         print_card_detail_extension(cd, indent="      ", include_hover_tips=True)
                 valid = {str(b["index"]): b for b in bundles}
                 if auto:
@@ -3666,7 +3666,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     up = c("+", "green") if cd.get("upgraded") else ""
                     sp = format_card_suffix_keywords_for_card(cd)
                     type_rarity = card_type_rarity_suffix(cd)
-                    print(f"  [{cd['index']}] {n(cd['name'])}{up} ({cd.get('cost','?')}){type_rarity}{sp}")
+                    print(f"  [{cd['index']}] {n(cd['name'])}{up} ({card_cost_label(cd)}){type_rarity}{sp}")
                     print_card_detail_extension(
                         cd,
                         indent="      ",
