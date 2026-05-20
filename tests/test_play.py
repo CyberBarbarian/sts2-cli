@@ -49,6 +49,41 @@ def test_card_type_rarity_suffix_keeps_distinct_labels():
     assert rendered == " Attack Basic"
 
 
+def test_shop_cards_use_shared_type_and_rarity_display(capsys):
+    play.LANG = "en"
+
+    play.show_shop({
+        "player": {
+            "name": "The Defect",
+            "hp": 70,
+            "max_hp": 70,
+            "gold": 99,
+            "deck_size": 10,
+            "relics": [],
+            "potions": [],
+        },
+        "cards": [
+            {
+                "index": 2,
+                "name": "Seven Stars",
+                "cost": 2,
+                "price": 88,
+                "type": "Skill",
+                "rarity": "Rare",
+                "is_stocked": True,
+                "description": "Deal 7 damage to ALL enemies 7 times.",
+            },
+        ],
+        "relics": [],
+        "potions": [],
+    })
+
+    text = plain(capsys.readouterr().out)
+
+    assert "[2] Seven Stars (2) Skill Rare" in text
+    assert "88g" in text
+
+
 def test_node_color_uses_distinct_map_type_colors():
     assert play.node_color("Monster") == "red"
     assert play.node_color("Elite") == "magenta"
@@ -899,6 +934,32 @@ def test_card_select_upgrade_description_is_enabled_for_smith():
     })
 
 
+def test_card_select_upgrade_description_is_enabled_for_card_upgrade_effect():
+    english_state = {
+        "decision": "card_select",
+        "combat": {"round": 1},
+        "source_card": {
+            "name": "Armaments",
+            "description": "Gain 5 Block.\nUpgrade a card in your Hand for the rest of combat.",
+        },
+        "prompt": "Choose a Card.",
+    }
+    assert play.card_select_should_show_upgrade_description(english_state)
+    assert play.card_select_should_show_upgrade_summary(english_state)
+
+    zh_state = {
+        "decision": "card_select",
+        "combat": {"round": 1},
+        "source_card": {
+            "name": "武装",
+            "description": "获得5点格挡。\n升级你手牌中的一张牌，本场战斗持续。",
+        },
+        "prompt": "选择一张牌。",
+    }
+    assert play.card_select_should_show_upgrade_description(zh_state)
+    assert play.card_select_should_show_upgrade_summary(zh_state)
+
+
 def test_card_select_upgrade_summary_is_hidden_for_combat_effect_select():
     assert not play.card_select_should_show_upgrade_summary({
         "decision": "card_select",
@@ -1151,7 +1212,58 @@ def test_player_state_change_lines_include_reward_relic_upgrade_details():
     assert any("Relic details:" in line for line in lines)
     assert any("+Whetstone" in line for line in lines)
     assert any("Upon pickup, Upgrade 2 random Attacks." in line for line in lines)
+    assert any("Deck: " in line and "↑Strike" in line for line in lines)
     assert any("Relic: Whetstone" in line for line in lines)
+
+
+def test_choose_treasure_relic_prints_relic_triggered_deck_changes(capsys):
+    play.LANG = "en"
+    old_state = {
+        "player": {
+            "hp": 70,
+            "max_hp": 70,
+            "gold": 99,
+            "deck_size": 1,
+            "relics": [],
+            "deck": [
+                {"id": "CARD.STRIKE", "name": "Strike", "cost": 1, "type": "Attack", "upgraded": False},
+            ],
+        },
+        "relics": [
+            {"index": 0, "id": "WHETSTONE", "name": "Whetstone"},
+        ],
+    }
+
+    def send(_cmd):
+        return {
+            "decision": "map_select",
+            "player": {
+                "hp": 70,
+                "max_hp": 70,
+                "gold": 99,
+                "deck_size": 1,
+                "relics": [{"id": "WHETSTONE", "name": "Whetstone", "description": "Upon pickup, Upgrade 2 random Attacks."}],
+                "deck": [
+                    {
+                        "id": "CARD.STRIKE",
+                        "name": "Strike",
+                        "cost": 1,
+                        "type": "Attack",
+                        "upgraded": True,
+                        "description": "Deal 9 damage.",
+                    },
+                ],
+            },
+        }
+
+    state = play.choose_treasure_relic(send, old_state, "0")
+    text = plain(capsys.readouterr().out)
+
+    assert state["decision"] == "map_select"
+    assert "Card details:" in text
+    assert "+Strike+" in text
+    assert "Deal 9 damage." in text
+    assert "Relic: Whetstone" in text
 
 
 def test_player_state_change_lines_include_added_potion_details():
@@ -1266,6 +1378,63 @@ def test_state_change_lines_can_include_potion_hand_cost_changes():
     assert any("Hand changes: Bash: cost 2 -> 0" in line for line in lines)
 
 
+def test_state_change_lines_include_new_exhaust_pile_cards():
+    play.LANG = "en"
+
+    old_state = {
+        "decision": "combat_play",
+        "player": {"hp": 79, "max_hp": 80, "gold": 119, "deck_size": 13},
+        "exhaust_pile": [
+            {"instance_id": "old-slimed", "name": "Slimed"},
+        ],
+        "exhaust_pile_count": 1,
+    }
+    new_state = {
+        "decision": "combat_play",
+        "player": {"hp": 79, "max_hp": 80, "gold": 119, "deck_size": 13},
+        "exhaust_pile": [
+            {"instance_id": "old-slimed", "name": "Slimed"},
+            {"instance_id": "top-strike", "name": "Strike"},
+        ],
+        "exhaust_pile_count": 2,
+    }
+
+    lines = [plain(line) for line in play.state_change_lines(old_state, new_state)]
+
+    assert any("Exhaust Pile: +Strike" in line for line in lines)
+
+
+def test_state_change_lines_include_shuffle_hint_when_discard_refills_draw():
+    play.LANG = "en"
+
+    old_state = {
+        "decision": "combat_play",
+        "player": {"hp": 79, "max_hp": 80, "gold": 119, "deck_size": 13},
+        "draw_pile": [],
+        "draw_pile_count": 0,
+        "discard_pile": [
+            {"instance_id": "discard-strike", "name": "Strike"},
+            {"instance_id": "discard-defend", "name": "Defend"},
+        ],
+        "discard_pile_count": 2,
+    }
+    new_state = {
+        "decision": "combat_play",
+        "player": {"hp": 79, "max_hp": 80, "gold": 119, "deck_size": 13},
+        "draw_pile": [
+            {"instance_id": "discard-strike", "name": "Strike"},
+        ],
+        "draw_pile_count": 1,
+        "discard_pile": [],
+        "discard_pile_count": 0,
+    }
+
+    lines = [plain(line) for line in play.state_change_lines(old_state, new_state)]
+
+    assert any("Shuffle:" in line for line in lines)
+    assert any("discard -> draw" in line for line in lines)
+
+
 def test_prompt_start_options_lets_player_choose_character_and_ascension():
     play.LANG = "en"
     answers = iter(["2", "3", "7"])
@@ -1355,9 +1524,13 @@ def test_zh_start_summary_prefers_engine_player_name():
 def test_zh_pile_display_lines_are_localized():
     play.LANG = "zh"
 
-    text = plain("\n".join(play.pile_display_lines("draw", [], count=0)))
+    text = plain("\n".join(
+        play.pile_display_lines("draw", [], count=0)
+        + play.pile_display_lines("exhaust", [], count=0)
+    ))
 
     assert "Draw Pile" not in text
+    assert "Exhaust Pile" not in text
     assert "Empty" not in text
     assert any("\u4e00" <= ch <= "\u9fff" for ch in text)
 
@@ -1438,6 +1611,34 @@ def test_combat_reward_choice_to_command_discards_potion():
         "action": "discard_potion",
         "args": {"potion_index": 1},
     }
+
+
+def test_combat_reward_full_potion_error_keeps_reward_state_and_mentions_cli_discard(capsys):
+    play.LANG = "en"
+    state = {
+        "decision": "combat_reward",
+        "player": {
+            "potions": [
+                {"slot": 0, "name": "Fire Potion"},
+                {"slot": 1, "name": "Block Potion"},
+            ],
+        },
+        "rewards": [{"index": 0, "type": "potion", "name": "Swift Potion"}],
+    }
+
+    def send(_cmd):
+        return {
+            "type": "error",
+            "error": "Potion slots are full; use discard_potion before claiming this potion reward",
+        }
+
+    result = play.choose_combat_reward(send, state, "0")
+    text = plain(capsys.readouterr().out)
+
+    assert result is state
+    assert "discard_potion" not in text
+    assert "d0" in text
+    assert "d1" in text
 
 
 def test_card_reward_marks_upgraded_cards(capsys):
@@ -1633,6 +1834,14 @@ def test_get_input_rejects_sequence_outside_combat(monkeypatch, capsys):
 
     assert choice == "s"
     assert "Invalid. Options:" in plain(capsys.readouterr().out)
+
+
+def test_get_input_accepts_enter_when_empty_string_is_valid(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+
+    choice = play.get_input("Press Enter to proceed", {""}, state={"decision": "treasure"})
+
+    assert choice == ""
 
 
 def test_zh_crystal_sphere_labels_are_localized(capsys):
@@ -2203,6 +2412,35 @@ def test_execute_card_sequence_does_not_warn_when_combat_ends():
 
     assert result["decision"] == "combat_reward"
     assert messages == []
+
+
+def test_execute_card_sequence_reports_exhaust_pile_changes():
+    state = {
+        "decision": "combat_play",
+        "energy": 3,
+        "hand": [
+            {"index": 0, "name": "Drum of Battle", "cost": 1, "energy_cost": 1, "can_play": True, "target_type": "None"},
+        ],
+        "enemies": [],
+        "exhaust_pile": [],
+    }
+    messages = []
+
+    def send(_cmd):
+        return {
+            "decision": "combat_play",
+            "energy": 2,
+            "hand": [],
+            "enemies": [],
+            "exhaust_pile": [
+                {"instance_id": "top-defend", "name": "Defend"},
+            ],
+        }
+
+    result = play.execute_card_sequence(state, [0], send, output_fn=messages.append)
+
+    assert result["decision"] == "combat_play"
+    assert any("Exhaust Pile: +Defend" in plain(message) for message in messages)
 
 
 def test_execute_card_sequence_stops_when_state_requires_manual_choice():

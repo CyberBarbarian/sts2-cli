@@ -2,6 +2,56 @@
 import pytest
 
 
+def _resolve_to_map(game, state):
+    for _ in range(80):
+        decision = state.get("decision")
+        if decision == "map_select":
+            return state
+        if decision == "combat_play":
+            state = game.auto_play_combat(state)
+        elif decision == "combat_reward":
+            state = game.claim_combat_rewards(state)
+        elif decision == "card_reward":
+            state = game.act("skip_card_reward")
+        elif decision == "event_choice":
+            options = [o for o in state["options"] if not o.get("is_locked")]
+            state = game.act("choose_option", option_index=options[0]["index"])
+        elif decision == "bundle_select":
+            state = game.act("select_bundle", bundle_index=0)
+        elif decision == "card_select":
+            if state.get("can_skip", state.get("min_select", 0) == 0):
+                state = game.act("skip_select")
+            else:
+                state = game.act("select_cards", indices="0")
+        else:
+            state = game.act("proceed")
+    raise AssertionError("room did not resolve to map_select")
+
+
+def _first_off_path_next_row(game, state):
+    full_map = game.get_map()
+    current = full_map["current_coord"]
+    assert current is not None
+    current_node = next(
+        node
+        for row in full_map["rows"]
+        for node in row
+        if node["col"] == current["col"] and node["row"] == current["row"]
+    )
+    connected = {(child["col"], child["row"]) for child in current_node.get("children") or []}
+    next_row = current["row"] + 1
+    next_row_nodes = [
+        node
+        for row in full_map["rows"]
+        for node in row
+        if node["row"] == next_row
+    ]
+    off_path = [node for node in next_row_nodes if (node["col"], node["row"]) not in connected]
+    if not off_path:
+        pytest.skip("seed did not produce an off-path next-row node")
+    return off_path[0]
+
+
 class TestMapStructure:
     def test_map_select_fields(self, game):
         state = game.start(seed="ms1")
@@ -60,3 +110,34 @@ class TestMapNavigation:
         assert "Invalid map node" in result["message"]
         assert "NullReferenceException" not in result["message"]
         assert after == before
+
+    def test_winged_boots_exports_next_row_off_path_choices(self, game):
+        state = game.start(seed="winged-boots-map")
+        state = game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12, relics=["WINGED_BOOTS"])
+
+        first = state["choices"][0]
+        state = game.act("select_map_node", col=first["col"], row=first["row"])
+        state = _resolve_to_map(game, state)
+        off_path = _first_off_path_next_row(game, state)
+
+        choices = {(choice["col"], choice["row"]): choice for choice in state["choices"]}
+        key = (off_path["col"], off_path["row"])
+        assert key in choices
+        assert choices[key].get("requires_winged_boots") is True
+
+    def test_winged_boots_allows_entering_next_row_off_path_node(self, game):
+        state = game.start(seed="winged-boots-map")
+        state = game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12, relics=["WINGED_BOOTS"])
+
+        first = state["choices"][0]
+        state = game.act("select_map_node", col=first["col"], row=first["row"])
+        state = _resolve_to_map(game, state)
+        off_path = _first_off_path_next_row(game, state)
+        result = game.act("select_map_node", col=off_path["col"], row=off_path["row"])
+
+        assert result.get("type") != "error"
+        assert result.get("decision") != "map_select"
+        winged_boots = next(r for r in result["player"]["relics"] if r["id"] == "WINGED_BOOTS")
+        assert winged_boots["display_amount"] == 2

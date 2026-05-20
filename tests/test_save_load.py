@@ -51,6 +51,19 @@ def _shop_signature(state):
     }
 
 
+def _combat_reward_signature(state):
+    return [
+        (
+            reward.get("type"),
+            reward.get("id"),
+            reward.get("name"),
+            reward.get("amount"),
+            reward.get("gold_amount"),
+        )
+        for reward in state.get("rewards", [])
+    ]
+
+
 def test_load_map_save_does_not_retrigger_neow(tmp_path):
     save_path = tmp_path / "map_select.save"
 
@@ -70,6 +83,28 @@ def test_load_map_save_does_not_retrigger_neow(tmp_path):
     try:
         state = game.send({"cmd": "load_save", "path": str(save_path)})
         assert state["decision"] == "map_select"
+    finally:
+        game.close()
+
+
+def test_combat_reward_checkpoint_refuses_reward_screen_rollback(tmp_path):
+    save_path = tmp_path / "combat_reward.save"
+
+    game = Game()
+    try:
+        state = game.start(seed="combat-reward-save")
+        state = game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        state = game.auto_play_combat(state)
+
+        assert state["decision"] == "combat_reward"
+        assert _combat_reward_signature(state)
+        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+
+        assert save_result["type"] == "error"
+        assert "combat rewards are pending" in save_result["message"]
+        assert not save_path.exists()
     finally:
         game.close()
 
