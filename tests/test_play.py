@@ -439,6 +439,29 @@ def test_card_detail_extension_prints_enchantment_effect(capsys):
     assert "Sown: The first time you play this card each combat, gain [E]." in text
 
 
+def test_card_detail_extension_prints_hover_tip_effects(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension(
+        {
+            "name": "Spinner",
+            "description": "At the start of your turn, Channel 1 Glass.",
+            "hover_tips": [
+                {
+                    "kind": "orb",
+                    "title": "Glass",
+                    "description": "Orb: Deals damage to ALL enemies.",
+                }
+            ],
+        },
+        include_hover_tips=True,
+    )
+
+    text = plain(capsys.readouterr().out)
+    assert "Channel 1 Glass." in text
+    assert "Glass: Orb: Deals damage to ALL enemies." in text
+
+
 def test_card_detail_extension_can_print_full_upgrade_description(capsys):
     play.LANG = "en"
 

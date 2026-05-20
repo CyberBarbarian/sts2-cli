@@ -275,6 +275,18 @@ internal class LocLookup
         return locKey;
     }
 
+    public IEnumerable<KeyValuePair<string, string>> Entries(string table)
+    {
+        var source = Lang == "zh" && _zhs.TryGetValue(table, out var zhsTable)
+            ? zhsTable
+            : _eng.GetValueOrDefault(table);
+        if (source == null)
+            yield break;
+
+        foreach (var kv in source)
+            yield return new KeyValuePair<string, string>(kv.Key, StripBBCode(kv.Value));
+    }
+
     public bool IsLoaded => _eng.Count > 0;
 }
 
@@ -2381,6 +2393,7 @@ public class RunSimulator
                     AddEnergyCostDetails(cardInfo, card);
                     AddStarCostDetails(cardInfo, card);
                     AddCardEnhancements(cardInfo, card);
+                    AddCardHoverTips(cardInfo, card);
                     return cardInfo;
                 }).ToList(),
             }).ToList();
@@ -2421,6 +2434,7 @@ public class RunSimulator
                 AddEnergyCostDetails(cardInfo, cr.Card);
                 AddStarCostDetails(cardInfo, cr.Card);
                 AddCardEnhancements(cardInfo, cr.Card);
+                AddCardHoverTips(cardInfo, cr.Card);
                 return cardInfo;
             }).ToList();
 
@@ -2474,6 +2488,7 @@ public class RunSimulator
                 AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: includeTargetRows);
                 AddStarCostDetails(cardInfo, card);
                 AddCardEnhancements(cardInfo, card);
+                AddCardHoverTips(cardInfo, card);
                 return cardInfo;
             }).ToList();
 
@@ -2808,6 +2823,7 @@ public class RunSimulator
             var kws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
             if (kws?.Count > 0) cardInfo["keywords"] = kws;
             AddCardEnhancements(cardInfo, c);
+            AddCardHoverTips(cardInfo, c);
             return cardInfo;
         }).ToList() ?? new();
 
@@ -3130,6 +3146,7 @@ public class RunSimulator
         AddCardVars(summary, card, includePreviewStats: applyCombatModifiers);
         AddEnergyCostDetails(summary, card, includeCurrentXValue: applyCombatModifiers);
         AddStarCostDetails(summary, card);
+        AddCardHoverTips(summary, card);
         return summary;
     }
 
@@ -3460,6 +3477,7 @@ public class RunSimulator
             AddEnergyCostDetails(cardInfo, c);
             AddStarCostDetails(cardInfo, c);
             AddCardEnhancements(cardInfo, c);
+            AddCardHoverTips(cardInfo, c);
             return cardInfo;
         }).ToList();
 
@@ -4313,6 +4331,115 @@ public class RunSimulator
             ["title"] = string.IsNullOrWhiteSpace(title) ? null : title,
             ["description"] = string.IsNullOrWhiteSpace(description) ? null : description,
         };
+    }
+
+    private void AddCardHoverTips(Dictionary<string, object?> info, CardModel card)
+    {
+        var description = info.TryGetValue("description", out var rawDescription)
+            ? CleanResolvedEngineText(rawDescription?.ToString())
+            : null;
+        var tips = CardHoverTips(card, description);
+        if (tips.Count > 0)
+            info["hover_tips"] = tips;
+    }
+
+    private List<Dictionary<string, object?>> CardHoverTips(CardModel card, string? description)
+    {
+        var tips = new List<Dictionary<string, object?>>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var rawTips = TryGetMember(card, "HoverTips") as System.Collections.IEnumerable;
+        if (rawTips != null)
+        {
+            foreach (var rawTip in rawTips)
+            {
+                var tip = EventOptionHoverTipInfo(rawTip);
+                AddHoverTipIfNew(tips, seen, tip);
+            }
+        }
+
+        var textParts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(description))
+            textParts.Add(description);
+        foreach (var keyword in card.Keywords?.Where(k => k != CardKeyword.None) ?? Enumerable.Empty<CardKeyword>())
+        {
+            var entry = keyword.ToString().ToUpperInvariant();
+            var title = _loc.Bilingual("card_keywords", entry + ".title");
+            if (title != entry + ".title")
+                textParts.Add(title);
+        }
+        var visibleText = string.Join("\n", textParts);
+        if (string.IsNullOrWhiteSpace(visibleText))
+            return tips;
+
+        AddMentionedLocTips(tips, seen, visibleText, "card_keyword", "card_keywords");
+        AddMentionedLocTips(tips, seen, visibleText, "static_hover_tip", "static_hover_tips");
+        AddMentionedLocTips(tips, seen, visibleText, "orb", "orbs");
+        AddMentionedLocTips(tips, seen, visibleText, "power", "powers");
+
+        return tips;
+    }
+
+    private void AddMentionedLocTips(
+        List<Dictionary<string, object?>> tips,
+        HashSet<string> seen,
+        string visibleText,
+        string kind,
+        string table)
+    {
+        foreach (var titleEntry in _loc.Entries(table).Where(kv => kv.Key.EndsWith(".title", StringComparison.Ordinal)))
+        {
+            var entry = titleEntry.Key[..^".title".Length];
+            var title = titleEntry.Value;
+            if (string.IsNullOrWhiteSpace(title) || !TextMentionsTitle(visibleText, title))
+                continue;
+
+            var descriptionKey = entry + ".description";
+            var description = CleanEngineText(_loc.Bilingual(table, descriptionKey));
+            if (string.IsNullOrWhiteSpace(description) || description == descriptionKey)
+                continue;
+
+            AddHoverTipIfNew(tips, seen, new Dictionary<string, object?>
+            {
+                ["kind"] = kind,
+                ["id"] = entry,
+                ["title"] = title,
+                ["description"] = description,
+            });
+        }
+    }
+
+    private static bool TextMentionsTitle(string text, string title)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(title))
+            return false;
+
+        var escaped = System.Text.RegularExpressions.Regex.Escape(title);
+        var pattern = title.All(char.IsLetter)
+            ? $@"(?<![A-Za-z]){escaped}(?:ed|s|ing)?(?![A-Za-z])"
+            : escaped;
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            text,
+            pattern,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    private static void AddHoverTipIfNew(
+        List<Dictionary<string, object?>> tips,
+        HashSet<string> seen,
+        Dictionary<string, object?>? tip)
+    {
+        if (tip == null)
+            return;
+        var id = tip.TryGetValue("id", out var rawId) ? rawId?.ToString() : null;
+        var title = tip.TryGetValue("title", out var rawTitle) ? rawTitle?.ToString() : null;
+        var name = tip.TryGetValue("name", out var rawName) ? rawName?.ToString() : null;
+        var kind = tip.TryGetValue("kind", out var rawKind) ? rawKind?.ToString() : null;
+        var key = $"{kind}|{id ?? title ?? name}";
+        if (string.IsNullOrWhiteSpace(key) || !seen.Add(key))
+            return;
+        tips.Add(tip);
     }
 
     private string? ResolveHoverTipText(object rawTip, string memberName)
@@ -5835,6 +5962,7 @@ public class RunSimulator
                     AddEnergyCostDetails(exported, card);
                     AddStarCostDetails(exported, card);
                     AddCardEnhancements(exported, card);
+                    AddCardHoverTips(exported, card);
                 }
                 return ShopItemState(e, exported, card != null);
             }).ToList();
@@ -7725,6 +7853,7 @@ public class RunSimulator
                 AddEnergyCostDetails(cardInfo, c);
                 AddStarCostDetails(cardInfo, c);
                 AddCardEnhancements(cardInfo, c);
+                AddCardHoverTips(cardInfo, c);
                 return cardInfo;
             }).ToList(),
         };
@@ -7761,6 +7890,7 @@ public class RunSimulator
             AddEnergyCostDetails(cardInfo, card, includeCurrentXValue: true);
             AddStarCostDetails(cardInfo, card);
             AddCardEnhancements(cardInfo, card);
+            AddCardHoverTips(cardInfo, card);
             return cardInfo;
         }).ToList();
     }

@@ -1518,7 +1518,7 @@ def show_player(p, show_deck=False):
                 suf_part = format_card_suffix_keywords_for_card(cd)
                 type_rarity = card_type_rarity_suffix(cd)
                 print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}){type_rarity}{suf_part}")
-                print_card_detail_extension(cd, indent="      ")
+                print_card_detail_extension(cd, indent="      ", include_hover_tips=True)
 
 
 def pile_display_lines(pile_name, cards, count=None):
@@ -1927,14 +1927,25 @@ def print_card_detail_extension(
     indent="      ",
     include_upgrade_description=False,
     include_upgrade_summary=True,
+    include_hover_tips=False,
 ):
     """Description (with [prefix/keywords]) + upgrade preview; indent matches title row spacing."""
+    shown = set()
     for line in card_description_display_lines(card):
         if line:
+            shown.add(line.strip())
             print(f"{indent}{c(line, 'dim')}")
     for line in card_modifier_detail_lines(card):
         if line:
+            shown.add(line.strip())
             print(f"{indent}{c(line, 'dim')}")
+    if include_hover_tips:
+        for tip in card.get("hover_tips") or []:
+            for line in hover_tip_display_lines(tip):
+                clean = line.strip()
+                if clean and clean not in shown:
+                    shown.add(clean)
+                    print(f"{indent}{c(line, 'dim')}")
     if include_upgrade_description:
         for line in upgrade_description_display_lines(card):
             if line:
@@ -2027,7 +2038,7 @@ def show_card_reward(state):
         suf_part = format_card_suffix_keywords_for_card(card)
         up = c("+", "green") if card.get("upgraded") else ""
         print(f"  [{card['index']}] {c(n(card['name']), type_color)}{up} ({cost}) {c(rarity_label, rarity_color)}{suf_part}")
-        print_card_detail_extension(card, indent="      ")
+        print_card_detail_extension(card, indent="      ", include_hover_tips=True)
 
     print()
     if cards:
@@ -2060,6 +2071,9 @@ def show_combat_reward(state):
         description = reward.get("description")
         if description:
             print(f"      {desc(description)}")
+        for tip in reward.get("hover_tips") or []:
+            for line in hover_tip_display_lines(tip):
+                print(f"      {c(line, 'dim')}")
         if reward.get("can_claim") is False:
             reason = reward.get("blocked_reason") or "blocked"
             print(f"      {c(t(f'Cannot claim: {reason}.', f'Cannot claim: {reason}.'), 'yellow')}")
@@ -2082,7 +2096,7 @@ def show_shop(state):
         cc = card.get("cost", card.get("card_cost", "?"))
         suf_part = format_card_suffix_keywords_for_card(card)
         print(f"  [{card['index']}] {n(card['name'])} ({cc}) {c(t(card.get('type','?'), ctype_zh), 'dim')}{suf_part} — {affordable}{t('g','金')}{sale}")
-        print_card_detail_extension(card, indent="      ")
+        print_card_detail_extension(card, indent="      ", include_hover_tips=True)
 
     print(f"\n  {c(t('Relics:','遗物:'), 'bold')}")
     for r in state.get("relics", []):
@@ -3193,7 +3207,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     for cd in b.get("cards", []):
                         sp = format_card_suffix_keywords_for_card(cd)
                         print(f"    {n(cd['name'])} ({cd.get('cost','?')}) {c(cd.get('type',''), 'dim')}{sp}")
-                        print_card_detail_extension(cd, indent="      ")
+                        print_card_detail_extension(cd, indent="      ", include_hover_tips=True)
                 valid = {str(b["index"]): b for b in bundles}
                 if auto:
                     choice = "0"
@@ -3228,6 +3242,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         indent="      ",
                         include_upgrade_description=include_upgrade_description,
                         include_upgrade_summary=include_upgrade_summary,
+                        include_hover_tips=True,
                     )
 
                 valid = {str(cd["index"]): cd for cd in cards}

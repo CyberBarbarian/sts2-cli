@@ -43,6 +43,27 @@ class TestCharacterMechanics:
         assert state["player"]["block"] == 20
         assert [orb["type"] for orb in state["orbs"]] == ["Frost", "Glass"]
 
+    def test_defect_orb_cards_export_hover_tips(self, game):
+        state = game.start(character="Defect", seed="defect-orb-card-hover-tips")
+        game.skip_neow(state)
+        game.set_player(
+            relics=[],
+            deck=[
+                "GLASSWORK",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        glasswork = next(c for c in state["hand"] if c["name"] == "Glasswork")
+        tips = glasswork.get("hover_tips") or []
+        glass = next(tip for tip in tips if tip.get("kind") == "orb" and tip.get("title") == "Glass")
+
+        assert "Deals damage to ALL enemies" in glass["description"]
+
     def test_regent_has_stars(self, game):
         state = game.start(character="Regent", seed="dm2")
         game.skip_neow(state)
