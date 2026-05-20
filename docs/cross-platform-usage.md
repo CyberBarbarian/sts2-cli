@@ -75,11 +75,14 @@ On Unix-like systems:
 python3 python/play.py
 ```
 
-On Windows from the BG-Agent checkout, use the launcher:
+On Windows from the repository root, use the launcher:
 
 ```cmd
 sts2-cli.bat
 ```
+
+Use `sts2-cli-zh.bat` for the Chinese launcher, or `setup-windows.bat` when
+you only want to copy/build prerequisites without starting a run.
 
 The first run builds the headless adapter if needed. If you used the default
 `lib/` output directory, no additional environment variables are required.

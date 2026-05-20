@@ -1,69 +1,148 @@
 # sts2-cli
 
 > Fork notice: this repository is a fork of
-> [wuhao21/sts2-cli](https://github.com/wuhao21/sts2-cli), maintained for
-> BG-Agent headless Slay the Spire 2 benchmark work. This fork carries local
-> Windows/headless API fixes for pending event and card selections, dynamic
-> state export, explicit potion targeting, treasure-room choice export, and headless
-> dialogue/VFX crashes. These fixes are limited to the CLI/headless API,
-> harness, and tests; they do not intentionally change underlying Slay the
-> Spire 2 card, relic, enemy, or combat rules.
+> [wuhao21/sts2-cli](https://github.com/wuhao21/sts2-cli). This fork is
+> maintained under [CyberBarbarian/sts2-cli](https://github.com/CyberBarbarian/sts2-cli)
+> for BG-Agent headless Slay the Spire 2 CLI play and benchmark work.
+>
+> The fork focuses on CLI, JSON protocol, headless adapter, state export, and
+> terminal presentation fixes. It does not intentionally change Slay the Spire 2
+> card, relic, enemy, event, combat, or reward semantics.
 
 <details open>
 <summary><b>English</b></summary>
 
-A CLI for Slay the Spire 2.
+## What This Is
 
-Runs the real game engine headless in your terminal — all damage, card effects, enemy AI, relics, and RNG are identical to the actual game. Everything is unlocked from the start: all characters, cards, relics, potions, and ascension levels — no timeline progression required.
+`sts2-cli` runs the real Slay the Spire 2 engine headlessly and exposes it as:
 
-![demo](docs/demo_en.gif)
+- an interactive terminal game;
+- a stdin/stdout JSON protocol for agents and benchmarks;
+- a reproducible logging surface for debugging CLI/export/headless issues.
 
-## Setup
+You must own and install Slay the Spire 2 through Steam. This repository does
+not contain or redistribute game DLLs.
 
-Requirements:
-- [Slay the Spire 2](https://store.steampowered.com/app/2868840/Slay_the_Spire_2/) on Steam
-- [.NET 9+ SDK](https://dotnet.microsoft.com/download)
-- Python 3.9+
+## Current Fork Status
 
-```bash
-git clone https://github.com/wuhao21/sts2-cli.git
+This fork is a rolling BG-Agent build. It includes additional fixes for:
+
+- Windows/headless launch stability;
+- pending card/event/reward selections;
+- target-specific combat preview exports;
+- shop, rest, treasure, map, potion, and reward affordances;
+- English/Chinese CLI startup paths;
+- focused pytest workflow for CLI/headless regressions.
+
+The fork's `main` branch is the recommended branch for users. The active
+development branch may also exist, but `main` is kept fast-forwarded after
+tested fix batches.
+
+## Requirements
+
+- Slay the Spire 2 installed through Steam.
+- Python 3.9 or newer.
+- .NET 9 SDK or newer.
+- On Windows, the standard Python launcher `py` is supported when available.
+- On Unix-like systems, `bash` is needed for `setup.sh` / `copy_dlls.sh`.
+
+## Quick Start On Windows
+
+Clone the fork:
+
+```cmd
+git clone https://github.com/CyberBarbarian/sts2-cli.git
 cd sts2-cli
-./setup.sh      # copies DLLs from Steam → IL patches → builds
 ```
 
-Or just run `python3 python/play.py` — it auto-detects and sets up on first run.
+Then choose one of these entry points:
 
-## Play
+```cmd
+sts2-cli.bat        :: English game UI launcher, double-click friendly
+sts2-cli-zh.bat     :: Chinese game UI launcher, double-click friendly
+setup-windows.bat   :: setup/build only, no game start
+```
+
+The launcher opens a menu for new game, load save, character, and ascension.
+On first run it will try to locate the Steam install, copy required DLLs into
+`lib/`, and build the headless adapter.
+
+If auto-detection fails, install Slay the Spire 2 through Steam first or copy
+the required game DLLs into `lib/` manually. Do not commit `lib/`.
+
+## Quick Start On macOS/Linux/Git Bash
 
 ```bash
-python3 python/play.py                        # interactive menu: language, character, ascension
-python3 python/play.py --lang zh              # Chinese UI with default start options
-python3 python/play.py --ascension 10         # Ascension 10
-python3 python/play.py --character Silent      # play as Silent
+git clone https://github.com/CyberBarbarian/sts2-cli.git
+cd sts2-cli
+./setup.sh
+python3 python/play.py
 ```
 
-Type `help` in-game:
+For cross-platform DLL copying details, see
+[`docs/cross-platform-usage.md`](docs/cross-platform-usage.md).
 
-```
-  help     — show help
-  map      — show map
-  deck     — show deck
-  potions  — show potions
-  relics   — show relics
-  quit     — quit
+## Direct CLI Usage
 
-  Map:     enter path number (0, 1, 2)
-  Combat:  card index / e (end turn) / p0 (use potion)
-  Reward:  card index / s (skip)
-  Rest:    option index
-  Event:   option index / leave
-  Shop:    c0 (card) / r0 (relic) / p0 (potion) / rm (remove) / leave
-  Treasure: relic index
+```bash
+python3 python/play.py                         # menu: language, character, ascension
+python3 python/play.py --lang zh               # Chinese UI mode
+python3 python/play.py --lang both             # bilingual display where supported
+python3 python/play.py --character Silent      # choose character
+python3 python/play.py --ascension 10          # choose ascension
+python3 python/play.py --continue saves/run.save
+python3 python/play.py --load saves/replay.json
+python3 python/play.py --no-log
 ```
+
+Supported characters:
+
+- `Ironclad`
+- `Silent`
+- `Defect`
+- `Regent`
+- `Necrobinder`
+
+Supported ascension range is currently `0-10`.
+
+## In-Game Commands
+
+Type `help` during a run. Common commands include:
+
+```text
+help                 show help
+map                  show map
+deck                 show deck
+draw                 show draw pile
+discard              show discard pile
+exhaust              show exhaust pile
+potions              show potions
+relics               show relics
+quit                 quit and offer save
+
+Map                  enter a visible path number
+Combat               card index, card@target, seq ..., e, p0
+Reward               reward index, card pick, skip where allowed
+Rest                 option index
+Event                option index / leave when exposed by the engine
+Shop                 c0, r0, p0, rm, leave
+Treasure             exposed option index
+Card selection       comma/space separated indices, or skip when optional
+```
+
+Queued combat input supports explicit targets:
+
+```text
+seq 0@1 2@0 4
+```
+
+The sequence is bound to the original hand and enemy list. If a later action
+requires a new selection or becomes invalid, the remaining queued cards stop
+instead of guessing.
 
 ## JSON Protocol
 
-For programmatic control (AI agents, RL, etc.), communicate via stdin/stdout JSON:
+For programmatic control, start the headless process and send JSON lines:
 
 ```bash
 dotnet run --project src/Sts2Headless/Sts2Headless.csproj
@@ -78,134 +157,187 @@ dotnet run --project src/Sts2Headless/Sts2Headless.csproj
 {"cmd": "quit"}
 ```
 
-Each command returns a JSON decision point (`map_select` / `combat_play` / `card_reward` / `treasure` / `rest_site` / `event_choice` / `shop` / `game_over`). All names are in English.
+Each command returns a decision/state payload such as `map_select`,
+`combat_play`, `card_select`, `bundle_select`, `card_reward`, `combat_reward`,
+`treasure`, `rest_site`, `event_choice`, `shop`, or `game_over`.
 
-## Game Logs
+## Logs And Bug Reports
 
-Every run is automatically logged to `logs/` as a JSONL file (one JSON per line), recording each game state and action with timestamps. Logs older than 7 days are cleaned up automatically.
+Interactive runs write JSONL logs under `logs/` by default. Logs include state
+snapshots and actions with timestamps.
 
 ```bash
-python3 python/play.py --no-log    # disable logging
+python3 python/play.py --no-log
 ```
 
-**When filing a bug report, please attach the relevant log file from `logs/`** — it contains the full step-by-step game state needed to reproduce the issue.
+When reporting a CLI/headless bug, include:
+
+- seed, character, ascension;
+- exact visible decision state;
+- command entered;
+- relevant `logs/*.jsonl` file when available;
+- stderr or exception text if the headless process failed.
+
+Do not report normal game outcomes as CLI bugs unless the CLI hides, corrupts,
+or blocks an engine decision.
 
 ## Testing
 
-Use focused pytest selections while iterating on headless CLI bugs. The pytest
-fixture reuses one headless process and calls the JSON `reset` command between
-tests, so broad non-slow coverage is practical for local validation. The slow
-end-to-end run tests are still better suited for nightly or release validation.
-
-Typical focused commands:
+Use focused pytest selections while iterating:
 
 ```bash
 python -m pytest tests/test_event.py -q
 python -m pytest tests/test_dynamic_card_stats.py tests/test_combat.py -q
 python -m pytest tests/test_treasure.py tests/test_shop.py tests/test_potions.py -q
-```
-
-The `slow` marker is reserved for long end-to-end run coverage. Use
-`python -m pytest -m "not slow" -q` when you need broad local coverage without
-the slowest full-run tests, and use plain `python -m pytest -q` for a full
-pre-release or overnight pass.
-
-If test isolation regresses, run:
-
-```bash
 python -m pytest tests/test_process_reuse.py -q
 ```
 
-## Supported Characters
+For broad local coverage without the slowest runs:
 
-| Character | Status |
-|---|---|
-| Ironclad | Fully playable |
-| Silent | Fully playable |
-| Defect | Fully playable |
-| Necrobinder | Fully playable |
-| Regent | Fully playable |
-
-## Architecture
-
+```bash
+python -m pytest -m "not slow" -q
 ```
-Your code (Python / JS / LLM)
-    │  JSON stdin/stdout
-    ▼
-src/Sts2Headless (C#)
-    │  RunSimulator.cs
-    ▼
-sts2.dll (game engine, IL patched)
-  + src/GodotStubs (replaces GodotSharp.dll)
-  + Harmony patches (localization)
-```
+
+Use full `python -m pytest -q` for pre-release or overnight validation.
+
+## Release Notes
+
+There is currently no packaged binary release. This is intentional for now:
+game DLLs are local Steam files and must not be redistributed.
+
+A safe public release should be a source/tag release that contains scripts,
+docs, tests, and source code only. Users still run `sts2-cli.bat`,
+`setup-windows.bat`, or `./setup.sh` locally to copy their own game files and
+build the adapter.
 
 </details>
 
 <details>
 <summary><b>中文</b></summary>
 
-杀戮尖塔2的命令行版本。
+## 这是什么
 
-在终端里运行真实游戏引擎 — 所有伤害计算、卡牌效果、敌人AI、遗物触发、随机数都和真实游戏一致。所有内容从一开始就全部解锁：全角色、全卡牌、全遗物、全药水、全渐进难度等级，无需时间线进度。
+`sts2-cli` 使用真实的杀戮尖塔 2 游戏引擎，并把它以无头命令行形式暴露出来：
 
-![demo](docs/demo_zh.gif)
+- 可以直接在终端里玩；
+- 可以通过 stdin/stdout JSON 协议给 agent 或 benchmark 使用；
+- 可以记录可复现日志，用于调试 CLI、状态导出和 headless adapter 问题。
 
-## 安装
+你需要自己在 Steam 中拥有并安装 Slay the Spire 2。本仓库不包含、也不会重新分发游戏 DLL。
 
-需要：
-- [Slay the Spire 2](https://store.steampowered.com/app/2868840/Slay_the_Spire_2/) (Steam)
-- [.NET 9+ SDK](https://dotnet.microsoft.com/download)
-- Python 3.9+
+## 当前 fork 状态
 
-```bash
-git clone https://github.com/wuhao21/sts2-cli.git
+本 fork 是 BG-Agent 使用的滚动版本，重点修复和补全：
+
+- Windows/headless 启动稳定性；
+- 卡牌、事件、奖励等 pending selection 的暴露；
+- 不同目标下的战斗预览数值导出；
+- 商店、休息点、宝箱、地图、药水、奖励等命令行交互；
+- 英文/中文启动入口；
+- 针对 CLI/headless 回归的 focused pytest 流程。
+
+推荐普通用户使用本 fork 的 `main` 分支。开发分支可能同时存在，但经过验证的修复会同步推进到 `main`。
+
+## 依赖
+
+- 通过 Steam 安装 Slay the Spire 2。
+- Python 3.9 或更新版本。
+- .NET 9 SDK 或更新版本。
+- Windows 上支持标准 Python launcher：`py`。
+- macOS/Linux/Git Bash 下，`setup.sh` 和 `copy_dlls.sh` 需要 `bash`。
+
+## Windows 快速开始
+
+克隆本 fork：
+
+```cmd
+git clone https://github.com/CyberBarbarian/sts2-cli.git
 cd sts2-cli
-./setup.sh      # 从 Steam 复制 DLL → IL patch → 编译
 ```
 
-或者直接运行 `python3 python/play.py`，首次会自动完成 setup。
+然后选择入口：
 
-## 玩
+```cmd
+sts2-cli.bat        :: 英文游戏界面入口，可双击
+sts2-cli-zh.bat     :: 中文游戏界面入口，可双击
+setup-windows.bat   :: 只做安装和构建，不进入游戏
+```
+
+启动器会显示新游戏、读取存档、角色、进阶等菜单。首次运行时会尝试自动定位 Steam 游戏目录，把所需 DLL 复制到 `lib/`，并构建 headless adapter。
+
+如果自动定位失败，请先确认 Steam 中已经安装 Slay the Spire 2，或者手动把所需游戏 DLL 复制到 `lib/`。不要提交 `lib/`。
+
+## macOS/Linux/Git Bash 快速开始
 
 ```bash
-python3 python/play.py                        # English
-python3 python/play.py --lang zh              # 中文交互模式
-python3 python/play.py --ascension 10         # 渐进难度 10
-python3 python/play.py --character Silent      # 选择静默猎手
+git clone https://github.com/CyberBarbarian/sts2-cli.git
+cd sts2-cli
+./setup.sh
+python3 python/play.py
 ```
 
-游戏内输入 `help` 查看所有命令：
+跨平台复制 DLL 的细节见
+[`docs/cross-platform-usage.md`](docs/cross-platform-usage.md)。
 
-```
-  help     — 帮助
-  map      — 显示地图
-  deck     — 查看牌组
-  potions  — 查看药水
-  relics   — 查看遗物
-  quit     — 退出
+## 直接命令行启动
 
-  地图:    输入编号 (0, 1, 2)
-  战斗:    输入卡牌编号 / e 结束回合 / p0 使用药水
-  奖励:    输入卡牌编号 / s 跳过
-  休息:    输入选项编号
-  事件:    输入选项编号 / leave 离开
-  商店:    c0 买卡 / r0 买遗物 / p0 买药水 / rm 移除 / leave 离开
+```bash
+python3 python/play.py                         # 菜单：语言、角色、进阶
+python3 python/play.py --lang zh               # 中文界面模式
+python3 python/play.py --lang both             # 支持位置显示中英双语
+python3 python/play.py --character Silent      # 指定角色
+python3 python/play.py --ascension 10          # 指定进阶
+python3 python/play.py --continue saves/run.save
+python3 python/play.py --load saves/replay.json
+python3 python/play.py --no-log
 ```
 
-## 角色支持
+当前支持角色：
 
-| 角色 | 状态 |
-|---|---|
-| 铁甲战士 (Ironclad) | 完全可玩 |
-| 静默猎手 (Silent) | 完全可玩 |
-| 故障机器人 (Defect) | 完全可玩 |
-| 亡灵契约师 (Necrobinder) | 完全可玩 |
-| 储君 (Regent) | 完全可玩 |
+- `Ironclad`
+- `Silent`
+- `Defect`
+- `Regent`
+- `Necrobinder`
+
+当前支持进阶范围是 `0-10`。
+
+## 游戏内常用命令
+
+游戏内输入 `help`。常用命令包括：
+
+```text
+help                 显示帮助
+map                  显示地图
+deck                 查看牌组
+draw                 查看抽牌堆
+discard              查看弃牌堆
+exhaust              查看消耗堆
+potions              查看药水
+relics               查看遗物
+quit                 退出并提示保存
+
+地图                 输入可见路线编号
+战斗                 卡牌编号、card@target、seq ...、e、p0
+奖励                 奖励编号、选牌、允许时跳过
+休息点               选项编号
+事件                 引擎暴露的选项编号 / leave
+商店                 c0、r0、p0、rm、leave
+宝箱                 暴露出来的选项编号
+选牌                 逗号或空格分隔的编号；可选时可以 skip
+```
+
+连续出牌支持显式目标：
+
+```text
+seq 0@1 2@0 4
+```
+
+这条指令会绑定输入时的原始手牌和敌人列表。如果后续动作需要新的选择，或者某张牌已经无法合法打出，剩余队列会停止，不会替玩家猜。
 
 ## JSON 协议
 
-除了交互模式，也可以通过 stdin/stdout JSON 协议编程控制（写 AI agent、RL 训练等）：
+如需程序化控制，启动 headless 进程并发送 JSON lines：
 
 ```bash
 dotnet run --project src/Sts2Headless/Sts2Headless.csproj
@@ -220,30 +352,49 @@ dotnet run --project src/Sts2Headless/Sts2Headless.csproj
 {"cmd": "quit"}
 ```
 
-每个命令返回一个 JSON decision point（`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`），所有名称为英文。
+每个命令会返回一个决策/状态 payload，例如 `map_select`、`combat_play`、`card_select`、`bundle_select`、`card_reward`、`combat_reward`、`treasure`、`rest_site`、`event_choice`、`shop` 或 `game_over`。
 
-## 游戏日志
+## 日志和 bug 报告
 
-每局游戏会自动记录到 `logs/` 目录下的 JSONL 文件中，包含每一步的游戏状态和操作，附带时间戳。超过 7 天的旧日志会自动清理。
+交互运行默认把 JSONL 日志写入 `logs/`，其中包含状态快照、动作和时间戳。
 
 ```bash
-python3 python/play.py --no-log    # 关闭日志
+python3 python/play.py --no-log
 ```
 
-**提交 bug 报告时，请附上 `logs/` 中对应的日志文件** — 它包含了复现问题所需的完整游戏步骤。
+报告 CLI/headless bug 时，请尽量提供：
 
-## 架构
+- seed、角色、进阶；
+- 当时可见的 decision state；
+- 输入过的命令；
+- 可用时附上对应 `logs/*.jsonl`；
+- headless 进程失败时的 stderr 或异常文本。
 
+正常游戏结果本身不是 CLI bug。只有当 CLI 隐藏、破坏或阻塞了原引擎决策时，才应当作为 CLI/headless bug 处理。
+
+## 测试
+
+开发时优先使用 focused pytest：
+
+```bash
+python -m pytest tests/test_event.py -q
+python -m pytest tests/test_dynamic_card_stats.py tests/test_combat.py -q
+python -m pytest tests/test_treasure.py tests/test_shop.py tests/test_potions.py -q
+python -m pytest tests/test_process_reuse.py -q
 ```
-你的代码 (Python / JS / LLM)
-    │  JSON stdin/stdout
-    ▼
-src/Sts2Headless (C#)
-    │  RunSimulator.cs
-    ▼
-sts2.dll (游戏引擎, IL patched)
-  + src/GodotStubs (替代 GodotSharp.dll)
-  + Harmony patches (本地化)
+
+需要较宽覆盖但不跑最慢测试时：
+
+```bash
+python -m pytest -m "not slow" -q
 ```
+
+发布前或夜间验证再使用完整 `python -m pytest -q`。
+
+## 发布说明
+
+当前还没有打包好的二进制 release。这是有意保持的：游戏 DLL 来自本地 Steam 安装，不能重新分发。
+
+安全的公开发布应当是源码/tag release，只包含脚本、文档、测试和源码。用户仍然需要在本地运行 `sts2-cli.bat`、`setup-windows.bat` 或 `./setup.sh`，用自己的游戏文件完成构建。
 
 </details>
