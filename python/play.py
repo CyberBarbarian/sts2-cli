@@ -1732,7 +1732,12 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
             return current
 
         current = send_fn({"cmd": "action", "action": "play_card", "args": args})
-        if not current or current.get("decision") != "combat_play":
+        if not current:
+            output_fn("Queued play stopped: manual decision is required.")
+            return current
+        if current.get("decision") != "combat_play":
+            if current.get("decision") in {"combat_reward", "event_choice", "map_select", "game_over"}:
+                return current
             output_fn("Queued play stopped: manual decision is required.")
             return current
     return current

@@ -1607,6 +1607,33 @@ def test_execute_card_sequence_binds_targets_to_initial_enemy_instances():
     assert result["decision"] == "combat_play"
 
 
+def test_execute_card_sequence_does_not_warn_when_combat_ends():
+    state = {
+        "decision": "combat_play",
+        "energy": 1,
+        "hand": [
+            {"index": 0, "name": "Strike", "cost": 1, "energy_cost": 1, "can_play": True, "target_type": "AnyEnemy"},
+        ],
+        "enemies": [
+            {"index": 0, "name": "Nibbit", "hp": 3},
+        ],
+    }
+    messages = []
+
+    def send(cmd):
+        return {"decision": "combat_reward", "rewards": [{"index": 0, "type": "gold"}]}
+
+    result = play.execute_card_sequence(
+        state,
+        [{"card_index": 0, "target_index": 0}],
+        send,
+        output_fn=messages.append,
+    )
+
+    assert result["decision"] == "combat_reward"
+    assert messages == []
+
+
 def test_execute_card_sequence_stops_when_state_requires_manual_choice():
     state = {
         "decision": "combat_play",
