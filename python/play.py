@@ -1602,6 +1602,25 @@ def parse_card_sequence(raw):
     return steps
 
 
+def parse_card_target(raw):
+    text = (raw or "").strip().lower()
+    if not text or " " in text or "," in text:
+        return None
+
+    target_sep = None
+    for sep in ("@", ">"):
+        if sep in text:
+            target_sep = sep
+            break
+    if not target_sep:
+        return None
+
+    card_text, target_text = text.split(target_sep, 1)
+    if not card_text.isdigit() or not target_text.isdigit():
+        return None
+    return {"card_index": int(card_text), "target_index": int(target_text)}
+
+
 def _sequence_step_indices(step):
     if isinstance(step, dict):
         card_index = step.get("card_index")
@@ -2654,6 +2673,13 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
                 raise KeyboardInterrupt("abandon")
             continue
 
+        if (
+            not multi_select
+            and state
+            and state.get("decision") == "combat_play"
+            and parse_card_target(raw)
+        ):
+            return raw
         if not multi_select and parse_card_sequence(raw):
             return raw
 
@@ -3028,9 +3054,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         _auto_last_fingerprint = fp
                         _auto_stuck_count = 0
                 else:
-                    choice = get_input(t("Play card [index/seq], (e)nd turn, (p0) potion", "\u51fa\u724c [\u7f16\u53f7/seq], (e)\u7ed3\u675f\u56de\u5408, (p0)\u836f\u6c34"), set(valid.keys()) | {"help"}, state=state)
+                    choice = get_input(t("Play card [index/index@target/seq], (e)nd turn, (p0) potion", "\u51fa\u724c [\u7f16\u53f7/seq], (e)\u7ed3\u675f\u56de\u5408, (p0)\u836f\u6c34"), set(valid.keys()) | {"help"}, state=state)
                     if choice == "help":
-                        print(f"  {t('Enter card index, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn, p0=use potion 0', '\u8f93\u5165\u5361\u724c\u7f16\u53f7\u3001seq 0 2 1\u3001seq 0@1 2@0\u3001e=\u7ed3\u675f\u56de\u5408\u3001p0=\u4f7f\u7528\u836f\u6c340')}")
+                        print(f"  {t('Enter card index, index@target, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn, p0=use potion 0', 'Enter card index, index@target, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn, p0=use potion 0')}")
                         continue
 
                 sequence = parse_card_sequence(choice)
@@ -3072,10 +3098,23 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         args["target_index"] = int(tgt)
                     state = send({"cmd": "action", "action": "use_potion", "args": args})
                 else:
+                    explicit_target = parse_card_target(choice)
+                    if explicit_target:
+                        choice = str(explicit_target["card_index"])
+                    target_index = explicit_target.get("target_index") if explicit_target else None
+                    if choice not in valid:
+                        print(f"  {t('Invalid. Options:', 'Invalid. Options:')} {', '.join(sorted(valid.keys()))}")
+                        continue
                     card = valid[choice]
                     args = {"card_index": card["index"]}
                     if card.get("target_type") == "AnyEnemy":
-                        if len(enemies) == 1:
+                        if target_index is not None:
+                            legal_targets = {e.get("index") for e in enemies}
+                            if target_index not in legal_targets:
+                                print(f"  {t('Invalid target. Options:', 'Invalid target. Options:')} {', '.join(str(e.get('index')) for e in enemies)}")
+                                continue
+                            args["target_index"] = target_index
+                        elif len(enemies) == 1:
                             args["target_index"] = enemies[0]["index"]
                         elif auto:
                             args["target_index"] = min(enemies, key=lambda e: e.get("hp", 999))["index"]
@@ -3083,6 +3122,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                             tgt = get_input("Target enemy [index]",
                                            {str(e["index"]) for e in enemies})
                             args["target_index"] = int(tgt)
+                    elif target_index is not None:
+                        print(f"  {t('That card does not target an enemy.', 'That card does not target an enemy.')}")
+                        continue
                     state = send({"cmd": "action", "action": "play_card", "args": args})
 
             elif dec == "combat_reward":

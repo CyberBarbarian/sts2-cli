@@ -1430,6 +1430,20 @@ def test_parse_card_sequence_accepts_per_card_targets():
     ]
 
 
+def test_parse_card_target_accepts_single_card_target():
+    assert play.parse_card_target("3@1") == {"card_index": 3, "target_index": 1}
+    assert play.parse_card_target("4>2") == {"card_index": 4, "target_index": 2}
+    assert play.parse_card_target("seq 3@1") is None
+    assert play.parse_card_target("3") is None
+
+
+def test_get_input_accepts_single_card_target(monkeypatch):
+    answers = iter(["0@1", "0"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+
+    assert play.get_input("Play", {"0"}, state={"decision": "combat_play"}) == "0@1"
+
+
 def test_execute_card_sequence_uses_explicit_targets_with_multiple_enemies():
     state = {
         "decision": "combat_play",
