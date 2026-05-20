@@ -740,7 +740,7 @@ def format_card_suffix_keywords(suffix_list):
 def format_card_prefix_tag(prefix_list):
     if not prefix_list:
         return ""
-    return "[" + "/".join(_card_kw_label(k) for k in prefix_list) + "]"
+    return ", ".join(_card_kw_label(k) for k in prefix_list) + ":"
 
 
 def _description_mentions_keyword(text, keyword):

@@ -296,6 +296,18 @@ def test_card_description_keeps_exported_keyword_lines_without_prefix_duplicatio
     assert lines == ["Unplayable.", "Ethereal.", "Eternal."]
 
 
+def test_card_description_renders_prefix_keywords_as_text_labels():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_description_display_lines({
+        "name": "Tactician",
+        "description": "Gain [E].",
+        "keywords": ["Sly"],
+    })]
+
+    assert lines == ["Sly: Gain [E]."]
+
+
 def test_combat_view_does_not_duplicate_keyword_lines_in_title(capsys):
     play.LANG = "en"
 
