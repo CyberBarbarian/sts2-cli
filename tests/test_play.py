@@ -731,6 +731,46 @@ def test_print_card_select_combat_context_shows_live_fight(capsys):
     assert "Hand" in text
 
 
+def test_card_select_combat_context_includes_player_powers():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_select_combat_context_lines({
+        "combat": {
+            "round": 4,
+            "energy": 2,
+            "max_energy": 3,
+            "draw_pile_count": 12,
+            "discard_pile_count": 4,
+            "exhaust_pile_count": 7,
+            "player_powers": [
+                {
+                    "name": "Phantom Blades",
+                    "amount": 9,
+                    "type": "Buff",
+                    "description": "Shivs gain Retain.\nThe first Shiv you play each turn deals 9 additional damage.",
+                }
+            ],
+            "enemies": [
+                {
+                    "index": 0,
+                    "name": "Ceremonial Beast",
+                    "hp": 148,
+                    "max_hp": 252,
+                    "intents": [{"type": "Stun"}],
+                    "powers": [],
+                }
+            ],
+            "hand": [
+                {"index": 0, "name": "Cloak and Dagger", "cost": 1, "stats": {"block": 6}},
+            ],
+        }
+    })]
+
+    assert any("Player powers" in line for line in lines)
+    assert any("Phantom Blades 9" in line for line in lines)
+    assert any("first Shiv" in line for line in lines)
+
+
 def test_card_select_combat_context_omits_non_combat_select():
     play.LANG = "en"
 

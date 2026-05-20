@@ -1082,6 +1082,11 @@ def power_display_text(power, include_description=False):
     return text
 
 
+def player_power_display_text(power, include_description=False):
+    label = t("Debuff") if power_is_debuff(power) else t("Buff")
+    return f"{label} {power_display_text(power, include_description=include_description)}"
+
+
 def enemy_intent_display_parts(intents):
     """Return text-only monster intent labels; colors are terminal styling only."""
     parts = []
@@ -1266,6 +1271,11 @@ def card_select_combat_context_lines(state):
         f"{t('Energy')} {energy}/{max_energy}  "
         f"{t('Draw')} {draw}  {t('Discard')} {discard}  {t('Exhaust')} {exhaust}"
     )
+
+    player_powers = combat.get("player_powers") or state.get("player_powers") or []
+    if player_powers:
+        power_parts = [player_power_display_text(power, include_description=True) for power in player_powers]
+        lines.append(f"{t('Player powers')}: " + "; ".join(power_parts))
 
     for enemy in combat.get("enemies") or []:
         idx = enemy.get("index", "?")
