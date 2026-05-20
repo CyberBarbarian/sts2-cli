@@ -2625,7 +2625,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
 
   {c('Actions:', 'bold')}
     Map:     path number (0, 1, 2)
-    Combat:  card index / {c('e', 'yellow')} end turn / {c('p0', 'yellow')} use potion
+    Combat:  card index / {c('e', 'yellow')} end turn / {c('pN', 'yellow')} use potion by slot
     Queue:   {c('seq 0 2 1', 'yellow')} plays cards by the hand snapshot shown now; use {c('seq 0@1 2@0', 'yellow')} to target multi-enemy fights
     Reward:  card index / {c('s', 'yellow')} skip
     Multi:   when prompted for N–M cards (or 0–M optional), comma-separate indices, e.g. {c('0,1,2', 'yellow')}
@@ -2736,6 +2736,46 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
         return raw
 
 # ─── Main game loop ───
+
+def combat_potion_shortcuts(state):
+    """Return potion input shortcuts that are valid for the current combat state."""
+    player = state.get("player", {}) if isinstance(state, dict) else {}
+    shortcuts = []
+    for pot in player.get("potions", []) or []:
+        if not pot:
+            continue
+        idx = pot.get("index")
+        if idx is None:
+            continue
+        try:
+            sort_idx = int(idx)
+        except (TypeError, ValueError):
+            sort_idx = 9999
+        shortcuts.append((sort_idx, f"p{idx}"))
+    return [key for _, key in sorted(shortcuts)]
+
+
+def combat_input_prompt(state):
+    """Build the combat prompt from the currently exported affordances."""
+    parts = ["Play card [index/index@target/seq]", "(e)nd turn"]
+    potion_keys = combat_potion_shortcuts(state)
+    if len(potion_keys) == 1:
+        parts.append(f"({potion_keys[0]}) potion")
+    elif potion_keys:
+        parts.append(f"potions {'/'.join(potion_keys)}")
+    return ", ".join(parts)
+
+
+def combat_help_text(state):
+    """Build state-specific combat input help."""
+    text = "Enter card index, index@target, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn"
+    potion_keys = combat_potion_shortcuts(state)
+    if len(potion_keys) == 1:
+        text += f", {potion_keys[0]}=use potion {potion_keys[0][1:]}"
+    elif potion_keys:
+        text += f", {'/'.join(potion_keys)}=use potion by slot"
+    return text
+
 
 def _save_game(save_path, character, seed, action_log):
     """Write action replay save file."""
@@ -3081,9 +3121,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         _auto_last_fingerprint = fp
                         _auto_stuck_count = 0
                 else:
-                    choice = get_input(t("Play card [index/index@target/seq], (e)nd turn, (p0) potion", "\u51fa\u724c [\u7f16\u53f7/seq], (e)\u7ed3\u675f\u56de\u5408, (p0)\u836f\u6c34"), set(valid.keys()) | {"help"}, state=state)
+                    choice = get_input(combat_input_prompt(state), set(valid.keys()) | {"help"}, state=state)
                     if choice == "help":
-                        print(f"  {t('Enter card index, index@target, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn, p0=use potion 0', 'Enter card index, index@target, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn, p0=use potion 0')}")
+                        print(f"  {combat_help_text(state)}")
                         continue
 
                 sequence = parse_card_sequence(choice)

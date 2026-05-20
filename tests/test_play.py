@@ -1140,6 +1140,47 @@ def test_show_player_marks_targeted_potions(capsys):
     assert "[0] Beetle Juice -> target enemy:" in text
 
 
+def test_combat_prompt_lists_all_potion_shortcuts():
+    state = {
+        "player": {
+            "potions": [
+                {"index": 0, "name": "Snecko Oil"},
+                {"index": 1, "name": "Fruit Juice"},
+            ],
+        },
+    }
+
+    prompt = play.combat_input_prompt(state)
+
+    assert "potions p0/p1" in prompt
+    assert "(p0) potion" not in prompt
+
+
+def test_combat_prompt_omits_potion_hint_without_potions():
+    state = {"player": {"potions": []}}
+
+    prompt = play.combat_input_prompt(state)
+
+    assert "Play card [index/index@target/seq]" in prompt
+    assert "p0" not in prompt
+    assert "potion" not in prompt
+
+
+def test_combat_help_lists_potion_shortcuts_by_slot():
+    state = {
+        "player": {
+            "potions": [
+                {"index": 0, "name": "Snecko Oil"},
+                {"index": 2, "name": "Fire Potion"},
+            ],
+        },
+    }
+
+    help_text = play.combat_help_text(state)
+
+    assert "p0/p2=use potion by slot" in help_text
+
+
 def test_zh_crystal_sphere_labels_are_localized(capsys):
     play.LANG = "zh"
 
