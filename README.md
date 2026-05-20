@@ -54,15 +54,19 @@ Windows:
 ```cmd
 git clone https://github.com/CyberBarbarian/sts2-cli.git
 cd sts2-cli
-sts2-cli.bat
+.\sts2-cli.bat
 ```
+
+PowerShell requires the `.\` prefix for commands in the current directory. For
+the Chinese UI, run `.\sts2-cli-zh.bat`. Double-clicking either launcher still
+works.
 
 Windows entry points:
 
 | File | Purpose |
 | --- | --- |
-| `sts2-cli.bat` | English game UI launcher, double-click friendly |
-| `sts2-cli-zh.bat` | Chinese game UI launcher, double-click friendly |
+| `sts2-cli.bat` | English game UI launcher; use `.\sts2-cli.bat` in PowerShell or double-click the file |
+| `sts2-cli-zh.bat` | Chinese game UI launcher; use `.\sts2-cli-zh.bat` in PowerShell or double-click the file |
 | `setup-windows.bat` | Setup/build only, no game start |
 
 macOS, Linux, or Git Bash:
@@ -245,15 +249,18 @@ Windows：
 ```cmd
 git clone https://github.com/CyberBarbarian/sts2-cli.git
 cd sts2-cli
-sts2-cli.bat
+.\sts2-cli.bat
 ```
+
+PowerShell 需要用 `.\` 前缀运行当前目录下的脚本。中文界面入口是
+`.\sts2-cli-zh.bat`；直接双击 bat 文件仍然可以启动。
 
 Windows 入口：
 
 | 文件 | 用途 |
 | --- | --- |
-| `sts2-cli.bat` | 英文游戏界面入口，可双击 |
-| `sts2-cli-zh.bat` | 中文游戏界面入口，可双击 |
+| `sts2-cli.bat` | 英文游戏界面入口；PowerShell 中运行 `.\sts2-cli.bat`，也可双击 |
+| `sts2-cli-zh.bat` | 中文游戏界面入口；PowerShell 中运行 `.\sts2-cli-zh.bat`，也可双击 |
 | `setup-windows.bat` | 只做安装和构建，不进入游戏 |
 
 macOS、Linux 或 Git Bash：

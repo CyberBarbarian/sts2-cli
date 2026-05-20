@@ -905,9 +905,10 @@ def target_row_damage_label(row):
         return None
     repeat = row.get("repeat")
     base = row.get("calculateddamage", row.get("damage"))
+    dmg_label = t("dmg", "\u4f24")
     if repeat and repeat > 1 and base is not None and damage != base:
-        return f"{damage}{t('dmg','\u4f24')} ({base}x{repeat})"
-    return f"{damage}{t('dmg','\u4f24')}"
+        return f"{damage}{dmg_label} ({base}x{repeat})"
+    return f"{damage}{dmg_label}"
 
 
 def target_row_display_name(row):
@@ -1081,7 +1082,8 @@ def card_target_damage_display_lines(card, enemies=None):
         target_name = target_row_display_name(row)
         extra = []
         if row.get("vulnerable"):
-            extra.append(f"{t('Vulnerable', '\u6613\u4f24')} {row['vulnerable']}")
+            vulnerable_label = t("Vulnerable", "\u6613\u4f24")
+            extra.append(f"{vulnerable_label} {row['vulnerable']}")
         suffix = f" ({', '.join(extra)})" if extra else ""
         lines.append(f"  {target_name}: {label}{suffix}")
     return lines if len(lines) > 1 else []
@@ -1194,10 +1196,11 @@ def enemy_intent_display_parts(intents):
         elif itype in ("CardDebuff", "StatusCard"):
             parts.append(c(t("Add Cards", "\u6dfb\u52a0\u5361\u724c"), "yellow"))
         elif itype == "DeathBlow":
+            deathblow_label = t("Deathblow", "\u81f4\u547d\u4e00\u51fb")
             if dmg is not None:
-                parts.append(c(f"{t('Deathblow', '\u81f4\u547d\u4e00\u51fb')} {dmg}", "red"))
+                parts.append(c(f"{deathblow_label} {dmg}", "red"))
             else:
-                parts.append(c(t("Deathblow", "\u81f4\u547d\u4e00\u51fb"), "red"))
+                parts.append(c(deathblow_label, "red"))
         elif itype == "Escape":
             parts.append(c(t("Escape", "\u9003\u8dd1"), "dim"))
         elif itype == "Summon":
