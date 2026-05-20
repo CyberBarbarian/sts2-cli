@@ -2205,6 +2205,19 @@ def show_rest_site(state):
         opt_desc = ""
         print(f"  {mark} [{opt['index']}] {opt_name}" + (f" — {opt_desc}" if opt_desc and opt_desc != opt_id else ""))
 
+def choose_rest_site_option(send_fn, state, choice):
+    old_state = state
+    new_state = send_fn({
+        "cmd": "action",
+        "action": "choose_option",
+        "args": {"option_index": int(choice)},
+    })
+    if new_state and new_state.get("type") == "error":
+        new_state = send_fn({"cmd": "action", "action": "leave_room"})
+    print_player_state_changes(old_state, new_state)
+    return new_state
+
+
 def _load_loc():
     """Load localization data for resolving event option names."""
     if not hasattr(_load_loc, '_cache'):
@@ -3430,10 +3443,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 else:
                     choice = get_input(t("Choose option [index]", "选择 [编号]"), set(valid.keys()), state=state)
 
-                state = send({"cmd": "action", "action": "choose_option",
-                             "args": {"option_index": int(choice)}})
-                if state and state.get("type") == "error":
-                    state = send({"cmd": "action", "action": "leave_room"})
+                state = choose_rest_site_option(send, state, choice)
 
             elif dec == "crystal_sphere":
                 show_crystal_sphere(state)

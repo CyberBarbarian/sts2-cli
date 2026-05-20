@@ -84,6 +84,48 @@ def test_show_rest_site_uses_titles_and_descriptions(capsys):
     assert "LiftRestSiteOption" not in rendered
 
 
+def test_choose_rest_site_option_prints_heal_changes(capsys):
+    play.LANG = "en"
+    old_state = {
+        "decision": "rest_site",
+        "player": {
+            "name": "The Defect",
+            "hp": 34,
+            "max_hp": 75,
+            "gold": 152,
+            "deck_size": 15,
+        },
+    }
+    new_state = {
+        "decision": "map_select",
+        "player": {
+            "name": "The Defect",
+            "hp": 56,
+            "max_hp": 75,
+            "gold": 152,
+            "deck_size": 15,
+        },
+        "choices": [],
+    }
+    calls = []
+
+    def send(payload):
+        calls.append(payload)
+        return new_state
+
+    returned = play.choose_rest_site_option(send, old_state, "0")
+
+    assert returned is new_state
+    assert calls == [{
+        "cmd": "action",
+        "action": "choose_option",
+        "args": {"option_index": 0},
+    }]
+    rendered = plain(capsys.readouterr().out)
+    assert "Changes:" in rendered
+    assert "HP: 34/75 -> 56/75" in rendered
+
+
 def test_context_display_floor_prefers_player_facing_floor():
     assert play.context_display_floor({"floor": 8, "display_floor": 7}) == 7
     assert play.context_display_floor({"floor": 8}) == 8
