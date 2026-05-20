@@ -846,6 +846,20 @@ def single_visible_target_row(stats, enemies=None):
     return None
 
 
+def uniform_repeated_target_damage(stats, enemies=None):
+    rows = visible_target_rows(stats, enemies)
+    damages = [target_row_damage(row) for row in rows]
+    if not rows or any(damage is None for damage in damages):
+        return None
+    has_repeated_total = any((row.get("repeat") or 0) > 1 or row.get("total_damage") is not None for row in rows)
+    if not has_repeated_total:
+        return None
+    first = damages[0]
+    if all(damage == first for damage in damages):
+        return first
+    return None
+
+
 def suppress_combat_inline_stats(card):
     if not card:
         return False
@@ -927,6 +941,11 @@ def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
         target_row = single_visible_target_row(stats, enemies)
         if target_row:
             target_damage = target_row_damage(target_row)
+            if target_damage is not None:
+                dmg = int(target_damage)
+
+        if dmg is None:
+            target_damage = uniform_repeated_target_damage(stats, enemies)
             if target_damage is not None:
                 dmg = int(target_damage)
 

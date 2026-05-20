@@ -1141,6 +1141,26 @@ def test_combat_inline_stat_prefers_single_target_damage():
     assert "6dmg" not in rendered
 
 
+def test_combat_inline_stat_uses_total_damage_for_repeated_hits():
+    play.LANG = "en"
+    rendered = plain(play.combat_hand_inline_stat_str(
+        {
+            "damage": 5,
+            "damage_by_target": [
+                {"target_index": 0, "target_name": "Wriggler", "damage": 5, "repeat": 3, "total_damage": 15},
+                {"target_index": 1, "target_name": "Wriggler", "damage": 5, "repeat": 3, "total_damage": 15},
+            ],
+        },
+        card={"id": "CARD.GUNK_UP", "type": "Attack", "target_type": "AnyEnemy"},
+        enemies=[
+            {"index": 0, "name": "Wriggler", "hp": 10},
+            {"index": 1, "name": "Wriggler", "hp": 13},
+        ],
+    ))
+
+    assert rendered == "15dmg"
+
+
 def test_combat_inline_stat_hides_unplayable_status_damage():
     play.LANG = "en"
     rendered = plain(play.combat_hand_inline_stat_str(
