@@ -9201,58 +9201,33 @@ public class RunSimulator
             var instance = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(LocManager));
             instanceProp!.SetValue(null, instance);
 
-            // Load REAL localization data from localization_eng/ JSON files
+            // Load real localization data from repo JSON files. The game engine's
+            // LocString path should resolve in the requested CLI language, not
+            // always English.
             var tablesField = typeof(LocManager).GetField("_tables",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            var tables = new Dictionary<string, LocTable>();
-
-            var locDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "localization_eng");
-            if (Directory.Exists(locDir))
-            {
-                foreach (var file in Directory.GetFiles(locDir, "*.json"))
-                {
-                    try
-                    {
-                        var name = Path.GetFileNameWithoutExtension(file);
-                        var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(
-                            File.ReadAllText(file));
-                        if (data != null)
-                            tables[name] = new LocTable(name, data);
-                    }
-                    catch { }
-                }
-                Console.Error.WriteLine($"[INFO] Loaded {tables.Count} localization tables from {locDir}");
-            }
-            else
-            {
-                Console.Error.WriteLine($"[WARN] Localization dir not found: {locDir}");
-                // Fallback: empty tables
-                var tableNames = new[] {
-                    "achievements","acts","afflictions","ancients","ascension",
-                    "bestiary","card_keywords","card_library","card_reward_ui",
-                    "card_selection","cards","characters","combat_messages",
-                    "credits","enchantments","encounters","epochs","eras",
-                    "events","ftues","game_over_screen","gameplay_ui",
-                    "inspect_relic_screen","intents","main_menu_ui","map",
-                    "merchant_room","modifiers","monsters","orbs","potion_lab",
-                    "potions","powers","relic_collection","relics","rest_site_ui",
-                    "run_history","settings_ui","static_hover_tips","stats_screen",
-                    "timeline","vfx"
-                };
-                foreach (var name in tableNames)
-                    tables[name] = new LocTable(name, new Dictionary<string, string>());
-            }
+            var repoRoot = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..");
+            var locFolder = _loc.Lang == "zh" ? "localization_zhs" : "localization_eng";
+            var locDir = Path.Combine(repoRoot, locFolder);
+            var tables = LoadLocTables(locDir);
             tablesField!.SetValue(instance, tables);
 
             // Set Language
             var langProp = typeof(LocManager).GetProperty("Language",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            try { langProp?.SetValue(instance, "eng"); } catch { }
+            try { langProp?.SetValue(instance, _loc.Lang == "zh" ? "zhs" : "eng"); } catch { }
 
             // Set CultureInfo
             var cultureProp = typeof(LocManager).GetProperty("CultureInfo",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-            try { cultureProp?.SetValue(instance, System.Globalization.CultureInfo.InvariantCulture); } catch { }
+            try
+            {
+                cultureProp?.SetValue(instance,
+                    _loc.Lang == "zh"
+                        ? System.Globalization.CultureInfo.GetCultureInfo("zh-Hans")
+                        : System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch { }
 
             // Initialize _smartFormatter — the game uses `new SmartFormatter()`
             try
@@ -9326,11 +9301,14 @@ public class RunSimulator
             {
                 var engTablesField = typeof(LocManager).GetField("_engTables",
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                engTablesField?.SetValue(instance, tables);
+                var engTables = _loc.Lang == "zh"
+                    ? LoadLocTables(Path.Combine(repoRoot, "localization_eng"))
+                    : tables;
+                engTablesField?.SetValue(instance, engTables);
             }
             catch { }
 
-            Console.Error.WriteLine("[INFO] LocManager initialized with stub tables");
+            Console.Error.WriteLine($"[INFO] LocManager initialized with {locFolder} tables");
 
             // Use Harmony to patch methods that need fallback behavior
             var harmony = new Harmony("sts2headless.locpatch");
@@ -9417,6 +9395,45 @@ public class RunSimulator
         {
             Console.Error.WriteLine($"[WARN] InitLocManager failed: {ex.Message}");
         }
+    }
+
+    private static Dictionary<string, LocTable> LoadLocTables(string locDir)
+    {
+        var tables = new Dictionary<string, LocTable>();
+        if (Directory.Exists(locDir))
+        {
+            foreach (var file in Directory.GetFiles(locDir, "*.json"))
+            {
+                try
+                {
+                    var name = Path.GetFileNameWithoutExtension(file);
+                    var data = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(
+                        File.ReadAllText(file));
+                    if (data != null)
+                        tables[name] = new LocTable(name, data);
+                }
+                catch { }
+            }
+            Console.Error.WriteLine($"[INFO] Loaded {tables.Count} localization tables from {locDir}");
+            return tables;
+        }
+
+        Console.Error.WriteLine($"[WARN] Localization dir not found: {locDir}");
+        var tableNames = new[] {
+            "achievements","acts","afflictions","ancients","ascension",
+            "bestiary","card_keywords","card_library","card_reward_ui",
+            "card_selection","cards","characters","combat_messages",
+            "credits","enchantments","encounters","epochs","eras",
+            "events","ftues","game_over_screen","gameplay_ui",
+            "inspect_relic_screen","intents","main_menu_ui","map",
+            "merchant_room","modifiers","monsters","orbs","potion_lab",
+            "potions","powers","relic_collection","relics","rest_site_ui",
+            "run_history","settings_ui","static_hover_tips","stats_screen",
+            "timeline","vfx"
+        };
+        foreach (var name in tableNames)
+            tables[name] = new LocTable(name, new Dictionary<string, string>());
+        return tables;
     }
 
     private static void PatchMethod(Harmony harmony, Type type, string methodName, string patchName)
