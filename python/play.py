@@ -2741,19 +2741,26 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
             if LANG == "zh":
                 print(f"""
   {c('命令:', 'bold')}
+    {c('draw', 'cyan')}     — 查看抽牌堆
+    {c('discard', 'cyan')}  — 查看弃牌堆
+    {c('exhaust', 'cyan')}  — 查看消耗堆
     {c('help', 'cyan')}     — 帮助
     {c('map', 'cyan')}      — 显示地图
     {c('deck', 'cyan')}     — 查看牌组
     {c('potions', 'cyan')}  — 查看药水
     {c('relics', 'cyan')}   — 查看遗物
     {c('quit', 'cyan')}     — 退出
+    {c('abandon', 'cyan')}  — 放弃本局
     {c('save', 'cyan')}     — 存档
     {c('saves', 'cyan')}    — 查看存档列表
 
   {c('操作:', 'bold')}
     地图:    输入路径编号 (0, 1, 2)
-    战斗:    卡牌编号 / {c('e', 'yellow')} 结束回合 / {c('p0', 'yellow')} 使用药水
-    \u961f\u5217:    {c('seq 0 2 1', 'yellow')} \u8fde\u7eed\u6253\u51fa\u591a\u5f20\u724c\uff1b\u591a\u654c\u4eba\u6218\u6597\u7528 {c('seq 0@1 2@0', 'yellow')} \u6307\u5b9a\u76ee\u6807
+    战斗:    {c('0', 'yellow')} 打出卡牌；{c('0@1', 'yellow')} 或 {c('0>1', 'yellow')} 对敌人 [1] 打出卡牌 [0]
+    回合:    {c('e', 'yellow')} 结束回合；{c('p0', 'yellow')}/{c('p1', 'yellow')} 使用对应药水槽
+    队列:    {c('seq 1 2 4', 'yellow')} / {c('play 1 2 4', 'yellow')} / {c('1,2,4', 'yellow')} 按当前手牌快照连续出牌
+    目标:    多敌人战斗用 {c('seq 1@0 4@2', 'yellow')} 指定每张单体牌的目标；AOE 或无目标牌不用写目标
+    中断:    队列遇到手动选择、非法目标、卡牌不在手牌、费用不足或不能打出时会停止
     奖励:    卡牌编号 / {c('s', 'yellow')} 跳过
     多选:    按提示选择张数（须选 N–M 张 / 可选 0–M 张等），编号逗号分隔，例如 {c('0,1,2', 'yellow')}
     休息:    选项编号
@@ -2778,8 +2785,11 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
 
   {c('Actions:', 'bold')}
     Map:     path number (0, 1, 2)
-    Combat:  card index / {c('e', 'yellow')} end turn / {c('pN', 'yellow')} use potion by slot
-    Queue:   {c('seq 0 2 1', 'yellow')} plays cards by the hand snapshot shown now; use {c('seq 0@1 2@0', 'yellow')} to target multi-enemy fights
+    Combat:  {c('0', 'yellow')} plays card [0]; {c('0@1', 'yellow')} or {c('0>1', 'yellow')} plays card [0] on enemy [1]
+    Turn:    {c('e', 'yellow')} ends turn; {c('p0', 'yellow')}/{c('p1', 'yellow')} uses a potion slot
+    Queue:   {c('seq 1 2 4', 'yellow')} / {c('play 1 2 4', 'yellow')} / {c('1,2,4', 'yellow')} plays from the current hand snapshot
+    Targets: use {c('seq 1@0 4@2', 'yellow')} for queued single-target cards in multi-enemy fights; omit targets for AOE/no-target cards
+    Stops:   queued play stops on manual choices, invalid targets, missing cards, insufficient energy, or unplayable cards
     Reward:  card index / {c('s', 'yellow')} skip
     Multi:   when prompted for N–M cards (or 0–M optional), comma-separate indices, e.g. {c('0,1,2', 'yellow')}
     Rest:    option index
@@ -2921,7 +2931,11 @@ def combat_input_prompt(state):
 
 def combat_help_text(state):
     """Build state-specific combat input help."""
-    text = "Enter card index, index@target, seq 0 2 1 (current hand snapshot), seq 0@1 2@0, e=end turn"
+    text = (
+        "Inputs: 0=play card, 0@1/0>1=target enemy [1], "
+        "seq 1 2 4 / play 1 2 4 / 1,2,4=queued play from current hand snapshot, "
+        "seq 1@0 4@2=queued targeted play, e=end turn"
+    )
     potion_keys = combat_potion_shortcuts(state)
     if len(potion_keys) == 1:
         text += f", {potion_keys[0]}=use potion {potion_keys[0][1:]}"

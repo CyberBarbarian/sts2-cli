@@ -1363,6 +1363,26 @@ def test_combat_help_lists_potion_shortcuts_by_slot():
     help_text = play.combat_help_text(state)
 
     assert "p0/p2=use potion by slot" in help_text
+    assert "0@1/0>1=target enemy [1]" in help_text
+    assert "seq 1 2 4 / play 1 2 4 / 1,2,4=queued play from current hand snapshot" in help_text
+    assert "seq 1@0 4@2=queued targeted play" in help_text
+
+
+def test_global_help_explains_queue_forms(monkeypatch, capsys):
+    answers = iter(["help", "quit"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    play.LANG = "en"
+
+    try:
+        play.get_input("Prompt", state={"decision": "combat_play"})
+    except play._QuitRequested:
+        pass
+
+    text = plain(capsys.readouterr().out)
+    assert "0@1 or 0>1" in text
+    assert "seq 1 2 4 / play 1 2 4 / 1,2,4" in text
+    assert "seq 1@0 4@2" in text
+    assert "queued play stops on manual choices" in text
 
 
 def test_zh_crystal_sphere_labels_are_localized(capsys):

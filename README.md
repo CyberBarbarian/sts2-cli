@@ -9,68 +9,63 @@
 > terminal presentation fixes. It does not intentionally change Slay the Spire 2
 > card, relic, enemy, event, combat, or reward semantics.
 
-<details open>
-<summary><b>English</b></summary>
+## English
+
+- [What This Is](#what-this-is)
+- [Quick Start](#quick-start)
+- [Play](#play)
+- [JSON Protocol](#json-protocol)
+- [Logs And Bug Reports](#logs-and-bug-reports)
+- [Testing](#testing)
+- [Release Notes](#release-notes)
+- [中文说明](#中文说明)
 
 ## What This Is
 
-`sts2-cli` runs the real Slay the Spire 2 engine headlessly and exposes it as:
-
-- an interactive terminal game;
-- a stdin/stdout JSON protocol for agents and benchmarks;
-- a reproducible logging surface for debugging CLI/export/headless issues.
+`sts2-cli` runs the real Slay the Spire 2 engine headlessly and exposes it as an
+interactive terminal game, a stdin/stdout JSON protocol for agents, and a
+reproducible logging surface for CLI/export/headless debugging.
 
 You must own and install Slay the Spire 2 through Steam. This repository does
 not contain or redistribute game DLLs.
 
-## Current Fork Status
+![English demo](docs/demo_en.gif)
 
-This fork is a rolling BG-Agent build. It includes additional fixes for:
-
-- Windows/headless launch stability;
-- pending card/event/reward selections;
-- target-specific combat preview exports;
-- shop, rest, treasure, map, potion, and reward affordances;
-- English/Chinese CLI startup paths;
-- focused pytest workflow for CLI/headless regressions.
+This fork is a rolling BG-Agent build. It includes additional fixes for
+Windows/headless launch stability, pending selections, target-specific combat
+preview exports, shop/rest/treasure/map/potion/reward affordances, bilingual
+startup paths, and focused pytest workflows.
 
 The fork's `main` branch is the recommended branch for users. The active
 development branch may also exist, but `main` is kept fast-forwarded after
 tested fix batches.
 
-## Requirements
+## Quick Start
+
+Requirements:
 
 - Slay the Spire 2 installed through Steam.
 - Python 3.9 or newer.
 - .NET 9 SDK or newer.
-- On Windows, the standard Python launcher `py` is supported when available.
-- On Unix-like systems, `bash` is needed for `setup.sh` / `copy_dlls.sh`.
+- On Unix-like systems, `bash` for `setup.sh` / `copy_dlls.sh`.
 
-## Quick Start On Windows
-
-Clone the fork:
+Windows:
 
 ```cmd
 git clone https://github.com/CyberBarbarian/sts2-cli.git
 cd sts2-cli
+sts2-cli.bat
 ```
 
-Then choose one of these entry points:
+Windows entry points:
 
-```cmd
-sts2-cli.bat        :: English game UI launcher, double-click friendly
-sts2-cli-zh.bat     :: Chinese game UI launcher, double-click friendly
-setup-windows.bat   :: setup/build only, no game start
-```
+| File | Purpose |
+| --- | --- |
+| `sts2-cli.bat` | English game UI launcher, double-click friendly |
+| `sts2-cli-zh.bat` | Chinese game UI launcher, double-click friendly |
+| `setup-windows.bat` | Setup/build only, no game start |
 
-The launcher opens a menu for new game, load save, character, and ascension.
-On first run it will try to locate the Steam install, copy required DLLs into
-`lib/`, and build the headless adapter.
-
-If auto-detection fails, install Slay the Spire 2 through Steam first or copy
-the required game DLLs into `lib/` manually. Do not commit `lib/`.
-
-## Quick Start On macOS/Linux/Git Bash
+macOS, Linux, or Git Bash:
 
 ```bash
 git clone https://github.com/CyberBarbarian/sts2-cli.git
@@ -79,10 +74,12 @@ cd sts2-cli
 python3 python/play.py
 ```
 
-For cross-platform DLL copying details, see
-[`docs/cross-platform-usage.md`](docs/cross-platform-usage.md).
+The first run tries to locate the Steam install, copy required DLLs into
+`lib/`, and build the headless adapter. Do not commit or redistribute `lib/`.
+For cross-platform DLL details, see
+[docs/cross-platform-usage.md](docs/cross-platform-usage.md).
 
-## Direct CLI Usage
+## Play
 
 ```bash
 python3 python/play.py                         # menu: language, character, ascension
@@ -105,9 +102,7 @@ Supported characters:
 
 Supported ascension range is currently `0-10`.
 
-## In-Game Commands
-
-Type `help` during a run. Common commands include:
+Common in-game commands:
 
 ```text
 help                 show help
@@ -121,7 +116,7 @@ relics               show relics
 quit                 quit and offer save
 
 Map                  enter a visible path number
-Combat               card index, card@target, seq ..., e, p0
+Combat               0, 0@1, 0>1, e, p0
 Reward               reward index, card pick, skip where allowed
 Rest                 option index
 Event                option index / leave when exposed by the engine
@@ -130,15 +125,23 @@ Treasure             exposed option index
 Card selection       comma/space separated indices, or skip when optional
 ```
 
-Queued combat input supports explicit targets:
+Combat input forms:
 
 ```text
-seq 0@1 2@0 4
+0                  play card [0]
+0@1 or 0>1        play card [0] on enemy [1]
+e                  end turn
+p0, p1             use potion slot
+seq 1 2 4          play cards by the hand snapshot currently shown
+play 1 2 4         same as seq
+1,2,4              short queued-play form
+seq 1@0 4@2        queued targeted cards for multi-enemy fights
 ```
 
-The sequence is bound to the original hand and enemy list. If a later action
-requires a new selection or becomes invalid, the remaining queued cards stop
-instead of guessing.
+Queued play is bound to the original hand and enemy list. AOE and no-target
+cards do not need targets. If a later action requires a new selection, has an
+invalid target, loses the card, lacks energy, or becomes unplayable, the queue
+stops instead of guessing.
 
 ## JSON Protocol
 
@@ -170,16 +173,12 @@ snapshots and actions with timestamps.
 python3 python/play.py --no-log
 ```
 
-When reporting a CLI/headless bug, include:
+When reporting a CLI/headless bug, include seed, character, ascension, exact
+visible decision state, command entered, relevant `logs/*.jsonl` file when
+available, and stderr/exception text if the headless process failed.
 
-- seed, character, ascension;
-- exact visible decision state;
-- command entered;
-- relevant `logs/*.jsonl` file when available;
-- stderr or exception text if the headless process failed.
-
-Do not report normal game outcomes as CLI bugs unless the CLI hides, corrupts,
-or blocks an engine decision.
+Normal game outcomes are not CLI bugs unless the CLI hides, corrupts, or blocks
+an engine decision.
 
 ## Testing
 
@@ -210,64 +209,54 @@ docs, tests, and source code only. Users still run `sts2-cli.bat`,
 `setup-windows.bat`, or `./setup.sh` locally to copy their own game files and
 build the adapter.
 
-</details>
+## 中文说明
 
-<details>
-<summary><b>中文</b></summary>
+- [这是什么](#这是什么)
+- [快速开始](#快速开始)
+- [启动游戏](#启动游戏)
+- [JSON 协议](#json-协议-1)
+- [日志和 bug 报告](#日志和-bug-报告)
+- [测试](#测试)
+- [发布说明](#发布说明)
 
 ## 这是什么
 
-`sts2-cli` 使用真实的杀戮尖塔 2 游戏引擎，并把它以无头命令行形式暴露出来：
-
-- 可以直接在终端里玩；
-- 可以通过 stdin/stdout JSON 协议给 agent 或 benchmark 使用；
-- 可以记录可复现日志，用于调试 CLI、状态导出和 headless adapter 问题。
+`sts2-cli` 使用真实的杀戮尖塔 2 游戏引擎，并把它以无头命令行形式暴露出来：可以直接在终端里玩，也可以通过 stdin/stdout JSON 协议给 agent 或 benchmark 使用。
 
 你需要自己在 Steam 中拥有并安装 Slay the Spire 2。本仓库不包含、也不会重新分发游戏 DLL。
 
-## 当前 fork 状态
+![中文演示](docs/demo_zh.gif)
 
-本 fork 是 BG-Agent 使用的滚动版本，重点修复和补全：
-
-- Windows/headless 启动稳定性；
-- 卡牌、事件、奖励等 pending selection 的暴露；
-- 不同目标下的战斗预览数值导出；
-- 商店、休息点、宝箱、地图、药水、奖励等命令行交互；
-- 英文/中文启动入口；
-- 针对 CLI/headless 回归的 focused pytest 流程。
+本 fork 是 BG-Agent 使用的滚动版本，重点补全 Windows/headless 稳定性、卡牌/事件/奖励选择、不同目标下的战斗预览、商店/休息点/宝箱/地图/药水/奖励交互、双语启动入口和 focused pytest 流程。
 
 推荐普通用户使用本 fork 的 `main` 分支。开发分支可能同时存在，但经过验证的修复会同步推进到 `main`。
 
-## 依赖
+## 快速开始
+
+依赖：
 
 - 通过 Steam 安装 Slay the Spire 2。
 - Python 3.9 或更新版本。
 - .NET 9 SDK 或更新版本。
-- Windows 上支持标准 Python launcher：`py`。
 - macOS/Linux/Git Bash 下，`setup.sh` 和 `copy_dlls.sh` 需要 `bash`。
 
-## Windows 快速开始
-
-克隆本 fork：
+Windows：
 
 ```cmd
 git clone https://github.com/CyberBarbarian/sts2-cli.git
 cd sts2-cli
+sts2-cli.bat
 ```
 
-然后选择入口：
+Windows 入口：
 
-```cmd
-sts2-cli.bat        :: 英文游戏界面入口，可双击
-sts2-cli-zh.bat     :: 中文游戏界面入口，可双击
-setup-windows.bat   :: 只做安装和构建，不进入游戏
-```
+| 文件 | 用途 |
+| --- | --- |
+| `sts2-cli.bat` | 英文游戏界面入口，可双击 |
+| `sts2-cli-zh.bat` | 中文游戏界面入口，可双击 |
+| `setup-windows.bat` | 只做安装和构建，不进入游戏 |
 
-启动器会显示新游戏、读取存档、角色、进阶等菜单。首次运行时会尝试自动定位 Steam 游戏目录，把所需 DLL 复制到 `lib/`，并构建 headless adapter。
-
-如果自动定位失败，请先确认 Steam 中已经安装 Slay the Spire 2，或者手动把所需游戏 DLL 复制到 `lib/`。不要提交 `lib/`。
-
-## macOS/Linux/Git Bash 快速开始
+macOS、Linux 或 Git Bash：
 
 ```bash
 git clone https://github.com/CyberBarbarian/sts2-cli.git
@@ -276,10 +265,10 @@ cd sts2-cli
 python3 python/play.py
 ```
 
-跨平台复制 DLL 的细节见
-[`docs/cross-platform-usage.md`](docs/cross-platform-usage.md)。
+首次运行会尝试自动定位 Steam 游戏目录，把所需 DLL 复制到 `lib/`，并构建 headless adapter。不要提交或分发 `lib/`。跨平台复制 DLL 的细节见
+[docs/cross-platform-usage.md](docs/cross-platform-usage.md)。
 
-## 直接命令行启动
+## 启动游戏
 
 ```bash
 python3 python/play.py                         # 菜单：语言、角色、进阶
@@ -292,19 +281,9 @@ python3 python/play.py --load saves/replay.json
 python3 python/play.py --no-log
 ```
 
-当前支持角色：
+当前支持角色：`Ironclad`、`Silent`、`Defect`、`Regent`、`Necrobinder`。当前支持进阶范围是 `0-10`。
 
-- `Ironclad`
-- `Silent`
-- `Defect`
-- `Regent`
-- `Necrobinder`
-
-当前支持进阶范围是 `0-10`。
-
-## 游戏内常用命令
-
-游戏内输入 `help`。常用命令包括：
+游戏内常用命令：
 
 ```text
 help                 显示帮助
@@ -318,7 +297,7 @@ relics               查看遗物
 quit                 退出并提示保存
 
 地图                 输入可见路线编号
-战斗                 卡牌编号、card@target、seq ...、e、p0
+战斗                 0、0@1、0>1、e、p0
 奖励                 奖励编号、选牌、允许时跳过
 休息点               选项编号
 事件                 引擎暴露的选项编号 / leave
@@ -327,13 +306,20 @@ quit                 退出并提示保存
 选牌                 逗号或空格分隔的编号；可选时可以 skip
 ```
 
-连续出牌支持显式目标：
+战斗输入形式：
 
 ```text
-seq 0@1 2@0 4
+0                  打出卡牌 [0]
+0@1 或 0>1        对敌人 [1] 打出卡牌 [0]
+e                  结束回合
+p0, p1             使用对应药水槽
+seq 1 2 4          按当前显示的手牌快照连续出牌
+play 1 2 4         与 seq 相同
+1,2,4              连续出牌短写
+seq 1@0 4@2        多敌人战斗中为每张单体牌指定目标
 ```
 
-这条指令会绑定输入时的原始手牌和敌人列表。如果后续动作需要新的选择，或者某张牌已经无法合法打出，剩余队列会停止，不会替玩家猜。
+连续出牌会绑定输入时的原始手牌和敌人列表。AOE 或无目标牌不用写目标。如果后续动作需要新的选择、目标非法、卡牌不在手牌、费用不足或不能打出，剩余队列会停止，不会替玩家猜。
 
 ## JSON 协议
 
@@ -362,13 +348,7 @@ dotnet run --project src/Sts2Headless/Sts2Headless.csproj
 python3 python/play.py --no-log
 ```
 
-报告 CLI/headless bug 时，请尽量提供：
-
-- seed、角色、进阶；
-- 当时可见的 decision state；
-- 输入过的命令；
-- 可用时附上对应 `logs/*.jsonl`；
-- headless 进程失败时的 stderr 或异常文本。
+报告 CLI/headless bug 时，请尽量提供 seed、角色、进阶、当时可见的 decision state、输入命令、可用的 `logs/*.jsonl`，以及 headless 进程失败时的 stderr 或异常文本。
 
 正常游戏结果本身不是 CLI bug。只有当 CLI 隐藏、破坏或阻塞了原引擎决策时，才应当作为 CLI/headless bug 处理。
 
@@ -396,5 +376,3 @@ python -m pytest -m "not slow" -q
 当前还没有打包好的二进制 release。这是有意保持的：游戏 DLL 来自本地 Steam 安装，不能重新分发。
 
 安全的公开发布应当是源码/tag release，只包含脚本、文档、测试和源码。用户仍然需要在本地运行 `sts2-cli.bat`、`setup-windows.bat` 或 `./setup.sh`，用自己的游戏文件完成构建。
-
-</details>
