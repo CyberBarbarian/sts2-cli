@@ -2293,6 +2293,20 @@ def choose_rest_site_option(send_fn, state, choice):
     return new_state
 
 
+def choose_card_reward(send_fn, state, choice):
+    old_state = state
+    if choice == "s":
+        new_state = send_fn({"cmd": "action", "action": "skip_card_reward"})
+    else:
+        new_state = send_fn({
+            "cmd": "action",
+            "action": "select_card_reward",
+            "args": {"card_index": int(choice)},
+        })
+    print_state_changes(old_state, new_state)
+    return new_state
+
+
 def _load_loc():
     """Load localization data for resolving event option names."""
     if not hasattr(_load_loc, '_cache'):
@@ -3338,11 +3352,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         state=state,
                     )
 
-                if choice == "s":
-                    state = send({"cmd": "action", "action": "skip_card_reward"})
-                else:
-                    state = send({"cmd": "action", "action": "select_card_reward",
-                                 "args": {"card_index": int(choice)}})
+                state = choose_card_reward(send, state, choice)
 
             elif dec == "treasure":
                 print(f"\n{'─' * 60}")

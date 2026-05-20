@@ -126,6 +126,59 @@ def test_choose_rest_site_option_prints_heal_changes(capsys):
     assert "HP: 34/75 -> 56/75" in rendered
 
 
+def test_choose_card_reward_prints_added_card_details(capsys):
+    play.LANG = "en"
+    old_state = {
+        "decision": "card_reward",
+        "player": {
+            "hp": 52,
+            "max_hp": 63,
+            "gold": 118,
+            "deck_size": 10,
+            "deck": [],
+        },
+    }
+    new_state = {
+        "decision": "map_select",
+        "player": {
+            "hp": 52,
+            "max_hp": 63,
+            "gold": 118,
+            "deck_size": 11,
+            "deck": [
+                {
+                    "id": "CARD.FURNACE",
+                    "name": "Furnace",
+                    "cost": 1,
+                    "type": "Power",
+                    "description": "At the start of your turn, Forge 4.",
+                }
+            ],
+        },
+        "choices": [],
+    }
+    calls = []
+
+    def send(payload):
+        calls.append(payload)
+        return new_state
+
+    returned = play.choose_card_reward(send, old_state, "2")
+
+    assert returned is new_state
+    assert calls == [{
+        "cmd": "action",
+        "action": "select_card_reward",
+        "args": {"card_index": 2},
+    }]
+    rendered = plain(capsys.readouterr().out)
+    assert "Card details:" in rendered
+    assert "+Furnace" in rendered
+    assert "At the start of your turn, Forge 4." in rendered
+    assert "Changes:" in rendered
+    assert "Deck: +Furnace" in rendered
+
+
 def test_context_display_floor_prefers_player_facing_floor():
     assert play.context_display_floor({"floor": 8, "display_floor": 7}) == 7
     assert play.context_display_floor({"floor": 8}) == 8
