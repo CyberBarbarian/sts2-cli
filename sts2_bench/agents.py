@@ -12,12 +12,53 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .actions import LegalAction
-from .context import build_llm_prompt
+from .context import compact_state, render_state_text
 
 
 class Agent(Protocol):
-    def choose(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> tuple[LegalAction, dict[str, Any]]:
+    def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
+        """Return the prompt this agent would use for this decision."""
+
+    def choose(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[LegalAction],
+        *,
+        prompt: str | None = None,
+    ) -> tuple[LegalAction, dict[str, Any]]:
         """Return a legal action and metadata for logging."""
+
+
+def build_llm_prompt(state: dict[str, Any], legal_actions: list[LegalAction], *, include_json: bool = True) -> str:
+    """Build the action-selection prompt used by LLM policies.
+
+    ``context.py`` owns only state rendering.  The policy-facing task
+    instruction, response schema, and legal-action wrapper live with agents so
+    different agents can define different prompting methods over the same
+    state text.
+    """
+
+    action_payload = [action.to_prompt_dict() for action in legal_actions]
+    parts = [
+        "You are playing Slay the Spire 2 through a headless benchmark environment.",
+        "Choose exactly one legal action. Return only JSON with this schema:",
+        '{"action_id": <integer>, "reason": "<short reason>"}',
+        "",
+        "Game state:",
+        render_state_text(state),
+        "",
+        "Legal actions:",
+        json.dumps(action_payload, ensure_ascii=False, separators=(",", ":")),
+    ]
+    if include_json and not (state.get("view_deck") or state.get("view_map")):
+        parts.extend(
+            [
+                "",
+                "Compact state JSON:",
+                json.dumps(compact_state(state), ensure_ascii=False, separators=(",", ":")),
+            ]
+        )
+    return "\n".join(parts)
 
 
 class RandomAgent:
@@ -26,7 +67,16 @@ class RandomAgent:
     def __init__(self, seed: int | None = None) -> None:
         self.rng = random.Random(seed)
 
-    def choose(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> tuple[LegalAction, dict[str, Any]]:
+    def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
+        return build_llm_prompt(state, legal_actions)
+
+    def choose(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[LegalAction],
+        *,
+        prompt: str | None = None,
+    ) -> tuple[LegalAction, dict[str, Any]]:
         action = self.rng.choice(legal_actions)
         return action, {"agent": "random"}
 
@@ -47,11 +97,20 @@ class OpenAICompatAgent:
     include_json_state: bool = True
     max_retries: int = 2
 
-    def choose(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> tuple[LegalAction, dict[str, Any]]:
+    def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
+        return build_llm_prompt(state, legal_actions, include_json=self.include_json_state)
+
+    def choose(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[LegalAction],
+        *,
+        prompt: str | None = None,
+    ) -> tuple[LegalAction, dict[str, Any]]:
         if not legal_actions:
             raise ValueError("No legal actions available")
 
-        prompt = build_llm_prompt(state, legal_actions, include_json=self.include_json_state)
+        prompt = prompt if prompt is not None else self.build_prompt(state, legal_actions)
         messages = [
             {
                 "role": "system",

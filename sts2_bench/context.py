@@ -5,17 +5,31 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .actions import LegalAction
-
 
 DROP_KEYS = {
     "enchantment_description",
     "affliction_description",
+    "id",
+    "option_id",
     "instance_id",
+    "move_id",
     "draw_pile",
     "discard_pile",
     "exhaust_pile",
     "inactive_enemies",
+    "full_map",
+}
+
+MAP_ICONS = {
+    "Monster": "M",
+    "Elite": "E",
+    "Boss": "B",
+    "RestSite": "R",
+    "Shop": "$",
+    "Treasure": "T",
+    "Event": "?",
+    "Unknown": "?",
+    "Ancient": "A",
 }
 
 
@@ -60,7 +74,7 @@ def compact_deck(deck: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "name": card_name,
                 "upgraded": upgraded,
                 "type": card.get("type"),
-                "cost": card.get("cost"),
+                "cost": card_cost_label(card),
             },
         )
     result = []
@@ -73,6 +87,26 @@ def compact_deck(deck: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def compact_state(state: dict[str, Any]) -> dict[str, Any]:
     """Return a JSON-friendly state for logs and LLM prompts."""
+
+    if state.get("view_deck"):
+        player = state.get("player") or {}
+        return {
+            "view": "deck",
+            "deck_size": player.get("deck_size"),
+            "deck": compact_deck(player.get("deck") or []),
+        }
+
+    if state.get("view_map"):
+        full_map = state.get("full_map")
+        if isinstance(full_map, dict) and full_map.get("type") == "map":
+            return {
+                "view": "map",
+                "map": render_full_map(full_map, state.get("choices", []) or []),
+            }
+        return {
+            "view": "map",
+            "error": _compact_obj(state.get("view_map_error") or "Map view unavailable."),
+        }
 
     return _compact_obj(state)
 
@@ -90,12 +124,18 @@ def incoming_damage(state: dict[str, Any]) -> int:
     return total
 
 
+def card_cost_label(card: dict[str, Any]) -> Any:
+    """Return the CLI-facing card cost, matching python/play.py fallback order."""
+
+    return card.get("cost", card.get("energy_cost", "?"))
+
+
 def card_line(card: dict[str, Any], state: dict[str, Any] | None = None) -> str:
     stats = card.get("stats") or {}
     bits = [
         f"[{card.get('index', '?')}]",
         name(card.get("name")),
-        f"cost={card.get('cost', '?')}",
+        f"cost={card_cost_label(card)}",
         str(card.get("type", "?")),
     ]
     if card.get("rarity"):
@@ -121,6 +161,36 @@ def card_line(card: dict[str, Any], state: dict[str, Any] | None = None) -> str:
         bits.append(f"enchantment={name(card.get('enchantment'))}")
     if card.get("affliction"):
         bits.append(f"affliction={name(card.get('affliction'))}")
+    keywords = card.get("keywords") or []
+    if keywords:
+        bits.append("keywords=" + ",".join(str(k) for k in keywords))
+    return " ".join(bits)
+
+
+def deck_card_line(card: dict[str, Any]) -> str:
+    stats = card.get("stats") or {}
+    bits = [
+        name(card.get("name")),
+        f"cost={card_cost_label(card)}",
+        str(card.get("type", "?")),
+    ]
+    if card.get("rarity"):
+        bits.append(f"rarity={card.get('rarity')}")
+    if card.get("upgraded") is not None:
+        bits.append(f"upgraded={card.get('upgraded')}")
+    for key in ("damage", "calculateddamage", "block", "magic", "draw"):
+        value = stats.get(key)
+        if value is not None:
+            label = "damage" if key == "calculateddamage" else key
+            bits.append(f"{label}={value}")
+    for key in ("cards", "vulnerablepower", "weakpower", "strengthpower", "dexteritypower"):
+        value = stats.get(key)
+        if value is not None:
+            bits.append(f"{key}={value}")
+    if card.get("target_type"):
+        bits.append(f"target={card.get('target_type')}")
+    if card.get("star_cost"):
+        bits.append(f"star_cost={card.get('star_cost')}")
     keywords = card.get("keywords") or []
     if keywords:
         bits.append("keywords=" + ",".join(str(k) for k in keywords))
@@ -167,6 +237,193 @@ def append_hover_tip_lines(lines: list[str], obj: dict[str, Any], *, prefix: str
             lines.append(prefix + f"tip: {title}")
 
 
+def _draw_conn(buf: list[str], from_col: int, to_col: int, width: int) -> None:
+    """Draw a simple TUI-style connection between two map columns."""
+
+    from_pos = from_col * width + width // 2
+    to_pos = to_col * width + width // 2
+    if from_pos == to_pos:
+        if 0 <= from_pos < len(buf):
+            buf[from_pos] = "|"
+        return
+    lo, hi = sorted((from_pos, to_pos))
+    char = "/" if to_pos < from_pos else "\\"
+    for pos in range(lo, hi + 1):
+        if 0 <= pos < len(buf):
+            buf[pos] = char
+
+
+def map_display_choices(choices: list[dict[str, Any]], map_data: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Match ``python/play.py`` filtering of choices to visible map coords."""
+
+    visible_coords: set[tuple[Any, Any]] = set()
+    for row in (map_data or {}).get("rows", []):
+        for node in row:
+            visible_coords.add((node.get("col"), node.get("row")))
+
+    boss = (map_data or {}).get("boss") or {}
+    if "col" in boss and "row" in boss:
+        visible_coords.add((boss.get("col"), boss.get("row")))
+
+    if not visible_coords:
+        return choices
+
+    filtered = [
+        choice
+        for choice in choices
+        if (choice.get("col"), choice.get("row")) in visible_coords
+        or choice.get("type") == "Ancient"
+    ]
+    return filtered or choices
+
+
+def render_full_map(map_data: dict[str, Any], choices: list[dict[str, Any]]) -> list[str]:
+    """Render map as a text grid close to ``python/play.py``'s TUI map."""
+
+    rows = map_data.get("rows") or []
+    if not rows:
+        return []
+
+    visible_choices = map_display_choices(choices, map_data)
+    choice_indices = {
+        (choice.get("col"), choice.get("row")): idx
+        for idx, choice in enumerate(visible_choices)
+    }
+    choice_nodes = {
+        (choice.get("col"), choice.get("row")): choice
+        for choice in visible_choices
+    }
+
+    node_map: dict[tuple[int, int], dict[str, Any]] = {}
+    max_col = 0
+    row_numbers: set[int] = set()
+    for row in rows:
+        for node in row:
+            col = int(node.get("col", 0))
+            row_number = int(node.get("row", 0))
+            node_map[(col, row_number)] = node
+            max_col = max(max_col, col)
+            row_numbers.add(row_number)
+
+    boss = map_data.get("boss") or {}
+    if "col" in boss:
+        max_col = max(max_col, int(boss.get("col", 0)))
+    for col, _row in choice_indices:
+        if isinstance(col, int):
+            max_col = max(max_col, col)
+
+    row_numbers_sorted = sorted(row_numbers)
+    total_cols = max_col + 1
+    cell_width = 4
+    grid_width = cell_width * total_cols
+    current = map_data.get("current_coord")
+    out = ["Full map:"]
+
+    if current and current.get("row", -1) not in row_numbers:
+        out.append("  You are at the start")
+
+    off_grid_choices = []
+    for coord, choice_idx in choice_indices.items():
+        col, row = coord
+        boss_coord = (boss.get("col"), boss.get("row"))
+        if coord not in node_map and coord != boss_coord:
+            node = choice_nodes.get(coord, {"col": col, "row": row, "type": "?"})
+            off_grid_choices.append((choice_idx, node))
+    for choice_idx, node in sorted(off_grid_choices):
+        out.append(f"  [{choice_idx}] {node.get('type', '?')}")
+
+    boss_col = int(boss.get("col", 0))
+    boss_row = boss.get("row", -1)
+    boss_choice_idx = choice_indices.get((boss_col, boss_row))
+    boss_buf = list(" " * grid_width)
+    boss_center = boss_col * cell_width + cell_width // 2
+    if 0 <= boss_center < len(boss_buf):
+        boss_buf[boss_center] = "B"
+    out.append(f"  B | {''.join(boss_buf)}")
+    if boss_choice_idx is not None:
+        ann = list(" " * grid_width)
+        label = f"[{boss_choice_idx}]"
+        start = boss_center - 1
+        for offset, ch in enumerate(label):
+            if 0 <= start + offset < len(ann):
+                ann[start + offset] = ch
+        out.append(f"    | {''.join(ann)}")
+
+    if row_numbers_sorted:
+        top_row = row_numbers_sorted[-1]
+        conn = list(" " * grid_width)
+        for row in rows:
+            for node in row:
+                if node.get("row") != top_row:
+                    continue
+                for child in node.get("children") or []:
+                    if child.get("row") == boss_row:
+                        _draw_conn(conn, int(node.get("col", 0)), int(child.get("col", 0)), cell_width)
+        out.append(f"    | {''.join(conn)}")
+
+    for idx in range(len(row_numbers_sorted) - 1, -1, -1):
+        row_number = row_numbers_sorted[idx]
+        node_buf = list(" " * grid_width)
+        for col in range(total_cols):
+            node = node_map.get((col, row_number))
+            if not node:
+                continue
+            icon = MAP_ICONS.get(node.get("type", "?"), ".")
+            center = col * cell_width + cell_width // 2
+            is_current = bool(current and current.get("col") == col and current.get("row") == row_number)
+            if is_current and center - 1 >= 0 and center + 1 < len(node_buf):
+                node_buf[center - 1] = "["
+                node_buf[center] = icon
+                node_buf[center + 1] = "]"
+            else:
+                node_buf[center] = icon
+        out.append(f"  {row_number:>2}| {''.join(node_buf)}")
+
+        row_choices = {
+            col: choice_indices[(col, row_number)]
+            for col in range(total_cols)
+            if (col, row_number) in choice_indices
+        }
+        if row_choices:
+            ann = list(" " * grid_width)
+            for col, choice_idx in row_choices.items():
+                label = f"[{choice_idx}]"
+                start = col * cell_width + cell_width // 2 - 1
+                for offset, ch in enumerate(label):
+                    if 0 <= start + offset < len(ann):
+                        ann[start + offset] = ch
+            out.append(f"    | {''.join(ann)}")
+
+        if idx > 0:
+            below_row = row_numbers_sorted[idx - 1]
+            conn = list(" " * grid_width)
+            for row in rows:
+                for node in row:
+                    if node.get("row") != below_row:
+                        continue
+                    for child in node.get("children") or []:
+                        if child.get("row") == row_number:
+                            _draw_conn(conn, int(node.get("col", 0)), int(child.get("col", 0)), cell_width)
+            out.append(f"    | {''.join(conn)}")
+
+    out.append("  Legend: M=Monster E=Elite R=Rest $=Shop T=Treasure ?=Event A=Ancient [x]=Current [n]=Choice")
+    if choice_indices:
+        parts = []
+        inverse = {value: key for key, value in choice_indices.items()}
+        for choice_idx in sorted(inverse):
+            col, row = inverse[choice_idx]
+            node = node_map.get((col, row))
+            if not node and col == boss_col and row == boss_row:
+                node = boss
+            if not node:
+                node = choice_nodes.get((col, row))
+            if node:
+                parts.append(f"{choice_idx}={node.get('type', '?')}")
+        if parts:
+            out.append("  Choices: " + " ".join(parts))
+    return out
+
+
 def append_card_lines(lines: list[str], card: dict[str, Any], *, prefix: str = "  ") -> None:
     lines.append(prefix + card_line(card))
     description = card_description(card)
@@ -179,8 +436,10 @@ def append_card_lines(lines: list[str], card: dict[str, Any], *, prefix: str = "
     after = card.get("after_upgrade")
     if isinstance(after, dict):
         upgrade_parts = []
-        if after.get("cost") is not None and after.get("cost") != card.get("cost"):
-            upgrade_parts.append(f"cost {card.get('cost')} -> {after.get('cost')}")
+        old_cost = card_cost_label(card)
+        new_cost = card_cost_label(after)
+        if new_cost != "?" and new_cost != old_cost:
+            upgrade_parts.append(f"cost {old_cost} -> {new_cost}")
         stats = card.get("stats") or {}
         after_stats = after.get("stats") or {}
         for key in sorted(set(stats) | set(after_stats)):
@@ -196,6 +455,21 @@ def append_card_lines(lines: list[str], card: dict[str, Any], *, prefix: str = "
         if after_desc:
             lines.append(prefix + f"  upgrade_description: {after_desc}")
     append_hover_tip_lines(lines, card, prefix=prefix + "  ")
+
+
+def append_deck_view(lines: list[str], player: dict[str, Any]) -> None:
+    deck = player.get("deck") or []
+    lines.append(f"Deck view ({len(deck)} entries, deck_size={player.get('deck_size', '?')}):")
+    if not deck:
+        lines.append("  No deck details available in this state.")
+        return
+    for card in deck:
+        count = card.get("count")
+        suffix = f" x{count}" if count else ""
+        lines.append(f"  {deck_card_line(card)}{suffix}")
+        desc = card_description(card)
+        if desc:
+            lines.append(f"    description: {desc}")
 
 
 def player_summary(player: dict[str, Any]) -> str:
@@ -266,6 +540,20 @@ def render_state_text(state: dict[str, Any]) -> str:
     decision = state.get("decision", state.get("type", "?"))
     context = state.get("context") or {}
     player = state.get("player") or {}
+
+    if state.get("view_deck"):
+        lines: list[str] = []
+        append_deck_view(lines, player)
+        return "\n".join(lines)
+
+    if state.get("view_map"):
+        full_map = state.get("full_map")
+        if isinstance(full_map, dict) and full_map.get("type") == "map":
+            return "\n".join(render_full_map(full_map, state.get("choices", []) or []))
+        if state.get("view_map_error"):
+            return f"Map view unavailable: {state.get('view_map_error')}"
+        return "Map view unavailable."
+
     lines = [
         f"Decision: {decision}",
         f"Context: act={context.get('act', state.get('act', '?'))} floor={context.get('floor', state.get('floor', '?'))} room={context.get('room_type', '?')} boss={name((context.get('boss') or {}).get('name'))}",
@@ -302,8 +590,9 @@ def render_state_text(state: dict[str, Any]) -> str:
             power_text = ""
             if powers:
                 power_text = " powers=" + ",".join(f"{name(p.get('name'))}({p.get('amount', '')})" for p in powers)
+            move = enemy.get("move_name") or "?"
             lines.append(
-                f"  [{enemy.get('index')}] {name(enemy.get('name'))} hp={enemy.get('hp')}/{enemy.get('max_hp')} block={enemy.get('block', 0)} intent={','.join(intents) or 'none'} move={enemy.get('move_name', enemy.get('move_id', '?'))}{power_text}"
+                f"  [{enemy.get('index')}] {name(enemy.get('name'))} hp={enemy.get('hp')}/{enemy.get('max_hp')} block={enemy.get('block', 0)} intent={','.join(intents) or 'none'} move={move}{power_text}"
             )
 
         hand = state.get("hand", []) or []
@@ -313,6 +602,9 @@ def render_state_text(state: dict[str, Any]) -> str:
 
     elif decision == "map_select":
         choices = state.get("choices", []) or []
+        full_map = state.get("full_map")
+        if not state.get("view_map") and isinstance(full_map, dict) and full_map.get("type") == "map":
+            lines.extend(render_full_map(full_map, choices))
         lines.append(f"Map choices ({len(choices)}):")
         for choice in choices:
             lines.append(f"  col={choice.get('col')} row={choice.get('row')} type={choice.get('type')}")
@@ -367,10 +659,8 @@ def render_state_text(state: dict[str, Any]) -> str:
         lines.append(f"Rest options ({len(options)}):")
         for option in options:
             disabled = " disabled" if option.get("is_enabled") is False else ""
-            option_id = option.get("option_id") or option.get("id")
-            id_text = f" id={option_id}" if option_id else ""
             vars_text = vars_line(option) or "{}"
-            lines.append(f"  [{option.get('index')}] {name(option.get('title') or option.get('name'))}{id_text}{disabled} vars={vars_text}")
+            lines.append(f"  [{option.get('index')}] {name(option.get('title') or option.get('name'))}{disabled} vars={vars_text}")
             desc = description_of(option)
             if desc:
                 lines.append(f"    description: {desc}")
@@ -443,29 +733,3 @@ def render_state_text(state: dict[str, Any]) -> str:
         lines.append(f"Game over: victory={state.get('victory')} act={state.get('act')} floor={state.get('floor')}")
 
     return "\n".join(lines)
-
-
-def build_llm_prompt(state: dict[str, Any], legal_actions: list[LegalAction], *, include_json: bool = True) -> str:
-    """Build a strict action-selection prompt for local LLMs."""
-
-    action_payload = [action.to_prompt_dict() for action in legal_actions]
-    parts = [
-        "You are playing Slay the Spire 2 through a headless benchmark environment.",
-        "Choose exactly one legal action. Return only JSON with this schema:",
-        '{"action_id": <integer>, "reason": "<short reason>"}',
-        "",
-        "Game state:",
-        render_state_text(state),
-        "",
-        "Legal actions:",
-        json.dumps(action_payload, ensure_ascii=False, separators=(",", ":")),
-    ]
-    if include_json:
-        parts.extend(
-            [
-                "",
-                "Compact state JSON:",
-                json.dumps(compact_state(state), ensure_ascii=False, separators=(",", ":")),
-            ]
-        )
-    return "\n".join(parts)

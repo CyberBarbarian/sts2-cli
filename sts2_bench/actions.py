@@ -10,8 +10,9 @@ from typing import Any
 class LegalAction:
     """One action exposed to a model or policy.
 
-    ``command`` is the exact JSON command sent to ``Sts2Headless``.  ``label``
-    is intentionally plain text because it is shown to LLMs and log readers.
+    ``command`` is either the exact JSON command sent to ``Sts2Headless`` or a
+    benchmark-local ``bench_view`` command. ``label`` is intentionally plain
+    text because it is shown to LLMs and log readers.
     """
 
     action_id: int
@@ -33,6 +34,14 @@ def _action(label: str, action: str, kind: str, **args: Any) -> dict[str, Any]:
     if args:
         command["args"] = args
     return {"label": label, "command": command, "kind": kind}
+
+
+def _view_action(label: str, view: str, kind: str) -> dict[str, Any]:
+    return {
+        "label": label,
+        "command": {"cmd": "bench_view", "view": view},
+        "kind": kind,
+    }
 
 
 def _name(obj: Any) -> str:
@@ -99,6 +108,14 @@ def build_legal_actions(state: dict[str, Any]) -> list[LegalAction]:
 
     decision = state.get("decision")
     raw: list[dict[str, Any]] = []
+
+    if decision != "game_over":
+        raw.extend(
+            [
+                _view_action("view deck", "deck", "view_deck"),
+                _view_action("view map and current position", "map", "view_map"),
+            ]
+        )
 
     if decision == "map_select":
         for choice in state.get("choices", []):

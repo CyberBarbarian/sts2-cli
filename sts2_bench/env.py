@@ -57,11 +57,28 @@ class Sts2Env:
 
         old_state = self.state
         action = self.legal_actions[action_index]
+        if action.command.get("cmd") == "bench_view":
+            self.state = self._apply_view_action(action.command)
+            self.legal_actions = build_legal_actions(self.state)
+            return self.observation(), 0.0, False, False, self.info()
+
         self.state = self.process.send(action.command)
         terminated = self.state.get("decision") == "game_over"
         reward = shaped_reward(old_state, self.state, invalid=False)
         self.legal_actions = build_legal_actions(self.state)
         return self.observation(), reward, terminated, False, self.info()
+
+    def _apply_view_action(self, command: dict[str, Any]) -> dict[str, Any]:
+        assert self.state is not None
+        view = command.get("view")
+        if view == "deck":
+            return {**self.state, "view_deck": True}
+        if view == "map":
+            map_state = self.process.send({"cmd": "get_map"})
+            if map_state.get("type") == "map":
+                return {**self.state, "view_map": True, "full_map": map_state}
+            return {**self.state, "view_map": True, "view_map_error": map_state}
+        return self.state
 
     def observation(self) -> dict[str, Any]:
         return compact_state(self.state or {})

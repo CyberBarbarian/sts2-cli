@@ -11,8 +11,8 @@ and closer to an RL environment.
 
 - `process.py` - owns one `Sts2Headless` subprocess.
 - `actions.py` - converts each decision point into a dynamic legal-action list.
-- `context.py` - renders compact LLM-facing state inspired by `python/play.py`.
-- `agents.py` - random baseline and OpenAI-compatible local LLM agent.
+- `context.py` - renders state text/compact observations inspired by `python/play.py`.
+- `agents.py` - random baseline, prompt construction, and OpenAI-compatible local LLM agent.
 - `runner.py` - programmatic benchmark loop.
 - `run_benchmark.py` - command-line benchmark runner.
 - `env.py` - dependency-free RL-style environment with action masks.
@@ -80,6 +80,17 @@ The prompt asks the model to return only:
 
 The model never needs to invent raw game commands.  `actions.py` generates all
 legal commands from the current state, and the model picks one by id.
+`context.py` only renders the current state; policy instructions and the legal
+action prompt wrapper live in `agents.py`.
+
+Two benchmark-local view actions are available at every non-terminal state:
+
+- `view deck` expands the player's full deck with card descriptions.
+- `view map and current position` fetches and renders the full map when the
+  simulator has map data.
+
+These actions do not advance the game process.  They only change the next
+benchmark prompt/observation by adding the requested information.
 
 ## RL Environment
 
@@ -110,10 +121,11 @@ The current LLM context keeps the important human-facing information from
 
 - act, floor, room, boss
 - player HP, block, gold, deck size, relics, potions
-- combat energy, incoming damage, draw/discard counts
+- combat energy and draw/discard pile counts
 - enemy HP, block, intents, moves, powers
 - hand cards with cost, type, playability, target type, and exposed stats
-- map, card reward, event, shop, rest, treasure, and selection options
+- map, full-deck view, card reward, event, shop, rest, treasure, and selection
+  options
 
 This is intentionally a benchmark scaffold, not a solved policy.  Serious RL
 work should add a numeric encoder and tune rewards separately from the

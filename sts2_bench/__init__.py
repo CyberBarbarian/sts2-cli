@@ -19,7 +19,8 @@ def __getattr__(name):
 
         return {"LegalAction": LegalAction, "build_legal_actions": build_legal_actions}[name]
     if name in {"build_llm_prompt", "compact_state"}:
-        from .context import build_llm_prompt, compact_state
+        from .agents import build_llm_prompt
+        from .context import compact_state
 
         return {"build_llm_prompt": build_llm_prompt, "compact_state": compact_state}[name]
     raise AttributeError(name)

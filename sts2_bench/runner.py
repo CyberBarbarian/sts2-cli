@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 from .actions import LegalAction, build_legal_actions
 from .agents import Agent, OpenAICompatAgent, RandomAgent
-from .context import build_llm_prompt, compact_state
+from .context import compact_state
 from .process import Sts2Process
 
 
@@ -70,6 +70,7 @@ def run_one(
     process: Sts2Process | None = None,
     logger: JsonlLogger | None = None,
     print_prompts: bool = False,
+    include_full_map: bool = False,
 ) -> RunResult:
     """Run one game and return summary metrics."""
 
@@ -90,8 +91,13 @@ def run_one(
                 _fill_result(result, state)
                 return result
 
+            if include_full_map and decision == "map_select" and "full_map" not in state:
+                map_state = proc.send({"cmd": "get_map"})
+                if map_state.get("type") == "map":
+                    state = {**state, "full_map": map_state}
+
             legal_actions = build_legal_actions(state)
-            prompt = build_llm_prompt(state, legal_actions) if print_prompts else None
+            prompt = agent.build_prompt(state, legal_actions) if print_prompts else None
             logger and logger.write(
                 {
                     "type": "decision",
@@ -112,7 +118,7 @@ def run_one(
                 print(prompt)
                 print(f"===== END PROMPT step={step} =====\n", flush=True)
 
-            action, meta = agent.choose(state, legal_actions)
+            action, meta = agent.choose(state, legal_actions, prompt=prompt)
             if not isinstance(action, LegalAction):
                 raise TypeError("Agent returned a non-LegalAction")
 
@@ -124,6 +130,10 @@ def run_one(
                     "agent_meta": meta,
                 }
             )
+
+            if action.command.get("cmd") == "bench_view":
+                state = _apply_view_action(proc, state, action.command)
+                continue
 
             state = proc.send(action.command)
             if state.get("type") == "error":
@@ -157,6 +167,18 @@ def _fill_result(result: RunResult, state: dict[str, Any]) -> None:
     result.max_hp = player.get("max_hp")
     result.gold = player.get("gold")
     result.deck_size = player.get("deck_size")
+
+
+def _apply_view_action(proc: Sts2Process, state: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
+    view = command.get("view")
+    if view == "deck":
+        return {**state, "view_deck": True}
+    if view == "map":
+        map_state = proc.send({"cmd": "get_map"})
+        if map_state.get("type") == "map":
+            return {**state, "view_map": True, "full_map": map_state}
+        return {**state, "view_map": True, "view_map_error": map_state}
+    return state
 
 
 def summarize(results: Iterable[RunResult]) -> dict[str, Any]:

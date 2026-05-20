@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-steps", type=int, default=2000)
     parser.add_argument("--out", default=None, help="JSONL trace output path")
     parser.add_argument("--print-prompts", action="store_true", help="Print the LLM prompt for every decision before acting")
+    parser.add_argument("--include-full-map", action="store_true", help="Always fetch and render the full map at map_select decisions")
     args = parser.parse_args(argv)
 
     agent = agent_from_args(args.agent, base_url=args.base_url, model=args.model, api_key=args.api_key)
@@ -58,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_steps=args.max_steps,
                 logger=logger,
                 print_prompts=args.print_prompts,
+                include_full_map=args.include_full_map,
             )
             results.append(result)
             print(json.dumps({"seed": seed, "result": result.to_dict()}, ensure_ascii=False), flush=True)
