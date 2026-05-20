@@ -592,6 +592,18 @@ def menu_t(lang, en, zh):
     """Translate launcher text before the global language has been selected."""
     return zh if lang == "zh" else en
 
+
+def special_hand_card_alerts(cards):
+    alerts = []
+    for card_type, label in (
+        ("Status", "Status cards in hand"),
+        ("Curse", "Curse cards in hand"),
+    ):
+        names = [n(card.get("name", "?")) for card in cards if card.get("type") == card_type]
+        if names:
+            alerts.append((label, names))
+    return alerts
+
 # Card rarities — keys match sts2 CardRarity.ToString(); ZHS from localization_zhs/gameplay_ui.json CARD_RARITY.*
 RARITY_ZH = {
     "Basic": "基础",
@@ -3075,19 +3087,11 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     continue
 
                 if choice == "e":
-                    # Track hand before end_turn to detect added status cards
-                    old_hand_names = [n(cd.get("name","?")) for cd in hand]
-                    old_discard = state.get("discard_pile_count", 0)
                     state = send({"cmd": "action", "action": "end_turn"})
-                    # Show status cards added (new cards in hand/discard that weren't there)
                     if state and state.get("decision") == "combat_play":
-                        new_hand = state.get("hand", [])
-                        new_discard = state.get("discard_pile_count", 0)
-                        status_cards = [n(cd.get("name","?")) for cd in new_hand if cd.get("type") in ("Status", "Curse")]
-                        if status_cards:
-                            from collections import Counter
-                            sc_str = ", ".join(f"{c(name, 'red')}" for name in status_cards)
-                            print(f"  ⚠ {t('Status cards in hand:','手牌中的状态牌:')}: {sc_str}")
+                        for label, names in special_hand_card_alerts(state.get("hand", [])):
+                            cards_text = ", ".join(f"{c(name, 'red')}" for name in names)
+                            print(f"  {c('!', 'yellow')} {t(label)}: {cards_text}")
                 elif choice.startswith("p") and choice[1:].isdigit():
                     # Use potion
                     pidx = int(choice[1:])

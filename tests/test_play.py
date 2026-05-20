@@ -1412,6 +1412,23 @@ def test_pile_display_lines_support_exhaust_pile():
     assert any("Exhaust." in line for line in lines)
 
 
+def test_special_hand_card_alerts_keep_curses_separate_from_status_cards():
+    play.LANG = "en"
+
+    alerts = play.special_hand_card_alerts(
+        [
+            {"name": "Dazed", "type": "Status"},
+            {"name": "Greed", "type": "Curse"},
+            {"name": "Strike", "type": "Attack"},
+        ]
+    )
+
+    assert alerts == [
+        ("Status cards in hand", ["Dazed"]),
+        ("Curse cards in hand", ["Greed"]),
+    ]
+
+
 def test_parse_card_sequence_accepts_ordered_indices():
     assert play.parse_card_sequence("seq 3,1,0") == [3, 1, 0]
     assert play.parse_card_sequence("play 2 0") == [2, 0]
