@@ -1504,6 +1504,81 @@ def player_state_change_lines(old_state, new_state):
     return lines
 
 
+def combat_snapshot(state):
+    if not isinstance(state, dict):
+        return {}
+    combat = state.get("combat")
+    if isinstance(combat, dict) and combat:
+        return combat
+    if isinstance(state.get("enemies"), list):
+        return state
+    return {}
+
+
+def enemy_change_key(enemy):
+    if not isinstance(enemy, dict):
+        return None
+    for key in ("instance_id", "id"):
+        value = enemy.get(key)
+        if value is not None:
+            return (key, value)
+    return ("fallback", n(enemy.get("name", "?")), enemy.get("index"))
+
+
+def hp_text(entity):
+    hp = entity.get("hp", "?") if isinstance(entity, dict) else "?"
+    max_hp = entity.get("max_hp") if isinstance(entity, dict) else None
+    if max_hp is not None:
+        return f"{hp}/{max_hp}"
+    return str(hp)
+
+
+def combat_state_change_lines(old_state, new_state):
+    old_combat = combat_snapshot(old_state)
+    new_combat = combat_snapshot(new_state)
+    old_enemies = old_combat.get("enemies") if isinstance(old_combat, dict) else None
+    new_enemies = new_combat.get("enemies") if isinstance(new_combat, dict) else None
+    if not old_enemies or new_enemies is None:
+        return []
+
+    new_by_key = {
+        enemy_change_key(enemy): enemy
+        for enemy in new_enemies
+        if enemy_change_key(enemy) is not None
+    }
+    changes = []
+    for old_enemy in old_enemies:
+        old_key = enemy_change_key(old_enemy)
+        if old_key is None:
+            continue
+        old_name = n(old_enemy.get("name", "?"))
+        new_enemy = new_by_key.get(old_key)
+        if new_enemy is None:
+            changes.append(f"{old_name}: defeated")
+            continue
+        if (
+            old_enemy.get("hp") != new_enemy.get("hp")
+            or old_enemy.get("max_hp") != new_enemy.get("max_hp")
+        ):
+            changes.append(f"{old_name}: {hp_text(old_enemy)} -> {hp_text(new_enemy)}")
+
+    if not changes:
+        return []
+    return [f"{c(t('Combat changes:', 'Combat changes:'), 'yellow')} {'; '.join(changes)}"]
+
+
+def state_change_lines(old_state, new_state):
+    return player_state_change_lines(old_state, new_state) + combat_state_change_lines(old_state, new_state)
+
+
+def print_state_changes(old_state, new_state):
+    lines = state_change_lines(old_state, new_state)
+    if lines:
+        print()
+        for line in lines:
+            print(f"  {line}")
+
+
 def print_player_state_changes(old_state, new_state):
     lines = player_state_change_lines(old_state, new_state)
     if lines:
@@ -2214,7 +2289,7 @@ def choose_rest_site_option(send_fn, state, choice):
     })
     if new_state and new_state.get("type") == "error":
         new_state = send_fn({"cmd": "action", "action": "leave_room"})
-    print_player_state_changes(old_state, new_state)
+    print_state_changes(old_state, new_state)
     return new_state
 
 
@@ -3164,7 +3239,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     continue
 
                 if choice == "e":
+                    old_state = state
                     state = send({"cmd": "action", "action": "end_turn"})
+                    print_state_changes(old_state, state)
                     if state and state.get("decision") == "combat_play":
                         for label, names in special_hand_card_alerts(state.get("hand", [])):
                             cards_text = ", ".join(f"{c(name, 'red')}" for name in names)
@@ -3404,7 +3481,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     state = send({"cmd": "action", "action": "select_cards",
                                  "args": {"indices": choice}})
 
-                print_player_state_changes(old_state, state)
+                print_state_changes(old_state, state)
             elif dec == "shop":
                 show_shop(state)
 

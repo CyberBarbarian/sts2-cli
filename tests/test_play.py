@@ -963,6 +963,33 @@ def test_player_state_change_lines_include_added_potion_details():
     assert any("Gold: -32" in line for line in lines)
 
 
+def test_state_change_lines_include_combat_auto_resolution():
+    play.LANG = "en"
+
+    old_state = {
+        "decision": "combat_play",
+        "player": {"hp": 42, "max_hp": 75, "gold": 143, "deck_size": 14},
+        "enemies": [
+            {"instance_id": "fuzzy-1", "name": "Fuzzy Wurm Crawler", "hp": 51, "max_hp": 56},
+        ],
+    }
+    new_state = {
+        "decision": "card_select",
+        "player": {"hp": 31, "max_hp": 75, "gold": 143, "deck_size": 14},
+        "combat": {
+            "enemies": [
+                {"instance_id": "fuzzy-1", "name": "Fuzzy Wurm Crawler", "hp": 33, "max_hp": 56},
+            ],
+        },
+    }
+
+    lines = [plain(line) for line in play.state_change_lines(old_state, new_state)]
+
+    assert any("HP: 42/75 -> 31/75" in line for line in lines)
+    assert any("Combat changes:" in line for line in lines)
+    assert any("Fuzzy Wurm Crawler: 51/56 -> 33/56" in line for line in lines)
+
+
 def test_prompt_start_options_lets_player_choose_character_and_ascension():
     play.LANG = "en"
     answers = iter(["2", "3", "7"])
