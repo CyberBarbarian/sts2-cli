@@ -2031,11 +2031,25 @@ def card_select_should_show_upgrade_summary(state):
     return not bool((state or {}).get("combat"))
 
 
+UNBOUNDED_CARD_SELECT_MAX = 999999999
+
+
+def is_unbounded_card_select_max(mx):
+    return mx is None or mx >= UNBOUNDED_CARD_SELECT_MAX
+
+
 def card_pick_quantity_hint(mn, mx, can_skip=None):
     """Short hint for prompts / help."""
     if can_skip is None:
         can_skip = mn == 0
-    if mn == mx:
+    if is_unbounded_card_select_max(mx):
+        if mn == 0:
+            hint = t("pick any number of cards", "pick any number of cards")
+        elif mn == 1:
+            hint = t("pick at least 1 card", "pick at least 1 card")
+        else:
+            hint = t(f"pick at least {mn} cards", f"pick at least {mn} cards")
+    elif mn == mx:
         if mn == 1:
             hint = t("pick 1 card", "pick 1 card")
         else:

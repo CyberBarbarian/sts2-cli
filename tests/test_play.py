@@ -208,6 +208,18 @@ def test_card_select_prompt_only_advertises_skip_when_optional():
     assert "(s)" in skippable_required_count
 
 
+def test_card_select_prompt_hides_unbounded_internal_maximum():
+    play.LANG = "en"
+
+    hint = plain(play.card_pick_quantity_hint(0, 999999999))
+    prompt = plain(play.card_select_input_prompt(0, 999999999))
+
+    assert "999999999" not in hint
+    assert "999999999" not in prompt
+    assert "any number of cards" in hint
+    assert "any number of cards" in prompt
+
+
 def test_quit_save_defaults_to_save_dir(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
 
