@@ -2006,7 +2006,8 @@ def show_card_reward(state):
         rarity_label = t(rarity, rarity_zh)
         rarity_color = {"Rare": "yellow", "Uncommon": "cyan"}.get(rarity, "dim")
         suf_part = format_card_suffix_keywords_for_card(card)
-        print(f"  [{card['index']}] {c(n(card['name']), type_color)} ({cost}) {c(rarity_label, rarity_color)}{suf_part}")
+        up = c("+", "green") if card.get("upgraded") else ""
+        print(f"  [{card['index']}] {c(n(card['name']), type_color)}{up} ({cost}) {c(rarity_label, rarity_color)}{suf_part}")
         print_card_detail_extension(card, indent="      ")
 
     print()

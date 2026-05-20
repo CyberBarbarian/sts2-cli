@@ -987,6 +987,49 @@ def test_combat_reward_shows_optional_skip_affordance(capsys):
     assert "Type s1 to skip this reward." in text
 
 
+def test_card_reward_marks_upgraded_cards(capsys):
+    play.LANG = "en"
+
+    play.show_card_reward({
+        "gold_earned": 14,
+        "player": {
+            "name": "The Defect",
+            "hp": 68,
+            "max_hp": 75,
+            "gold": 113,
+            "deck_size": 10,
+            "relics": [{"name": "Silver Crucible", "description": "The first 3 card rewards you see are Upgraded."}],
+            "potions": [],
+        },
+        "cards": [
+            {
+                "index": 0,
+                "name": "Compile Driver",
+                "cost": 1,
+                "type": "Attack",
+                "rarity": "Common",
+                "upgraded": True,
+                "description": "Deal 10 damage.\nDraw 1 card for each unique Orb you have.",
+            },
+            {
+                "index": 1,
+                "name": "Cold Snap",
+                "cost": 1,
+                "type": "Attack",
+                "rarity": "Common",
+                "upgraded": False,
+                "description": "Deal 6 damage.\nChannel 1 Frost.",
+            },
+        ],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "[0] Compile Driver+ (1)" in text
+    assert "Deal 10 damage." in text
+    assert "[1] Cold Snap (1)" in text
+    assert "Cold Snap+ (1)" not in text
+
+
 def test_show_player_includes_potion_slot_capacity(capsys):
     play.LANG = "en"
 
