@@ -1385,6 +1385,20 @@ def test_global_help_explains_queue_forms(monkeypatch, capsys):
     assert "queued play stops on manual choices" in text
 
 
+def test_get_input_rejects_sequence_outside_combat(monkeypatch, capsys):
+    answers = iter(["seq 0 1", "s"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+
+    choice = play.get_input(
+        "Reward",
+        {"0", "s"},
+        state={"decision": "card_reward"},
+    )
+
+    assert choice == "s"
+    assert "Invalid. Options:" in plain(capsys.readouterr().out)
+
+
 def test_zh_crystal_sphere_labels_are_localized(capsys):
     play.LANG = "zh"
 
@@ -1609,7 +1623,7 @@ def test_target_damage_detail_lines_include_indices_for_duplicate_names():
     assert any("[1] Wriggler: 4dmg" in line for line in lines)
 
 
-def test_target_damage_detail_lines_show_single_target_block_context():
+def test_target_damage_detail_lines_ignore_single_target_block_context():
     play.LANG = "en"
     lines = [plain(line) for line in play.card_target_damage_display_lines(
         {
@@ -1630,7 +1644,7 @@ def test_target_damage_detail_lines_show_single_target_block_context():
         enemies=[{"index": 0, "name": "Nibbit", "hp": 15, "block": 5}],
     )]
 
-    assert any("[0] Nibbit: 10dmg (Block 5)" in line for line in lines)
+    assert lines == []
 
 
 def test_zh_target_damage_detail_lines_are_localized():

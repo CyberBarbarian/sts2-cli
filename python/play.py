@@ -836,11 +836,9 @@ def target_row_display_name(row):
 
 
 def target_row_has_damage_context(row):
-    if row.get("vulnerable") or row.get("block"):
+    if row.get("vulnerable"):
         return True
-    damage = target_row_damage(row)
-    unblocked = row.get("unblocked_damage")
-    return unblocked is not None and damage is not None and unblocked != damage
+    return False
 
 
 def visible_target_rows(stats, enemies=None):
@@ -1001,8 +999,6 @@ def card_target_damage_display_lines(card, enemies=None):
         extra = []
         if row.get("vulnerable"):
             extra.append(f"{t('Vulnerable', '\u6613\u4f24')} {row['vulnerable']}")
-        if row.get("block"):
-            extra.append(f"{t('Block', '\u683c\u6321')} {row['block']}")
         suffix = f" ({', '.join(extra)})" if extra else ""
         lines.append(f"  {target_name}: {label}{suffix}")
     return lines if len(lines) > 1 else []
@@ -2863,15 +2859,9 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
                 raise KeyboardInterrupt("abandon")
             continue
 
-        if (
-            not multi_select
-            and state
-            and state.get("decision") == "combat_play"
-            and parse_card_target(raw)
-        ):
-            return raw
-        if not multi_select and parse_card_sequence(raw):
-            return raw
+        if not multi_select and state and state.get("decision") == "combat_play":
+            if parse_card_target(raw) or parse_card_sequence(raw):
+                return raw
 
         if valid_options:
             if multi_select and multi_max > 1:
