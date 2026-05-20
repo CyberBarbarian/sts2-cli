@@ -4373,7 +4373,13 @@ public class RunSimulator
             return tips;
 
         AddMentionedLocTips(tips, seen, visibleText, "card_keyword", "card_keywords");
-        AddMentionedLocTips(tips, seen, visibleText, "static_hover_tip", "static_hover_tips");
+        AddMentionedLocTips(
+            tips,
+            seen,
+            visibleText,
+            "static_hover_tip",
+            "static_hover_tips",
+            entry => !entry.StartsWith("ROOM_", StringComparison.Ordinal));
         AddMentionedLocTips(tips, seen, visibleText, "orb", "orbs");
         AddMentionedLocTips(tips, seen, visibleText, "power", "powers");
 
@@ -4385,11 +4391,14 @@ public class RunSimulator
         HashSet<string> seen,
         string visibleText,
         string kind,
-        string table)
+        string table,
+        Func<string, bool>? includeEntry = null)
     {
         foreach (var titleEntry in _loc.Entries(table).Where(kv => kv.Key.EndsWith(".title", StringComparison.Ordinal)))
         {
             var entry = titleEntry.Key[..^".title".Length];
+            if (includeEntry != null && !includeEntry(entry))
+                continue;
             var title = titleEntry.Value;
             if (string.IsNullOrWhiteSpace(title) || !TextMentionsTitle(visibleText, title))
                 continue;

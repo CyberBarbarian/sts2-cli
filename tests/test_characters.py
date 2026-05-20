@@ -64,6 +64,27 @@ class TestCharacterMechanics:
 
         assert "Deals damage to ALL enemies" in glass["description"]
 
+    def test_card_hover_tips_do_not_export_room_tooltips_for_plain_enemy_text(self, game):
+        state = game.start(character="Defect", seed="defect-card-hover-tip-room-filter")
+        game.skip_neow(state)
+        game.set_player(
+            relics=[],
+            deck=[
+                "TESLA_COIL",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+                "DEFEND_DEFECT",
+            ],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        tesla = next(c for c in state["hand"] if c["name"] == "Tesla Coil")
+        tips = tesla.get("hover_tips") or []
+
+        assert not any(tip.get("id") == "ROOM_ENEMY" for tip in tips)
+        assert not any(tip.get("title") == "Enemy" for tip in tips)
+
     def test_regent_has_stars(self, game):
         state = game.start(character="Regent", seed="dm2")
         game.skip_neow(state)
