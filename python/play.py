@@ -683,8 +683,14 @@ def card_type_rarity_suffix(card):
         parts.append(c(ctype_label, "dim"))
     if rarity and str(rarity).casefold() != str(ctype).casefold():
         rarity_label = t(rarity, RARITY_ZH.get(rarity, rarity))
-        parts.append(c(rarity_label, "dim"))
+        rarity_color = {"Rare": "yellow", "Uncommon": "cyan", "Common": "dim"}.get(rarity, "dim")
+        parts.append(c(rarity_label, rarity_color))
     return f" {' '.join(parts)}" if parts else ""
+
+
+def card_name_type_color(card):
+    ctype = (card or {}).get("type", "")
+    return {"Attack": "red", "Skill": "blue", "Power": "magenta", "Status": "dim", "Curse": "dim"}.get(ctype, "reset")
 
 
 def _positive_int(value, default=0):
@@ -1413,6 +1419,62 @@ def _deck_card_key(card):
     return (card.get("id") or "", n(card.get("name", "?")), bool(card.get("upgraded")))
 
 
+def _deck_card_base_key(card):
+    if not isinstance(card, dict):
+        return (n(card), "")
+    return (card.get("id") or "", n(card.get("name", "?")))
+
+
+def _card_modifier_label(card, prefix):
+    for field in (f"{prefix}_id", prefix):
+        value = (card or {}).get(field)
+        if value:
+            return n(value)
+    return None
+
+
+def deck_change_summary_parts(old_cards, new_cards):
+    """Return concise deck mutation tokens: add/remove/upgrade/downgrade/modifier changes."""
+    from collections import defaultdict
+
+    remaining = defaultdict(list)
+    for card in old_cards or []:
+        remaining[_deck_card_base_key(card)].append(card)
+
+    parts = []
+    matched_old = []
+    for card in new_cards or []:
+        key = _deck_card_base_key(card)
+        old_card = remaining[key].pop(0) if remaining[key] else None
+        name = n(card.get("name", "?")) if isinstance(card, dict) else n(card)
+        up = "+" if isinstance(card, dict) and card.get("upgraded") else ""
+        if old_card is None:
+            parts.append(c(f"+{name}{up}", "green"))
+            continue
+        matched_old.append(old_card)
+        if isinstance(old_card, dict) and isinstance(card, dict):
+            if bool(old_card.get("upgraded")) != bool(card.get("upgraded")):
+                marker = "↑" if card.get("upgraded") else "↓"
+                color = "green" if card.get("upgraded") else "red"
+                parts.append(c(f"{marker}{name}", color))
+            for prefix, label in (("enchantment", "enchant"), ("affliction", "afflict")):
+                old_mod = _card_modifier_label(old_card, prefix)
+                new_mod = _card_modifier_label(card, prefix)
+                if old_mod != new_mod:
+                    if old_mod and not new_mod:
+                        parts.append(c(f"~{name} -{old_mod}", "yellow"))
+                    elif new_mod and not old_mod:
+                        parts.append(c(f"~{name} {label}:{new_mod}", "yellow"))
+                    else:
+                        parts.append(c(f"~{name} {old_mod}->{new_mod}", "yellow"))
+
+    for cards in remaining.values():
+        for card in cards:
+            name = n(card.get("name", "?")) if isinstance(card, dict) else n(card)
+            parts.append(c(f"-{name}", "red"))
+    return parts
+
+
 def added_deck_cards(old_cards, new_cards):
     from collections import Counter
 
@@ -1420,6 +1482,29 @@ def added_deck_cards(old_cards, new_cards):
     added = []
     for card in new_cards or []:
         key = _deck_card_key(card)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+        else:
+            added.append(card)
+    return added
+
+
+def _pile_card_key(card):
+    if not isinstance(card, dict):
+        return (str(card),)
+    instance_id = card.get("instance_id")
+    if instance_id is not None:
+        return ("instance", instance_id)
+    return ("card",) + _deck_card_key(card)
+
+
+def added_pile_cards(old_cards, new_cards):
+    from collections import Counter
+
+    remaining = Counter(_pile_card_key(card) for card in old_cards or [])
+    added = []
+    for card in new_cards or []:
+        key = _pile_card_key(card)
         if remaining[key] > 0:
             remaining[key] -= 1
         else:
@@ -1439,6 +1524,57 @@ def deck_change_detail_lines(old_cards, new_cards):
         for desc_line in card_description_display_lines(card):
             if desc_line:
                 lines.append(f"  {desc_line}")
+    return lines
+
+
+def pile_cards_from_state(state, pile_name):
+    if not isinstance(state, dict):
+        return []
+    direct = state.get(f"{pile_name}_pile")
+    if isinstance(direct, list):
+        return direct
+    combat = state.get("combat")
+    if isinstance(combat, dict):
+        nested = combat.get(f"{pile_name}_pile")
+        if isinstance(nested, list):
+            return nested
+    return []
+
+
+def combat_pile_change_lines(old_state, new_state):
+    lines = []
+    old_draw = pile_cards_from_state(old_state, "draw")
+    new_draw = pile_cards_from_state(new_state, "draw")
+    old_discard = pile_cards_from_state(old_state, "discard")
+    new_discard = pile_cards_from_state(new_state, "discard")
+
+    if old_discard and len(new_discard) < len(old_discard) and (not old_draw) and new_draw:
+        old_discard_keys = {_pile_card_key(card) for card in old_discard}
+        moved = [card for card in new_draw if _pile_card_key(card) in old_discard_keys]
+        if moved:
+            names = ", ".join(n(card.get("name", "?")) if isinstance(card, dict) else n(card) for card in moved[:3])
+            if len(moved) > 3:
+                names += f", +{len(moved) - 3}"
+            lines.append(
+                f"{c(t('Shuffle:', '洗牌:'), 'yellow')} "
+                f"{len(old_discard) - len(new_discard)} {t('discard -> draw', '弃牌堆 -> 抽牌堆')}"
+                + (f" ({names})" if names else "")
+            )
+
+    old_exhaust = pile_cards_from_state(old_state, "exhaust")
+    new_exhaust = pile_cards_from_state(new_state, "exhaust")
+    added_exhaust = added_pile_cards(old_exhaust, new_exhaust)
+    if not added_exhaust:
+        return lines
+
+    names = []
+    for card in added_exhaust:
+        if isinstance(card, dict):
+            up = "+" if card.get("upgraded") else ""
+            names.append(c(f"+{n(card.get('name', '?'))}{up}", "green"))
+        else:
+            names.append(c(f"+{n(card)}", "green"))
+    lines.append(f"{c(t('Exhaust Pile', '消耗堆'), 'yellow')}: {' '.join(names)}")
     return lines
 
 
@@ -1526,8 +1662,6 @@ def player_state_change_lines(old_state, new_state):
     new_relics = set(n(r.get("name", "?")) for r in new_player.get("relics", []))
     old_cards = list(old_player.get("deck", []))
     new_cards = list(new_player.get("deck", []))
-    old_deck_names = [n(cd.get("name", "?")) for cd in old_cards]
-    new_deck_names = [n(cd.get("name", "?")) for cd in new_cards]
     old_deck_size = old_player.get("deck_size", 0)
     new_deck_size = new_player.get("deck_size", 0)
     old_hp = old_player.get("hp", 0)
@@ -1548,16 +1682,9 @@ def player_state_change_lines(old_state, new_state):
 
     from collections import Counter
 
-    old_counts = Counter(old_deck_names)
-    new_counts = Counter(new_deck_names)
-    added = new_counts - old_counts
-    removed = old_counts - new_counts
-    if added or removed:
-        parts = []
-        for card_name, cnt in removed.items():
-            parts.append(c(f"-{card_name}" + (f"x{cnt}" if cnt > 1 else ""), "red"))
-        for card_name, cnt in added.items():
-            parts.append(c(f"+{card_name}" + (f"x{cnt}" if cnt > 1 else ""), "green"))
+    deck_parts = deck_change_summary_parts(old_cards, new_cards)
+    if deck_parts:
+        parts = deck_parts
         changes.append(f"{t('Deck', 'Deck')}: {' '.join(parts)}")
     elif new_deck_size != old_deck_size:
         changes.append(f"{t('Deck', 'Deck')}: {old_deck_size} -> {new_deck_size}")
@@ -1694,7 +1821,11 @@ def hand_state_change_lines(old_state, new_state):
 
 
 def state_change_lines(old_state, new_state, include_hand=False):
-    lines = player_state_change_lines(old_state, new_state) + combat_state_change_lines(old_state, new_state)
+    lines = (
+        player_state_change_lines(old_state, new_state)
+        + combat_state_change_lines(old_state, new_state)
+        + combat_pile_change_lines(old_state, new_state)
+    )
     if include_hand:
         lines += hand_state_change_lines(old_state, new_state)
     return lines
@@ -1751,7 +1882,7 @@ def pile_display_lines(pile_name, cards, count=None):
     titles = {
         "draw": t("Draw Pile", "抽牌堆"),
         "discard": t("Discard Pile", "弃牌堆"),
-        "exhaust": t("Exhaust Pile", "Exhaust Pile"),
+        "exhaust": t("Exhaust Pile", "消耗堆"),
     }
     title = titles.get(pile_name, t("Card Pile", "Card Pile"))
     total = len(cards) if count is None else count
@@ -1956,7 +2087,10 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
             output_fn(f"Queued play stopped: {n(card.get('name', '?'))} does not take an enemy target.")
             return current
 
-        current = send_fn({"cmd": "action", "action": "play_card", "args": args})
+        next_state = send_fn({"cmd": "action", "action": "play_card", "args": args})
+        for line in state_change_lines(current, next_state):
+            output_fn(line)
+        current = next_state
         if not current:
             output_fn("Queued play stopped: manual decision is required.")
             return current
@@ -2044,7 +2178,7 @@ def show_combat(state):
         ctype = card.get("type", "?")
         target = card.get("target_type", "")
 
-        type_color = {"Attack": "red", "Skill": "blue", "Power": "magenta", "Status": "dim", "Curse": "dim"}.get(ctype, "reset")
+        type_color = card_name_type_color(card)
         mark = c("●", "green") if playable else c("○", "dim")
         cost_str = c(card_cost_label(card), "cyan")
 
@@ -2266,6 +2400,13 @@ def print_card_detail_extension(
 def card_select_should_show_upgrade_description(state):
     if (state or {}).get("decision") != "card_select":
         return False
+
+    def mentions_upgrade(text):
+        if not isinstance(text, str):
+            return False
+        lowered = text.lower()
+        return "upgrade" in lowered or "升级" in text
+
     source_room_option = (state or {}).get("source_room_option") or {}
     if source_room_option.get("option_id") == "SMITH":
         return True
@@ -2279,7 +2420,22 @@ def card_select_should_show_upgrade_description(state):
         source_event_option.get("title"),
         source_event_option.get("description"),
     ])
-    return any(isinstance(text, str) and "upgrade" in text.lower() for text in text_parts)
+    source_card = (state or {}).get("source_card") or {}
+    text_parts.extend([
+        source_card.get("name"),
+        source_card.get("description"),
+    ])
+    source_power = (state or {}).get("source_power") or {}
+    text_parts.extend([
+        source_power.get("name"),
+        source_power.get("description"),
+    ])
+    source_potion = (state or {}).get("source_potion") or {}
+    text_parts.extend([
+        source_potion.get("name"),
+        source_potion.get("description"),
+    ])
+    return any(mentions_upgrade(text) for text in text_parts)
 
 
 def card_select_should_show_upgrade_summary(state):
@@ -2350,15 +2506,10 @@ def show_card_reward(state):
     print()
     cards = state.get("cards", [])
     for card in cards:
-        ctype = card.get("type", "?")
-        rarity = card.get("rarity", "Common")
-        type_color = {"Attack": "red", "Skill": "blue", "Power": "magenta"}.get(ctype, "reset")
-        rarity_zh = RARITY_ZH.get(rarity, rarity)
-        rarity_label = t(rarity, rarity_zh)
-        rarity_color = {"Rare": "yellow", "Uncommon": "cyan"}.get(rarity, "dim")
         suf_part = format_card_suffix_keywords_for_card(card)
         up = c("+", "green") if card.get("upgraded") else ""
-        print(f"  [{card['index']}] {c(n(card['name']), type_color)}{up} ({card_cost_label(card)}) {c(rarity_label, rarity_color)}{suf_part}")
+        type_rarity = card_type_rarity_suffix(card)
+        print(f"  [{card['index']}] {c(n(card['name']), card_name_type_color(card))}{up} ({card_cost_label(card)}){type_rarity}{suf_part}")
         print_card_detail_extension(card, indent="      ", include_hover_tips=True)
 
     print()
@@ -2419,9 +2570,9 @@ def show_shop(state):
         price = card.get("price", card.get("gold_cost", card.get("cost", 0)))
         affordable = c(str(price), "green") if price <= gold else c(str(price), "red")
         sale = c(t(" SALE"," 打折"), "yellow") if card.get("on_sale") else ""
-        ctype_zh = CARD_TYPE_ZH.get(card.get("type",""), card.get("type",""))
+        type_rarity = card_type_rarity_suffix(card)
         suf_part = format_card_suffix_keywords_for_card(card)
-        print(f"  [{card['index']}] {n(card['name'])} ({card_cost_label(card)}) {c(t(card.get('type','?'), ctype_zh), 'dim')}{suf_part} — {affordable}{t('g','金')}{sale}")
+        print(f"  [{card['index']}] {c(n(card['name']), card_name_type_color(card))} ({card_cost_label(card)}){type_rarity}{suf_part} — {affordable}{t('g','金')}{sale}")
         print_card_detail_extension(card, indent="      ", include_hover_tips=True)
 
     print(f"\n  {c(t('Relics:','遗物:'), 'bold')}")
@@ -2493,6 +2644,69 @@ def choose_card_reward(send_fn, state, choice):
             "cmd": "action",
             "action": "select_card_reward",
             "args": {"card_index": int(choice)},
+        })
+    print_state_changes(old_state, new_state)
+    return new_state
+
+
+def choose_combat_reward(send_fn, state, choice):
+    old_state = state
+    new_state = send_fn(combat_reward_choice_to_command(choice))
+    if isinstance(new_state, dict) and new_state.get("type") == "error":
+        print(f"  {c(t('Error:', 'Error:'), 'red')} {combat_reward_error_message(old_state, new_state)}")
+        return old_state
+    print_state_changes(old_state, new_state)
+    return new_state
+
+
+def choose_treasure_relic(send_fn, state, choice):
+    old_state = state
+    new_state = send_fn({
+        "cmd": "action",
+        "action": "claim_relic",
+        "args": {"relic_index": int(choice)},
+    })
+    print_state_changes(old_state, new_state)
+    return new_state
+
+
+def choose_shop_action(send_fn, state, choice):
+    old_state = state
+    if choice == "leave":
+        new_state = send_fn({"cmd": "action", "action": "leave_room"})
+    elif choice == "rm":
+        new_state = send_fn({"cmd": "action", "action": "remove_card"})
+    elif choice.startswith("r"):
+        new_state = send_fn({
+            "cmd": "action",
+            "action": "buy_relic",
+            "args": {"relic_index": int(choice[1:])},
+        })
+    elif choice.startswith("p"):
+        new_state = send_fn({
+            "cmd": "action",
+            "action": "buy_potion",
+            "args": {"potion_index": int(choice[1:])},
+        })
+    else:
+        new_state = send_fn({
+            "cmd": "action",
+            "action": "buy_card",
+            "args": {"card_index": int(choice)},
+        })
+    print_state_changes(old_state, new_state, include_hand=True)
+    return new_state
+
+
+def choose_event_action(send_fn, state, choice):
+    old_state = state
+    if choice == "leave":
+        new_state = send_fn({"cmd": "action", "action": "leave_room"})
+    else:
+        new_state = send_fn({
+            "cmd": "action",
+            "action": "choose_option",
+            "args": {"option_index": int(choice)},
         })
     print_state_changes(old_state, new_state)
     return new_state
@@ -2906,6 +3120,8 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
             raise _QuitRequested()
 
         if not raw:
+            if valid_options and "" in valid_options:
+                return ""
             continue
 
         # Meta-commands available at any prompt
@@ -3091,7 +3307,7 @@ def combat_reward_potion_discard_shortcuts(state):
     for pot in player.get("potions", []) or []:
         if not pot:
             continue
-        idx = pot.get("index")
+        idx = pot.get("index", pot.get("slot", pot.get("slot_index")))
         if idx is None:
             continue
         try:
@@ -3120,6 +3336,20 @@ def combat_reward_choice_to_command(choice):
         "action": "claim_reward",
         "args": {"reward_index": int(choice)},
     }
+
+
+def combat_reward_error_message(state, error_state):
+    message = ""
+    if isinstance(error_state, dict):
+        message = n(error_state.get("error") or error_state.get("message") or "")
+    if "discard_potion" in message:
+        shortcuts = list(combat_reward_potion_discard_shortcuts(state))
+        shortcut_text = "/".join(shortcuts) if shortcuts else "d<slot>"
+        return t(
+            f"Potion slots are full; use {shortcut_text} to discard a potion before claiming this reward.",
+            f"Potion slots are full; use {shortcut_text} to discard a potion before claiming this reward.",
+        )
+    return message or t("Action failed.", "Action failed.")
 
 
 def combat_input_prompt(state):
@@ -3561,7 +3791,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     elif target_index is not None:
                         print(f"  {t('That card does not target an enemy.', 'That card does not target an enemy.')}")
                         continue
+                    old_state = state
                     state = send({"cmd": "action", "action": "play_card", "args": args})
+                    print_state_changes(old_state, state)
 
             elif dec == "combat_reward":
                 show_combat_reward(state)
@@ -3591,9 +3823,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         state=state,
                     )
 
-                old_state = state
-                state = send(combat_reward_choice_to_command(choice))
-                print_player_state_changes(old_state, state)
+                state = choose_combat_reward(send, state, choice)
 
             elif dec == "card_reward":
                 show_card_reward(state)
@@ -3645,8 +3875,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     choice = str(relics[0]["index"]) if relics else "0"
                 else:
                     choice = get_input(t("Choose relic [index]", "选择遗物 [编号]"), set(valid.keys()), state=state)
-                state = send({"cmd": "action", "action": "claim_relic",
-                             "args": {"relic_index": int(choice)}})
+                state = choose_treasure_relic(send, state, choice)
 
             elif dec == "treasure_empty":
                 print(f"\n{'─' * 60}")
@@ -3679,7 +3908,8 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     print(f"  {c(f'Pack [{bidx}]:', 'yellow')}")
                     for cd in b.get("cards", []):
                         sp = format_card_suffix_keywords_for_card(cd)
-                        print(f"    {n(cd['name'])} ({card_cost_label(cd)}) {c(cd.get('type',''), 'dim')}{sp}")
+                        type_rarity = card_type_rarity_suffix(cd)
+                        print(f"    {c(n(cd['name']), card_name_type_color(cd))} ({card_cost_label(cd)}){type_rarity}{sp}")
                         print_card_detail_extension(cd, indent="      ", include_hover_tips=True)
                 valid = {str(b["index"]): b for b in bundles}
                 if auto:
@@ -3758,19 +3988,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 else:
                     choice = get_input(t("Buy [index/r0/p0/rm] or (leave)", "购买 [编号/r0/p0/rm] 或 (leave)离开"), state=state)
 
-                if choice == "leave":
-                    state = send({"cmd": "action", "action": "leave_room"})
-                elif choice == "rm":
-                    state = send({"cmd": "action", "action": "remove_card"})
-                elif choice.startswith("r"):
-                    state = send({"cmd": "action", "action": "buy_relic",
-                                 "args": {"relic_index": int(choice[1:])}})
-                elif choice.startswith("p"):
-                    state = send({"cmd": "action", "action": "buy_potion",
-                                 "args": {"potion_index": int(choice[1:])}})
-                else:
-                    state = send({"cmd": "action", "action": "buy_card",
-                                 "args": {"card_index": int(choice)}})
+                state = choose_shop_action(send, state, choice)
 
             elif dec == "rest_site":
                 show_rest_site(state)
@@ -3865,13 +4083,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         prompt = t("Choose option [index] or (leave)", "选择 [编号] 或 (leave)离开")
                     choice = get_input(prompt, set(valid.keys()), state=state)
 
-                if choice == "leave":
-                    state = send({"cmd": "action", "action": "leave_room"})
-                else:
-                    state = send({"cmd": "action", "action": "choose_option",
-                                 "args": {"option_index": int(choice)}})
-
-                print_player_state_changes(old_state, state)
+                state = choose_event_action(send, old_state, choice)
             else:
                 print(f"  {t('Unknown state:','未知状态:')} {dec}")
                 state = send({"cmd": "action", "action": "proceed"})

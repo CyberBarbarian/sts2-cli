@@ -963,6 +963,10 @@ public class RunSimulator
                 serializableRun = RunManager.Instance.ToSave(currentRoom);
                 saveJson = SaveManager.ToJson(serializableRun);
             }
+            else if (HasPendingPostCombatRewards())
+            {
+                return Error("Cannot save checkpoint while combat rewards are pending; claim or skip rewards before saving.");
+            }
             else if (_preCurrentRoomSaveJson != null)
             {
                 Log($"Saving pre-room checkpoint snapshot from {currentRoom.GetType().Name} (outputPath={outputPath})...");
@@ -1005,6 +1009,13 @@ public class RunSimulator
             return ErrorWithTrace("SaveCheckpoint failed", ex);
         }
     }
+
+    private bool HasPendingPostCombatRewards()
+    {
+        return !CombatManager.Instance.IsInProgress
+            && (_pendingRewards != null || _pendingCardReward != null);
+    }
+
     public Dictionary<string, object?> ExecuteAction(string action, Dictionary<string, object?>? args)
     {
         try
@@ -1128,7 +1139,7 @@ public class RunSimulator
         var col = Convert.ToInt32(args["col"]);
         var row = Convert.ToInt32(args["row"]);
         var coord = new MapCoord((byte)col, (byte)row);
-        var legalCoords = CurrentMapChoiceCoords();
+        var legalCoords = CurrentMapChoiceCoords(player);
         if (!legalCoords.Any(c => c.col == coord.col && c.row == coord.row))
         {
             var legalText = string.Join(", ", legalCoords.Select(c => $"({(int)c.col},{(int)c.row})"));
@@ -1168,26 +1179,62 @@ public class RunSimulator
         return DetectDecisionPoint();
     }
 
-    private List<MapCoord> CurrentMapChoiceCoords()
+    private List<MapCoord> CurrentMapChoiceCoords(Player player)
+    {
+        return CurrentMapChoicePoints(player)
+            .Select(choice => choice.Point.coord)
+            .ToList();
+    }
+
+    private List<(MapPoint Point, bool RequiresWingedBoots)> CurrentMapChoicePoints(Player player)
     {
         var map = _runState?.Map;
         if (map == null)
-            return new List<MapCoord>();
+            return new List<(MapPoint Point, bool RequiresWingedBoots)>();
 
         var currentCoord = _runState!.CurrentMapCoord;
         if (currentCoord.HasValue)
         {
             var currentPoint = map.GetPoint(currentCoord.Value);
-            return (currentPoint?.Children ?? Enumerable.Empty<MapPoint>())
-                .Select(child => child.coord)
+            var choices = (currentPoint?.Children ?? Enumerable.Empty<MapPoint>())
+                .Select(child => (Point: child, RequiresWingedBoots: false))
                 .ToList();
+
+            if (HasWingedBootsCharge(player))
+            {
+                var connected = choices
+                    .Select(choice => choice.Point.coord)
+                    .ToHashSet();
+                var nextRow = currentCoord.Value.row + 1;
+                for (int rowIndex = 0; rowIndex < map.GetRowCount(); rowIndex++)
+                {
+                    foreach (var point in map.GetPointsInRow(rowIndex))
+                    {
+                        if (point == null || point.coord.row != nextRow)
+                            continue;
+                        if (connected.Contains(point.coord))
+                            continue;
+                        choices.Add((point, true));
+                    }
+                }
+            }
+
+            return choices;
         }
 
         var startPoint = map.StartingMapPoint;
-        var choices = new List<MapCoord> { startPoint.coord };
+        var startChoices = new List<(MapPoint Point, bool RequiresWingedBoots)> { (startPoint, false) };
         if (startPoint.Children != null)
-            choices.AddRange(startPoint.Children.Select(child => child.coord));
-        return choices;
+            startChoices.AddRange(startPoint.Children.Select(child => (child, false)));
+        return startChoices;
+    }
+
+    private static bool HasWingedBootsCharge(Player player)
+    {
+        return player.Relics?.Any(relic =>
+            relic != null
+            && relic.Id.Entry == "WINGED_BOOTS"
+            && (!relic.ShowCounter || relic.DisplayAmount > 0)) == true;
     }
 
     private string? CapturePreRoomCheckpoint()
@@ -2701,6 +2748,7 @@ public class RunSimulator
                 return Error("No map available");
         }
         var currentCoord = _runState!.CurrentMapCoord;
+        var player = _runState.Players[0];
 
         List<Dictionary<string, object?>> choices;
         if (currentCoord.HasValue)
@@ -2727,12 +2775,18 @@ public class RunSimulator
             }
             else
             {
-                choices = (currentPoint.Children ?? Enumerable.Empty<MapPoint>())
-                    .Select(child => new Dictionary<string, object?>
+                choices = CurrentMapChoicePoints(player)
+                    .Select(choice =>
                     {
-                        ["col"] = (int)child.coord.col,
-                        ["row"] = (int)child.coord.row,
-                        ["type"] = child.PointType.ToString(),
+                        var item = new Dictionary<string, object?>
+                        {
+                            ["col"] = (int)choice.Point.coord.col,
+                            ["row"] = (int)choice.Point.coord.row,
+                            ["type"] = choice.Point.PointType.ToString(),
+                        };
+                        if (choice.RequiresWingedBoots)
+                            item["requires_winged_boots"] = true;
+                        return item;
                     })
                     .ToList();
             }
@@ -2771,7 +2825,7 @@ public class RunSimulator
             ["decision"] = "map_select",
             ["context"] = RunContext(),
             ["choices"] = choices,
-            ["player"] = PlayerSummary(_runState!.Players[0]),
+            ["player"] = PlayerSummary(player),
             ["act"] = _runState.CurrentActIndex + 1,
             ["act_name"] = _loc.Act(_runState.Act?.Id.Entry ?? "OVERGROWTH"),
             ["floor"] = _runState.ActFloor,

@@ -826,7 +826,7 @@ class TestCombatEdgeCases:
         assert strike["instance_id"] not in remaining_ids
         assert set(remaining_ids).issubset(set(initial_ids))
 
-    def test_checkpoint_reports_pre_room_scope_for_pending_card_reward(self, game, tmp_path):
+    def test_checkpoint_refuses_pending_card_reward_rollback(self, game, tmp_path):
         state = game.start(seed="checkpoint-pending-card-reward")
         game.skip_neow(state)
         game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12)
@@ -838,11 +838,9 @@ class TestCombatEdgeCases:
         save_path = tmp_path / "pending-card-reward.save"
         result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
 
-        assert result["type"] == "save_result"
-        assert result["success"] is True
-        assert result["checkpoint_scope"] == "pre_room"
-        assert result["rolled_back_room_type"] == "CombatRoom"
-        assert save_path.exists()
+        assert result["type"] == "error"
+        assert "combat rewards are pending" in result["message"]
+        assert not save_path.exists()
 
     def test_play_card_is_rejected_without_mutation_during_card_selection(self, game):
         state = game.start(seed="pending-selection-play-card-guard")
