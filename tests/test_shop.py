@@ -256,3 +256,21 @@ class TestShopRemove:
         assert state["prompt"] == "Choose a card to Remove."
         assert state["source_room_option"]["category"] == "card_removal"
         assert state["source_room_option"]["cost"] == removal_cost
+
+    def test_remove_card_can_only_be_used_once_per_shop(self, game):
+        state = game.start(seed="sr-one-removal")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+        deck_before = state["player"]["deck_size"]
+
+        state = game.act("remove_card")
+        assert state["decision"] == "card_select"
+        state = game.act("select_cards", indices="0")
+
+        assert state["decision"] == "shop"
+        assert state["player"]["deck_size"] == deck_before - 1
+        assert state["card_removal_cost"] is None
+
+        state = game.act("remove_card")
+        assert state["type"] == "error"

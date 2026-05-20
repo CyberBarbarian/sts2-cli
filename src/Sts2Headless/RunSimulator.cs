@@ -324,6 +324,7 @@ public class RunSimulator
     private EventModel? _pendingEventChoiceAfterCombat;
     private EventModel? _pendingEventResult;
     private Task? _pendingShopPurchaseTask;
+    private MerchantCardRemovalEntry? _pendingShopCardRemovalEntry;
 
     // Pending rewards for card selection (populated after combat, before proceeding)
     private List<Reward>? _pendingRewards;
@@ -1143,6 +1144,7 @@ public class RunSimulator
         _pendingEventChoiceAfterCombat = null;
         _pendingEventResult = null;
         _pendingShopPurchaseTask = null;
+        _pendingShopCardRemovalEntry = null;
         _pendingRewards = null;
         _pendingCardSelectionSourceEventOption = null;
         _pendingCardSelectionSourceRoomOption = null;
@@ -1770,6 +1772,7 @@ public class RunSimulator
 
         var removal = merchantRoom.Inventory.CardRemovalEntry;
         if (removal == null) return Error("No card removal available");
+        if (!removal.IsStocked) return Error("Card removal already purchased");
         if (player.Gold < removal.Cost) return Error("Not enough gold");
 
         try
@@ -1778,6 +1781,7 @@ public class RunSimulator
             // Run on background thread so card selection can pause (same pattern as event options)
             var task = Task.Run(() => removal.OnTryPurchaseWrapper(merchantRoom.Inventory));
             _pendingShopPurchaseTask = task;
+            _pendingShopCardRemovalEntry = removal;
             for (int i = 0; i < 100; i++)
             {
                 _syncCtx.Pump();
@@ -1796,10 +1800,18 @@ public class RunSimulator
             }
             if (!task.IsCompleted) task.Wait(2000);
             _syncCtx.Pump();
+            if (task.IsCompletedSuccessfully && task.Result)
+                removal.SetUsed();
             _pendingShopPurchaseTask = null;
+            _pendingShopCardRemovalEntry = null;
             Log($"Removed card for {removal.Cost}g");
         }
-        catch (Exception ex) { return Error($"Remove card failed: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            _pendingShopPurchaseTask = null;
+            _pendingShopCardRemovalEntry = null;
+            return Error($"Remove card failed: {ex.Message}");
+        }
 
         return DetectDecisionPoint();
     }
@@ -1939,7 +1951,10 @@ public class RunSimulator
             {
                 if (shopTask.IsFaulted)
                     Log($"Shop purchase task failed: {shopTask.Exception?.GetBaseException().Message}");
+                else if (!shopTask.IsCanceled && shopTask is Task<bool> boolTask && boolTask.Result)
+                    _pendingShopCardRemovalEntry?.SetUsed();
                 _pendingShopPurchaseTask = null;
+                _pendingShopCardRemovalEntry = null;
             }
         }
         else
@@ -6003,6 +6018,7 @@ public class RunSimulator
         }).ToList();
 
         var removal = merchantRoom.Inventory.CardRemovalEntry;
+        var removalCost = removal != null && removal.IsStocked ? removal.Cost : (int?)null;
 
         return new Dictionary<string, object?>
         {
@@ -6012,7 +6028,7 @@ public class RunSimulator
             ["cards"] = cards,
             ["relics"] = relics,
             ["potions"] = potions,
-            ["card_removal_cost"] = removal?.Cost,
+            ["card_removal_cost"] = removalCost,
             ["player"] = PlayerSummary(player),
         };
     }
@@ -9712,6 +9728,7 @@ public class RunSimulator
         _pendingEventChoiceAfterCombat = null;
         _pendingEventResult = null;
         _pendingShopPurchaseTask = null;
+        _pendingShopCardRemovalEntry = null;
         _pendingRewards = null;
         _pendingCardReward = null;
         _rewardsProcessed = false;
