@@ -2223,9 +2223,7 @@ public class RunSimulator
         Log("Leaving room");
         if (_pendingEventChoiceAfterCombat != null)
         {
-            _pendingEventChoiceAfterCombat = null;
-            ForceToMap();
-            return MapSelectState();
+            return Error("Cannot leave this event; choose an available event option");
         }
         try { RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult(); }
         catch { }
@@ -2234,7 +2232,10 @@ public class RunSimulator
 
         // If still in a non-combat room, force to map
         var room = _runState?.CurrentRoom;
-        if (room is RestSiteRoom || room is MerchantRoom || room is EventRoom || room is TreasureRoom)
+        if (room is EventRoom && !TryGetFakeMerchant(out _))
+            return Error("Cannot leave this event; choose an available event option");
+
+        if (room is RestSiteRoom || room is MerchantRoom || room is TreasureRoom || room is EventRoom)
         {
             Log("Force leaving non-combat room to map");
             try
@@ -3804,6 +3805,7 @@ public class RunSimulator
             ["description"] = eventDesc,
             ["vars"] = eventVars?.Count > 0 ? eventVars : null,
             ["options"] = options,
+            ["can_leave"] = false,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
     }
@@ -4952,6 +4954,8 @@ public class RunSimulator
         bool includePreviewStats = false,
         bool preferDisplayVars = true)
     {
+        text = ApplyBooleanChoiceFormatter(text, "IfUpgraded", card.IsUpgraded);
+
         var vars = ExportCardDescriptionVars(card, includePreviewStats: includePreviewStats);
         if (preferDisplayVars && vars != null && vars.Count > 0)
             text = PreferDisplayVarInterpolation(card.Description, vars, text) ?? text;
@@ -7586,6 +7590,9 @@ public class RunSimulator
             output.Append(text, cursor, start - cursor);
 
             var bodyStart = start + marker.Length;
+            if (text.AsSpan(bodyStart).StartsWith("show:", StringComparison.Ordinal))
+                bodyStart += "show:".Length;
+
             var depth = 0;
             var split = -1;
             var end = -1;

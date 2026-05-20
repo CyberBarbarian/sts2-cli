@@ -80,7 +80,8 @@ class Game:
             [os.path.expanduser("~/.dotnet-arm64/dotnet"), "run", "--no-build",
              "--project", "Sts2Headless/Sts2Headless.csproj"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            text=True, encoding="utf-8", errors="replace", bufsize=1,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         def _forward_stderr():
             for line in self.proc.stderr:
                 print(f"[GAME] {line.rstrip()}", file=sys.stderr)

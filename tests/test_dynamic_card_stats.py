@@ -975,6 +975,19 @@ class TestDynamicCardStats:
         assert "0[E]" in unrelenting["after_upgrade"]["description"]
         assert "{energyPrefix" not in unrelenting["after_upgrade"]["description"]
 
+    def test_begone_zh_description_uses_engine_transform_target(self, game):
+        state = game.start(character="Necrobinder", seed="begone-zh-description", lang="zh")
+        state = game.skip_neow(state)
+        state = game.set_player(deck=["BEGONE"])
+
+        begone = next(card for card in state["player"]["deck"] if card["id"] == "CARD.BEGONE")
+
+        assert "Damage" not in begone["description"]
+        assert "Damage" not in begone["after_upgrade"]["description"]
+        assert "仆从打击" in begone["description"]
+        assert "仆从打击+" in begone["after_upgrade"]["description"]
+        assert "仆从俯冲" not in begone["description"]
+
     def test_relic_description_falls_back_when_engine_hover_text_is_mojibake(self, game):
         state = game.start(seed="strike-dummy-relic-text")
         state = game.skip_neow(state)

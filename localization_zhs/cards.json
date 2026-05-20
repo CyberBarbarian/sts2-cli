@@ -74,7 +74,7 @@
   "BEAT_INTO_SHAPE.title": "锻打成型",
   "BECKON.description": "在你的回合结束时，如果这张牌在你的[gold]手牌[/gold]中，\n则失去{HpLoss}点生命。",
   "BECKON.title": "呼唤",
-  "BEGONE.description": "造成{Damage:diff()}点伤害。\n选择你[gold]手牌[/gold]中的一张牌，将其[gold]变化[/gold]为[gold]{IfUpgraded:show:仆从俯冲+|仆从俯冲}[/gold]。",
+  "BEGONE.description": "选择你[gold]手牌[/gold]中的一张牌，将其[gold]变化[/gold]为[gold]{IfUpgraded:show:仆从打击+|仆从打击}[/gold]。",
   "BEGONE.title": "下去！",
   "BELIEVE_IN_YOU.description": "另一名玩家获得{Energy:energyIcons()}。",
   "BELIEVE_IN_YOU.title": "相信着你",

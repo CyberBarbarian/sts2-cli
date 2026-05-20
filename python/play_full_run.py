@@ -61,6 +61,8 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE if not verbose else None,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
 

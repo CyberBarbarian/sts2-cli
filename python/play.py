@@ -29,6 +29,12 @@ SAVE_DIR = os.path.join(ROOT, "saves")
 LOCAL_DOTNET_DIR = os.path.join(REPO_ROOT, ".tools", "dotnet")
 LOCAL_DOTNET = os.path.join(LOCAL_DOTNET_DIR, "dotnet.exe" if os.name == "nt" else "dotnet")
 HEADLESS_DLL = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug", "net9.0", "Sts2Headless.dll")
+CAPTURE_TEXT_KWARGS = {
+    "capture_output": True,
+    "text": True,
+    "encoding": "utf-8",
+    "errors": "replace",
+}
 
 
 def _find_dotnet():
@@ -41,7 +47,7 @@ def _find_dotnet():
     ]
     for p in candidates:
         try:
-            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run([p, "--version"], timeout=5, **CAPTURE_TEXT_KWARGS)
             if r.returncode == 0:
                 return p
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -142,7 +148,7 @@ def _build():
     """Build the C# project."""
     if not DOTNET:
         return False
-    r = subprocess.run([DOTNET, "build", PROJECT], capture_output=True, text=True, timeout=60)
+    r = subprocess.run([DOTNET, "build", PROJECT], timeout=60, **CAPTURE_TEXT_KWARGS)
     return r.returncode == 0
 
 
@@ -508,6 +514,26 @@ def context_display_floor(ctx):
         return "?"
     return ctx.get("display_floor", ctx.get("floor", "?"))
 
+
+def context_boss_name(ctx):
+    """Return the current act boss name exported by the engine, if available."""
+    boss = (ctx or {}).get("boss")
+    if not isinstance(boss, dict):
+        return ""
+    name = boss.get("name") or boss.get("id")
+    return n(name) if name else ""
+
+
+def context_display_line(ctx):
+    """Return the common room/map context line, including the current act boss."""
+    if not ctx:
+        return ""
+    line = f"{n(ctx.get('act_name','?'))} {t('Floor','层')} {context_display_floor(ctx)}"
+    boss_name = context_boss_name(ctx)
+    if boss_name:
+        line += f"  {t('Boss','Boss')} {boss_name}"
+    return line
+
 def desc(obj):
     """Extract description, strip BBCode tags, clean SmartFormat vars."""
     if obj and isinstance(obj, str):
@@ -658,6 +684,61 @@ def card_type_rarity_suffix(card):
         rarity_label = t(rarity, RARITY_ZH.get(rarity, rarity))
         parts.append(c(rarity_label, "dim"))
     return f" {' '.join(parts)}" if parts else ""
+
+
+def _positive_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def card_cost_label(card):
+    """Return the CLI card cost label, including non-energy resources exported by the engine."""
+    card = card or {}
+    label = str(card.get("cost", "?"))
+    star_cost = _positive_int(card.get("star_cost"), default=0)
+    if star_cost > 0:
+        label += f"+{star_cost}[S]"
+    return label
+
+
+def card_hover_title(tip):
+    """Return a hover-card title with the same cost metadata as normal card rows."""
+    title = n(tip.get("name") or tip.get("title") or tip.get("id") or tip.get("kind"))
+    if tip.get("kind") != "card" or "cost" not in tip:
+        return title
+    up = "+" if tip.get("upgraded") else ""
+    return f"{title}{up} ({card_cost_label(tip)}){card_type_rarity_suffix(tip)}"
+
+
+NODE_COLORS = {
+    "Monster": "red",
+    "CombatRoom": "red",
+    "Elite": "magenta",
+    "EliteRoom": "magenta",
+    "Boss": "red",
+    "BossRoom": "red",
+    "RestSite": "green",
+    "RestSiteRoom": "green",
+    "Shop": "yellow",
+    "ShopRoom": "yellow",
+    "Treasure": "cyan",
+    "TreasureRoom": "cyan",
+    "Event": "blue",
+    "EventRoom": "blue",
+    "Unknown": "blue",
+    "Ancient": "cyan",
+}
+
+
+def node_color(node_type, is_choice=False, visited=False, current=False):
+    """Color map nodes by room type, preserving current/visited emphasis."""
+    if current:
+        return "green"
+    if visited and not is_choice:
+        return "dim"
+    return NODE_COLORS.get(node_type, "reset")
 
 SPECIAL_VARS = {
     "energyprefix": "能量" if True else "E",  # placeholder, overridden by LANG
@@ -1151,14 +1232,22 @@ def hover_tip_display_lines(tip):
     """Render an exported hover tip without inventing game semantics."""
     if not isinstance(tip, dict):
         return []
-    title = tip.get("name") or tip.get("title") or tip.get("id") or tip.get("kind")
-    title = n(title)
+    title = card_hover_title(tip)
     description = card_desc(tip) if tip.get("kind") == "card" else resolved_description(tip)
     if description:
         detail_lines = description.splitlines()
         if not detail_lines:
             return [title] if title and title != "?" else []
-        return [f"{title}: {detail_lines[0]}"] + [f"  {line}" for line in detail_lines[1:]]
+        lines = [f"{title}: {detail_lines[0]}"] + [f"  {line}" for line in detail_lines[1:]]
+        if tip.get("kind") == "card":
+            upgrade_parts = _format_upgrade_preview(
+                tip.get("stats") or {},
+                tip.get("after_upgrade"),
+                tip.get("cost"),
+            )
+            if upgrade_parts:
+                lines.append(f"  {t('upgrade:','升级:')} {', '.join(upgrade_parts)}")
+        return lines
     return [title] if title and title != "?" else []
 
 
@@ -1297,7 +1386,7 @@ def card_select_combat_context_lines(state):
         for card in hand[:6]:
             stat = combat_hand_inline_stat_str(card.get("stats") or {}, card=card, enemies=enemies)
             stat_text = f" {stat}" if stat else ""
-            hand_parts.append(f"[{card.get('index', '?')}] {n(card.get('name', '?'))} ({card.get('cost', '?')}){stat_text}")
+            hand_parts.append(f"[{card.get('index', '?')}] {n(card.get('name', '?'))} ({card_cost_label(card)}){stat_text}")
         if len(hand) > 6:
             hand_parts.append(f"+{len(hand) - 6} more")
         lines.append(f"{t('Hand')}: " + "; ".join(hand_parts))
@@ -1338,8 +1427,7 @@ def deck_change_detail_lines(old_cards, new_cards):
             continue
         up = "+" if card.get("upgraded") else ""
         ctype = card.get("type", "?")
-        cost = card.get("cost", "?")
-        lines.append(c(f"+{n(card.get('name', '?'))}{up} ({cost}) {ctype}", "green"))
+        lines.append(c(f"+{n(card.get('name', '?'))}{up} ({card_cost_label(card)}) {ctype}", "green"))
         for desc_line in card_description_display_lines(card):
             if desc_line:
                 lines.append(f"  {desc_line}")
@@ -1647,7 +1735,7 @@ def show_player(p, show_deck=False):
                 up = c("+", "green") if cd.get("upgraded") else ""
                 suf_part = format_card_suffix_keywords_for_card(cd)
                 type_rarity = card_type_rarity_suffix(cd)
-                print(f"    {n(cd['name'])}{up} ({cd.get('cost','?')}){type_rarity}{suf_part}")
+                print(f"    {n(cd['name'])}{up} ({card_cost_label(cd)}){type_rarity}{suf_part}")
                 print_card_detail_extension(cd, indent="      ", include_hover_tips=True)
 
 
@@ -1670,9 +1758,8 @@ def pile_display_lines(pile_name, cards, count=None):
     for card in cards:
         up = "+" if card.get("upgraded") else ""
         ctype = card.get("type", "?")
-        cost = card.get("cost", "?")
         index = card.get("index", "?")
-        lines.append(f"  [{index}] {n(card.get('name', '?'))}{up} ({cost}) {ctype}")
+        lines.append(f"  [{index}] {n(card.get('name', '?'))}{up} ({card_cost_label(card)}) {ctype}")
         for desc_line in card_description_display_lines(card):
             if desc_line:
                 lines.append(f"      {desc_line}")
@@ -1945,17 +2032,13 @@ def show_combat(state):
     print()
     hand = state.get("hand", [])
     for card in hand:
-        cost = card.get("cost", 0)
         playable = card.get("can_play", False)
         ctype = card.get("type", "?")
         target = card.get("target_type", "")
 
         type_color = {"Attack": "red", "Skill": "blue", "Power": "magenta", "Status": "dim", "Curse": "dim"}.get(ctype, "reset")
         mark = c("●", "green") if playable else c("○", "dim")
-        star_cost = card.get("star_cost", 0)
-        cost_str = c(str(cost), "cyan")
-        if star_cost > 0:
-            cost_str += f"+{c(f'{star_cost}⭐', 'yellow')}"
+        cost_str = c(card_cost_label(card), "cyan")
 
         # Damage/block inline on title row; suffix keywords (e.g. 消耗) at end of title row
         stat_str = combat_hand_inline_stat_str(
@@ -1989,6 +2072,7 @@ def map_display_choices(choices, map_data):
     filtered = [
         ch for ch in choices
         if (ch.get("col"), ch.get("row")) in visible_coords
+        or ch.get("type") == "Ancient"
     ]
     return filtered or choices
 
@@ -2005,15 +2089,15 @@ def show_map(state, send_fn=None):
             choice_set = {(ch["col"], ch["row"]) for ch in choices}
             # Build index map: (col,row) → choice index
             choice_indices = {(ch["col"], ch["row"]): i for i, ch in enumerate(choices)}
-            _render_map(map_data, choice_set, choice_indices)
+            choice_nodes = {(ch["col"], ch["row"]): ch for ch in choices}
+            _render_map(map_data, choice_set, choice_indices, choice_nodes=choice_nodes)
             return choices
 
     # Fallback: simple list
     ctx = state.get("context", {})
-    act_name = n(ctx.get("act_name", "?"))
-    floor = ctx.get("floor", "?")
     print(f"\n{'═' * 60}")
-    print(f"  {c(f'{act_name}', 'bold')} {t('Floor','层')} {floor}")
+    if ctx:
+        print(f"  {c(context_display_line(ctx), 'bold')}")
     show_player(state.get("player", {}))
     print()
     type_icons = {
@@ -2026,6 +2110,30 @@ def show_map(state, send_fn=None):
         ntype = t(ch["type"], NODE_TYPE_ZH.get(ch["type"], ch["type"]))
         print(f"  [{i}] {icon} {ntype}")
     return choices
+
+def _stat_display_name(key, aug=None):
+    """Return a concise label for a dynamic stat exported by the engine."""
+    lower_key = str(key).lower()
+    labels = {
+        "damage": t("dmg", "伤害"),
+        "calculateddamage": t("dmg", "伤害"),
+        "block": t("blk", "格挡"),
+        "cards": t("cards", "抽牌"),
+        "energy": t("energy", "能量"),
+        "repeat": t("hits", "次数"),
+        "calculatedhits": t("hits", "次数"),
+    }
+    if lower_key in labels:
+        return labels[lower_key]
+
+    vars_dict = (aug or {}).get("vars") or {}
+    if isinstance(vars_dict, dict):
+        for var_name in vars_dict.keys():
+            if str(var_name).lower() == lower_key:
+                return str(var_name)
+
+    return str(key)
+
 
 def _format_upgrade_preview(stats, aug, current_cost=None):
     """Format upgrade preview string."""
@@ -2054,7 +2162,7 @@ def _format_upgrade_preview(stats, aug, current_cost=None):
             elif k == "block":
                 parts.append(c(f"{t('blk','格挡')} {old}→{new_val}", "blue"))
             else:
-                parts.append(c(f"{old}→{new_val}", "green"))
+                parts.append(c(f"{_stat_display_name(k, aug)} {old}→{new_val}", "green"))
     # Keyword changes (e.g., Discovery removes Exhaust)
     for kw in (aug.get("removed_keywords") or []):
         parts.append(c(f"-{_card_kw_label(kw)}", "green"))
@@ -2188,6 +2296,9 @@ def card_select_input_prompt(min_select, max_select, can_skip=None):
 
 def show_card_reward(state):
     print(f"\n{'─' * 60}")
+    ctx = state.get("context", {})
+    if ctx:
+        print(f"  {c(context_display_line(ctx), 'dim')}")
     gold_earned = state.get("gold_earned", 0)
     if gold_earned > 0:
         print(f"  {c(t('Combat won!','战斗胜利!'), 'green')} +{c(str(gold_earned), 'yellow')}{t('g','金')}")
@@ -2198,14 +2309,13 @@ def show_card_reward(state):
     for card in cards:
         ctype = card.get("type", "?")
         rarity = card.get("rarity", "Common")
-        cost = card.get("cost", "?")
         type_color = {"Attack": "red", "Skill": "blue", "Power": "magenta"}.get(ctype, "reset")
         rarity_zh = RARITY_ZH.get(rarity, rarity)
         rarity_label = t(rarity, rarity_zh)
         rarity_color = {"Rare": "yellow", "Uncommon": "cyan"}.get(rarity, "dim")
         suf_part = format_card_suffix_keywords_for_card(card)
         up = c("+", "green") if card.get("upgraded") else ""
-        print(f"  [{card['index']}] {c(n(card['name']), type_color)}{up} ({cost}) {c(rarity_label, rarity_color)}{suf_part}")
+        print(f"  [{card['index']}] {c(n(card['name']), type_color)}{up} ({card_cost_label(card)}) {c(rarity_label, rarity_color)}{suf_part}")
         print_card_detail_extension(card, indent="      ", include_hover_tips=True)
 
     print()
@@ -2217,6 +2327,9 @@ def show_card_reward(state):
 
 def show_combat_reward(state):
     print(f"\n{'-' * 60}")
+    ctx = state.get("context", {})
+    if ctx:
+        print(f"  {c(context_display_line(ctx), 'dim')}")
     print(f"  {c(t('Combat Rewards', '战斗奖励'), 'bold')}")
     show_player(state.get("player", {}))
     print()
@@ -2250,6 +2363,9 @@ def show_combat_reward(state):
 
 def show_shop(state):
     print(f"\n{'─' * 60}")
+    ctx = state.get("context", {})
+    if ctx:
+        print(f"  {c(context_display_line(ctx), 'dim')}")
     print(f"  {c(t('Shop','商店'), 'bold')}")
     show_player(state.get("player", {}))
     gold = state.get("player", {}).get("gold", 0)
@@ -2261,9 +2377,8 @@ def show_shop(state):
         affordable = c(str(price), "green") if price <= gold else c(str(price), "red")
         sale = c(t(" SALE"," 打折"), "yellow") if card.get("on_sale") else ""
         ctype_zh = CARD_TYPE_ZH.get(card.get("type",""), card.get("type",""))
-        cc = card.get("cost", card.get("card_cost", "?"))
         suf_part = format_card_suffix_keywords_for_card(card)
-        print(f"  [{card['index']}] {n(card['name'])} ({cc}) {c(t(card.get('type','?'), ctype_zh), 'dim')}{suf_part} — {affordable}{t('g','金')}{sale}")
+        print(f"  [{card['index']}] {n(card['name'])} ({card_cost_label(card)}) {c(t(card.get('type','?'), ctype_zh), 'dim')}{suf_part} — {affordable}{t('g','金')}{sale}")
         print_card_detail_extension(card, indent="      ", include_hover_tips=True)
 
     print(f"\n  {c(t('Relics:','遗物:'), 'bold')}")
@@ -2299,7 +2414,7 @@ def show_rest_site(state):
     print(f"\n{'─' * 60}")
     ctx = state.get("context", {})
     if ctx:
-        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
+        print(f"  {c(context_display_line(ctx), 'dim')}")
     print(f"  {c(t('Rest Site','休息处'), 'bold')}")
     show_player(state.get("player", {}))
     print()
@@ -2398,9 +2513,7 @@ def show_event(state):
     # Show context
     ctx = state.get("context", {})
     if ctx:
-        act = n(ctx.get("act_name", "?"))
-        floor = context_display_floor(ctx)
-        print(f"  {c(act, 'dim')} {t('Floor','层')} {floor}")
+        print(f"  {c(context_display_line(ctx), 'dim')}")
     event_label = t("Event", "事件")
     print(f"  {c(f'{event_label}: {event_display}', 'bold')}")
     # event_desc is usually a raw loc key — skip it (event name already in title)
@@ -2437,9 +2550,7 @@ def show_event_result(state):
     event_display = n(event_name) if isinstance(event_name, dict) else event_name
     ctx = state.get("context", {})
     if ctx:
-        act = n(ctx.get("act_name", "?"))
-        floor = context_display_floor(ctx)
-        print(f"  {c(act, 'dim')} {t('Floor', 'Floor')} {floor}")
+        print(f"  {c(context_display_line(ctx), 'dim')}")
     label = t("Event Result", "Event Result")
     print(f"  {c(f'{label}: {event_display}', 'bold')}")
     show_player(state.get("player", {}))
@@ -2455,7 +2566,7 @@ def show_crystal_sphere(state):
     print(f"\n{'-' * 60}")
     ctx = state.get("context", {})
     if ctx:
-        print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
+        print(f"  {c(context_display_line(ctx), 'dim')}")
     print(f"  {c(t('Crystal Sphere', '水晶球'), 'bold')}")
     show_player(state.get("player", {}))
     print()
@@ -2518,16 +2629,16 @@ def show_crystal_sphere(state):
                   f"{item.get('width')}x{item.get('height')}")
     print(f"  {c(t('? hidden, . empty, G good item, B bad item', '? 隐藏，. 空，G 正面物品，B 负面物品'), 'dim')}")
 
-def _render_map(map_data, choice_set=None, choice_indices=None):
+def _render_map(map_data, choice_set=None, choice_indices=None, choice_nodes=None):
     """Render map as a grid with connection lines between rows."""
     if choice_set is None:
         choice_set = set()
     if choice_indices is None:
         choice_indices = {}
+    if choice_nodes is None:
+        choice_nodes = {}
 
     ctx = map_data.get("context", {})
-    act = n(ctx.get("act_name", "?"))
-    floor_n = ctx.get("floor", "?")
     cur = map_data.get("current_coord")
 
     ICONS = {
@@ -2556,27 +2667,41 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
                 edges_up.setdefault(rn, []).append((col, ch["col"]))
 
     row_numbers = sorted(row_numbers)
+    boss = map_data.get("boss", {})
+    if "col" in boss:
+        max_col = max(max_col, boss.get("col", 0))
+    for col, _row in choice_indices.keys():
+        max_col = max(max_col, col)
     total_cols = max_col + 1
     W = 4  # chars per column cell
     # Center of column c = c*W + W//2 = c*4 + 2
 
     width = W * total_cols + 6
     print(f"\n{'═' * width}")
-    print(f"  {c(act, 'bold')} — {t('Floor','层')} {floor_n}")
+    if ctx:
+        print(f"  {c(context_display_line(ctx), 'bold')}")
     # Show current position if it's not on the map grid (e.g., starting row 0)
     if cur and cur.get("row", -1) not in row_numbers:
         print(f"  {c(t('You are at the start','你在起点'), 'green')}")
+    off_grid_choices = []
+    for coord, choice_idx in choice_indices.items():
+        col, row = coord
+        if coord not in node_map and not (col == boss.get("col") and row == boss.get("row")):
+            node = choice_nodes.get(coord, {"col": col, "row": row, "type": "?"})
+            off_grid_choices.append((choice_idx, node))
+    for choice_idx, node in sorted(off_grid_choices):
+        ntype = t(node.get("type", "?"), NODE_TYPE_ZH.get(node.get("type", ""), node.get("type", "?")))
+        print(f"  {c(f'[{choice_idx}] {ntype}', node_color(node.get('type'), is_choice=True))}")
     print()
 
     # Boss row
-    boss = map_data.get("boss", {})
     boss_col = boss.get("col", 0)
     boss_row = boss.get("row", -1)
     boss_choice_idx = choice_indices.get((boss_col, boss_row))
     buf = list(" " * (W * total_cols))
     buf[boss_col * W + W // 2] = "B"
     line = "".join(buf)
-    boss_color = "yellow" if boss_choice_idx is not None else "red"
+    boss_color = node_color("Boss", is_choice=boss_choice_idx is not None)
     line = line[:boss_col * W + W // 2] + c("B", boss_color) + line[boss_col * W + W // 2 + 1:]
     print(f"  {c('B','dim')} | {line}")
     if boss_choice_idx is not None:
@@ -2629,15 +2754,16 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
                 buf[center - 1] = "["
                 buf[center] = icon
                 buf[center + 1] = "]"
-                color_subs.append((center - 1, center + 2, c(f"[{icon}]", "green")))
+                color_subs.append((center - 1, center + 2, c(f"[{icon}]", node_color(nd.get("type"), current=True))))
             elif choice_idx is not None:
                 buf[center] = icon
-                color_subs.append((center, center + 1, c(icon, "yellow")))
+                color_subs.append((center, center + 1, c(icon, node_color(nd.get("type"), is_choice=True))))
             elif visited:
                 buf[center] = icon
-                color_subs.append((center, center + 1, c(icon, "dim")))
+                color_subs.append((center, center + 1, c(icon, node_color(nd.get("type"), visited=True))))
             else:
                 buf[center] = icon
+                color_subs.append((center, center + 1, c(icon, node_color(nd.get("type")))))
 
         line = "".join(buf)
         # Apply colors right-to-left
@@ -2682,8 +2808,13 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
 
     # Legend
     print(f"  {'─' * width}")
-    legend = (f"  M={t('Monster','怪物')} E={t('Elite','精英')} R={t('Rest','休息')} "
-              f"$={t('Shop','商店')} T={t('Treasure','宝箱')} ?={t('Event','事件')} "
+    legend = (f"  {c('M', node_color('Monster'))}={t('Monster','怪物')} "
+              f"{c('E', node_color('Elite'))}={t('Elite','精英')} "
+              f"{c('R', node_color('RestSite'))}={t('Rest','休息')} "
+              f"{c('$', node_color('Shop'))}={t('Shop','商店')} "
+              f"{c('T', node_color('Treasure'))}={t('Treasure','宝箱')} "
+              f"{c('?', node_color('Event'))}={t('Event','事件')} "
+              f"{c('A', node_color('Ancient'))}={t('Ancient','先古')} "
               f"{c('[x]','green')}={t('You','当前')} {c('0','yellow')}={t('Choice','可选')}")
     print(legend)
     # Show choice details
@@ -2695,6 +2826,8 @@ def _render_map(map_data, choice_set=None, choice_indices=None):
             nd = node_map.get((col, row))
             if not nd and col == boss_col and row == boss_row:
                 nd = boss
+            if not nd:
+                nd = choice_nodes.get((col, row))
             if nd:
                 ntype = t(nd.get("type", "?"), NODE_TYPE_ZH.get(nd.get("type", ""), nd.get("type", "?")))
                 parts.append(f"{c(str(i), 'yellow')}={ntype}")
@@ -2760,7 +2893,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
     奖励:    卡牌编号 / {c('s', 'yellow')} 跳过
     多选:    按提示选择张数（须选 N–M 张 / 可选 0–M 张等），编号逗号分隔，例如 {c('0,1,2', 'yellow')}
     休息:    选项编号
-    事件:    选项编号 / {c('leave', 'yellow')} 离开
+    事件:    选项编号
     商店:    {c('c0', 'yellow')} 买卡 / {c('r0', 'yellow')} 遗物 / {c('p0', 'yellow')} 药水 / {c('rm', 'yellow')} 移除 / {c('leave', 'yellow')} 离开
 """)
             else:
@@ -2789,7 +2922,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
     Reward:  card index / {c('s', 'yellow')} skip
     Multi:   when prompted for N–M cards (or 0–M optional), comma-separate indices, e.g. {c('0,1,2', 'yellow')}
     Rest:    option index
-    Event:   option index / {c('leave', 'yellow')} leave
+    Event:   option index
     Shop:    {c('c0', 'yellow')} card / {c('r0', 'yellow')} relic / {c('p0', 'yellow')} potion / {c('rm', 'yellow')} remove / {c('leave', 'yellow')} leave
 """)
             continue
@@ -2833,7 +2966,7 @@ def get_input(prompt, valid_options=None, state=None, multi_select=False, multi_
                     print("  Map not available.")
             elif state:
                 ctx = state.get("context", {})
-                print(f"  {c(n(ctx.get('act_name','?')), 'bold')} {t('Floor','层')} {context_display_floor(ctx)}")
+                print(f"  {c(context_display_line(ctx), 'bold')}")
             continue
         if raw == "save":
             if hasattr(get_input, '_save_fn'):
@@ -2906,6 +3039,44 @@ def combat_potion_shortcuts(state):
             sort_idx = 9999
         shortcuts.append((sort_idx, f"p{idx}"))
     return [key for _, key in sorted(shortcuts)]
+
+
+def combat_reward_potion_discard_shortcuts(state):
+    """Return d<slot> shortcuts for discarding carried potions on reward screens."""
+    player = state.get("player", {}) if isinstance(state, dict) else {}
+    shortcuts = []
+    for pot in player.get("potions", []) or []:
+        if not pot:
+            continue
+        idx = pot.get("index")
+        if idx is None:
+            continue
+        try:
+            sort_idx = int(idx)
+        except (TypeError, ValueError):
+            continue
+        shortcuts.append((sort_idx, f"d{idx}"))
+    return {key: idx for idx, key in sorted(shortcuts)}
+
+
+def combat_reward_choice_to_command(choice):
+    if isinstance(choice, str) and choice.startswith("d") and choice[1:].isdigit():
+        return {
+            "cmd": "action",
+            "action": "discard_potion",
+            "args": {"potion_index": int(choice[1:])},
+        }
+    if isinstance(choice, str) and choice.startswith("s") and choice[1:].isdigit():
+        return {
+            "cmd": "action",
+            "action": "skip_reward",
+            "args": {"reward_index": int(choice[1:])},
+        }
+    return {
+        "cmd": "action",
+        "action": "claim_reward",
+        "args": {"reward_index": int(choice)},
+    }
 
 
 def combat_input_prompt(state):
@@ -3027,12 +3198,16 @@ def _show_quit_save_result(result):
 def start_run_summary_line(character, seed, ascension, state=None):
     """Return the new-run summary line using engine-localized player text when available."""
     player_name = None
+    ctx = {}
     if state:
         player = state.get("player") or {}
         player_name = player.get("name")
+        ctx = state.get("context") or {}
     character_label = n(player_name) if player_name else character
     asc_str = f"  {t('Ascension','进阶')}: {ascension}" if ascension > 0 else ""
-    return f"{t('Character','角色')}: {character_label}  {t('Seed','种子')}: {seed}{asc_str}"
+    boss_name = context_boss_name(ctx)
+    boss_str = f"  {t('Boss','Boss')}: {boss_name}" if boss_name else ""
+    return f"{t('Character','角色')}: {character_label}  {t('Seed','种子')}: {seed}{asc_str}{boss_str}"
 
 
 def _writeback_continue_save(send_fn, native_save_path):
@@ -3159,7 +3334,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
             p = state.get("player", {}) if state else {}
             ctx = state.get("context", {}) if state else {}
             print(f"{t('Character','角色')}: {n(p.get('name','?'))}  "
-                  f"{t('Act','幕')}: {ctx.get('act','?')} ({n(ctx.get('act_name','?'))})  "
+                  f"{context_display_line(ctx)}  "
                   f"{t('HP','生命')}: {p.get('hp','?')}/{p.get('max_hp','?')}  "
                   f"{t('Gold','金')}: {p.get('gold','?')}")
         else:
@@ -3193,9 +3368,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     print(f"  {c(t('DEFEAT','战败'), 'red')}")
                 print()
 
-                act_name = n(ctx.get("act_name", "?"))
-                floor = context_display_floor(ctx) if ctx else state.get("floor", "?")
-                print(f"  {t('Act','幕')}: {state.get('act','?')} ({act_name})  {t('Floor','层')}: {floor}")
+                print(f"  {context_display_line(ctx) if ctx else f'{t('Floor','层')}: {state.get('floor','?')}' }")
                 print(f"  {t('Character','角色')}: {n(p.get('name','?'))}")
                 print(f"  HP: {p.get('hp','?')}/{p.get('max_hp','?')}  {t('Gold','金')}: {p.get('gold','?')}")
 
@@ -3354,6 +3527,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 for r in rewards:
                     if r.get("can_skip"):
                         valid[f"s{r['index']}"] = r
+                discard_shortcuts = combat_reward_potion_discard_shortcuts(state)
+                for shortcut in discard_shortcuts:
+                    valid[shortcut] = None
 
                 if auto:
                     if not rewards:
@@ -3363,22 +3539,18 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     else:
                         choice = str(rewards[0]["index"])
                 else:
+                    prompt = "Claim reward index, s<index> to skip, or d<slot> to discard potion"
+                    if not discard_shortcuts:
+                        prompt = "Claim reward index, or s<index> to skip an optional reward"
                     choice = get_input(
-                        "Claim reward index, or s<index> to skip an optional reward",
+                        prompt,
                         set(valid.keys()),
                         state=state,
                     )
 
-                if choice.startswith("s"):
-                    old_state = state
-                    state = send({"cmd": "action", "action": "skip_reward",
-                                  "args": {"reward_index": int(choice[1:])}})
-                    print_player_state_changes(old_state, state)
-                else:
-                    old_state = state
-                    state = send({"cmd": "action", "action": "claim_reward",
-                                  "args": {"reward_index": int(choice)}})
-                    print_player_state_changes(old_state, state)
+                old_state = state
+                state = send(combat_reward_choice_to_command(choice))
+                print_player_state_changes(old_state, state)
 
             elif dec == "card_reward":
                 show_card_reward(state)
@@ -3401,7 +3573,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
+                    print(f"  {c(context_display_line(ctx), 'dim')}")
                 print(f"  {c(t('Choose a relic','选择遗物'), 'bold')}")
                 for line in card_select_context_lines(state):
                     print(f"      {c(line, 'dim')}")
@@ -3437,7 +3609,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
+                    print(f"  {c(context_display_line(ctx), 'dim')}")
                 print(f"  {c(t('Empty treasure chest','空宝箱'), 'yellow')}")
                 msg = state.get("message")
                 if msg:
@@ -3454,7 +3626,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
+                    print(f"  {c(context_display_line(ctx), 'dim')}")
                 print(f"  {c(t('Choose a card pack','选择一个卡牌包'), 'bold')}")
                 show_player(state.get("player", {}))
                 print()
@@ -3478,7 +3650,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 print(f"\n{'─' * 60}")
                 ctx = state.get("context", {})
                 if ctx:
-                    print(f"  {c(n(ctx.get('act_name','?')), 'dim')} {t('Floor','层')} {context_display_floor(ctx)}")
+                    print(f"  {c(context_display_line(ctx), 'dim')}")
                 min_sel = state.get("min_select", 1)
                 max_sel = state.get("max_select", 1)
                 can_skip = bool(state.get("can_skip", min_sel == 0))
@@ -3630,22 +3802,31 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 options = state.get("options", [])
                 unlocked = [o for o in options if not o.get("is_locked")]
                 valid = {str(o["index"]): o for o in unlocked}
-                valid["leave"] = None
+                can_leave = bool(state.get("can_leave"))
+                if can_leave:
+                    valid["leave"] = None
 
                 old_state = state
 
                 if auto:
-                    choice = str(unlocked[0]["index"]) if unlocked else "leave"
+                    if unlocked:
+                        choice = str(unlocked[0]["index"])
+                    elif can_leave:
+                        choice = "leave"
+                    else:
+                        print(f"  {t('No available event options.', 'No available event options.')}")
+                        return restart_requested
                 else:
-                    choice = get_input(t("Choose option [index] or (leave)", "选择 [编号] 或 (leave)离开"), set(valid.keys()), state=state)
+                    prompt = t("Choose option [index]", "选择 [编号]")
+                    if can_leave:
+                        prompt = t("Choose option [index] or (leave)", "选择 [编号] 或 (leave)离开")
+                    choice = get_input(prompt, set(valid.keys()), state=state)
 
                 if choice == "leave":
                     state = send({"cmd": "action", "action": "leave_room"})
                 else:
                     state = send({"cmd": "action", "action": "choose_option",
                                  "args": {"option_index": int(choice)}})
-                    if state and state.get("type") == "error":
-                        state = send({"cmd": "action", "action": "leave_room"})
 
                 print_player_state_changes(old_state, state)
             else:

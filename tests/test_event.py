@@ -13,6 +13,16 @@ class TestNeowEvent:
         state = game.start(seed="ne1")
         assert state["decision"] == "event_choice"
         assert "Neow" in str(state.get("event_name", ""))
+        assert state["can_leave"] is False
+
+    def test_neow_cannot_be_force_left(self, game):
+        state = game.start(seed="neow-no-force-leave")
+        assert state["decision"] == "event_choice"
+
+        result = game.act("leave_room")
+
+        assert result["type"] == "error"
+        assert "Cannot leave this event" in result["message"]
 
     def test_neow_options(self, game):
         state = game.start(seed="ne2")

@@ -49,6 +49,24 @@ def test_card_type_rarity_suffix_keeps_distinct_labels():
     assert rendered == " Attack Basic"
 
 
+def test_node_color_uses_distinct_map_type_colors():
+    assert play.node_color("Monster") == "red"
+    assert play.node_color("Elite") == "magenta"
+    assert play.node_color("RestSite") == "green"
+    assert play.node_color("Shop") == "yellow"
+    assert play.node_color("Treasure") == "cyan"
+    assert play.node_color("Event") == "blue"
+    assert play.node_color("Ancient") == "cyan"
+
+
+def test_card_cost_label_includes_star_cost():
+    play.LANG = "en"
+
+    rendered = plain(play.card_cost_label({"cost": 2, "star_cost": 1}))
+
+    assert rendered == "2+1[S]"
+
+
 def test_show_rest_site_uses_titles_and_descriptions(capsys):
     play.LANG = "en"
 
@@ -284,6 +302,40 @@ def test_show_map_renumbers_visible_choices_when_start_choice_is_hidden(capsys):
     assert "0=Monster" in rendered
     assert "1=Monster" in rendered
     assert "2=Monster" not in rendered
+
+
+def test_show_map_keeps_ancient_start_choice_outside_visible_rows(capsys):
+    play.LANG = "en"
+
+    state = {
+        "choices": [
+            {"col": 3, "row": 0, "type": "Ancient"},
+            {"col": 1, "row": 1, "type": "Monster"},
+        ]
+    }
+    map_data = {
+        "type": "map",
+        "context": {"act_name": "Hive", "floor": 0},
+        "current_coord": None,
+        "rows": [
+            [
+                {"col": 1, "row": 1, "type": "Monster", "children": [], "visited": False},
+            ],
+        ],
+        "boss": {"col": 3, "row": 15, "type": "Boss"},
+    }
+
+    def send_fn(cmd):
+        assert cmd == {"cmd": "get_map"}
+        return map_data
+
+    visible_choices = play.show_map(state, send_fn=send_fn)
+    rendered = plain(capsys.readouterr().out)
+
+    assert visible_choices == state["choices"]
+    assert "[0] Ancient" in rendered
+    assert "0=Ancient" in rendered
+    assert "0=Monster" not in rendered
 
 
 def test_card_select_prompt_only_advertises_skip_when_optional():
@@ -581,6 +633,46 @@ def test_card_detail_extension_prints_hover_tip_effects(capsys):
     assert "Glass: Orb: Deals damage to ALL enemies." in text
 
 
+def test_card_hover_tip_lines_include_card_upgrade_stats():
+    play.LANG = "zh"
+
+    lines = play.hover_tip_display_lines(
+        {
+            "kind": "card",
+            "name": "仆从打击",
+            "description": "造成6点伤害。\n抽1张牌。\n消耗。",
+            "stats": {"damage": 6, "cards": 1},
+            "after_upgrade": {
+                "description": "造成9点伤害。\n抽1张牌。\n消耗。",
+                "stats": {"damage": 9, "cards": 1},
+            },
+        }
+    )
+
+    text = "\n".join(plain(line) for line in lines)
+    assert "仆从打击: 造成6点伤害。" in text
+    assert "升级:" in text
+    assert "6→9" in text
+
+
+def test_card_hover_tip_lines_include_card_cost_and_type():
+    play.LANG = "en"
+
+    lines = play.hover_tip_display_lines(
+        {
+            "kind": "card",
+            "name": "Debris",
+            "cost": 0,
+            "type": "Status",
+            "rarity": "Status",
+            "description": "Exhaust.",
+        }
+    )
+
+    text = "\n".join(plain(line) for line in lines)
+    assert "Debris (0) Status: Exhaust." in text
+
+
 def test_card_detail_extension_can_print_full_upgrade_description(capsys):
     play.LANG = "en"
 
@@ -660,6 +752,28 @@ def test_card_detail_extension_omits_internal_dynamic_upgrade_stats(capsys):
     text = plain(capsys.readouterr().out)
     assert "dmg 9" in text
     assert "13" not in text
+
+
+def test_card_detail_extension_labels_unknown_upgrade_stats(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension({
+        "name": "Loop",
+        "cost": 1,
+        "description": "At the start of your turn, trigger the passive ability of your rightmost Orb.",
+        "stats": {"loop": 1},
+        "after_upgrade": {
+            "cost": 1,
+            "description": "At the start of your turn, trigger the passive ability of your rightmost Orb 2 times.",
+            "stats": {"loop": 2},
+            "vars": {"Loop": 2},
+        },
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "upgrade:" in text
+    assert "Loop 1\u21922" in text
+    assert "upgrade: 1\u21922" not in text
 
 
 def test_card_detail_extension_can_hide_upgrade_summary(capsys):
@@ -888,6 +1002,33 @@ def test_card_select_combat_context_includes_player_powers():
     assert any("Player powers" in line for line in lines)
     assert any("Phantom Blades 9" in line for line in lines)
     assert any("first Shiv" in line for line in lines)
+
+
+def test_card_select_combat_context_displays_star_cost():
+    play.LANG = "en"
+
+    lines = [plain(line) for line in play.card_select_combat_context_lines({
+        "decision": "card_select",
+        "combat": {
+            "round": 1,
+            "energy": 3,
+            "max_energy": 3,
+            "draw_pile_count": 0,
+            "discard_pile_count": 0,
+            "exhaust_pile_count": 0,
+            "enemies": [],
+            "hand": [
+                {
+                    "index": 1,
+                    "name": "Seven Stars",
+                    "cost": 2,
+                    "star_cost": 1,
+                },
+            ],
+        },
+    })]
+
+    assert any("Seven Stars (2+1[S])" in line for line in lines)
 
 
 def test_card_select_combat_context_omits_non_combat_select():
@@ -1234,6 +1375,27 @@ def test_combat_reward_shows_optional_skip_affordance(capsys):
     assert "Type s1 to skip this reward." in text
 
 
+def test_combat_reward_potion_discard_shortcuts_include_slots():
+    shortcuts = play.combat_reward_potion_discard_shortcuts({
+        "player": {
+            "potions": [
+                {"index": 0, "name": "Strength Potion"},
+                {"index": 2, "name": "Fire Potion"},
+            ]
+        }
+    })
+
+    assert shortcuts == {"d0": 0, "d2": 2}
+
+
+def test_combat_reward_choice_to_command_discards_potion():
+    assert play.combat_reward_choice_to_command("d1") == {
+        "cmd": "action",
+        "action": "discard_potion",
+        "args": {"potion_index": 1},
+    }
+
+
 def test_card_reward_marks_upgraded_cards(capsys):
     play.LANG = "en"
 
@@ -1275,6 +1437,36 @@ def test_card_reward_marks_upgraded_cards(capsys):
     assert "Deal 10 damage." in text
     assert "[1] Cold Snap (1)" in text
     assert "Cold Snap+ (1)" not in text
+
+
+def test_card_reward_displays_star_cost(capsys):
+    play.LANG = "en"
+
+    play.show_card_reward({
+        "player": {
+            "name": "The Regent",
+            "hp": 80,
+            "max_hp": 80,
+            "gold": 99,
+            "deck_size": 10,
+            "relics": [],
+            "potions": [],
+        },
+        "cards": [
+            {
+                "index": 1,
+                "name": "Seven Stars",
+                "cost": 2,
+                "star_cost": 1,
+                "type": "Skill",
+                "rarity": "Rare",
+                "description": "Deal 7 damage to ALL enemies 7 times.",
+            },
+        ],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "[1] Seven Stars (2+1[S])" in text
 
 
 def test_show_player_includes_potion_slot_capacity(capsys):
@@ -1689,6 +1881,25 @@ def test_pile_display_lines_include_card_descriptions():
     assert any("Draw Pile" in line for line in lines)
     assert any("Strike" in line for line in lines)
     assert any("Deal 6 damage." in line for line in lines)
+
+
+def test_pile_display_lines_include_star_cost():
+    play.LANG = "en"
+    lines = [plain(line) for line in play.pile_display_lines(
+        "draw",
+        [
+            {
+                "index": 0,
+                "name": "Seven Stars",
+                "cost": 2,
+                "star_cost": 1,
+                "type": "Skill",
+                "description": "Deal 7 damage to ALL enemies 7 times.",
+            }
+        ],
+    )]
+
+    assert any("Seven Stars (2+1[S])" in line for line in lines)
 
 
 def test_pile_display_lines_support_exhaust_pile():
