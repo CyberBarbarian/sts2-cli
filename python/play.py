@@ -15,6 +15,7 @@ import sys
 import os
 import argparse
 import random
+import re
 from game_log import GameLogger
 
 for stream in (sys.stdout, sys.stderr):
@@ -709,7 +710,8 @@ def card_hover_title(tip):
     if tip.get("kind") != "card" or "cost" not in tip:
         return title
     up = "+" if tip.get("upgraded") else ""
-    return f"{title}{up} ({card_cost_label(tip)}){card_type_rarity_suffix(tip)}"
+    suffix = format_card_suffix_keywords_for_card(tip)
+    return f"{title}{up} ({card_cost_label(tip)}){card_type_rarity_suffix(tip)}{suffix}"
 
 
 NODE_COLORS = {
@@ -1233,9 +1235,12 @@ def hover_tip_display_lines(tip):
     if not isinstance(tip, dict):
         return []
     title = card_hover_title(tip)
-    description = card_desc(tip) if tip.get("kind") == "card" else resolved_description(tip)
-    if description:
-        detail_lines = description.splitlines()
+    if tip.get("kind") == "card":
+        detail_lines = card_description_display_lines(tip)
+    else:
+        description = resolved_description(tip)
+        detail_lines = description.splitlines() if description else []
+    if detail_lines:
         if not detail_lines:
             return [title] if title and title != "?" else []
         lines = [f"{title}: {detail_lines[0]}"] + [f"  {line}" for line in detail_lines[1:]]
@@ -2135,6 +2140,40 @@ def _stat_display_name(key, aug=None):
     return str(key)
 
 
+def _upgrade_changed_scalar_values(stats, aug):
+    """Return upgraded stat values that changed, formatted as text for description highlighting."""
+    aug_stats = (aug or {}).get("stats") or {}
+    values = []
+    all_keys = set(list((stats or {}).keys()) + list(aug_stats.keys()))
+    for k in sorted(all_keys):
+        if k.endswith("_by_target"):
+            continue
+        if k in ("calculationbase", "extradamage"):
+            continue
+        old = (stats or {}).get(k, 0)
+        new_val = aug_stats.get(k, old)
+        if isinstance(old, (dict, list, tuple)) or isinstance(new_val, (dict, list, tuple)):
+            continue
+        if new_val == old:
+            continue
+        if isinstance(new_val, float) and new_val.is_integer():
+            new_val = int(new_val)
+        values.append(str(new_val))
+    return sorted(set(values), key=len, reverse=True)
+
+
+def highlight_upgrade_description_numbers(text, stats, aug):
+    """Highlight numeric values in upgrade text when they match changed engine stats."""
+    if not text:
+        return text
+    for value in _upgrade_changed_scalar_values(stats, aug):
+        if not value:
+            continue
+        pattern = re.compile(rf"(?<!\d){re.escape(value)}(?!\d)")
+        text = pattern.sub(lambda m: c(m.group(0), "green"), text)
+    return text
+
+
 def _format_upgrade_preview(stats, aug, current_cost=None):
     """Format upgrade preview string."""
     if not aug:
@@ -2178,6 +2217,7 @@ def upgrade_description_display_lines(card):
     text = card_desc(aug)
     if not text:
         return []
+    text = highlight_upgrade_description_numbers(text, (card or {}).get("stats") or {}, aug)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return []

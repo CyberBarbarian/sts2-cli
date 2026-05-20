@@ -673,6 +673,25 @@ def test_card_hover_tip_lines_include_card_cost_and_type():
     assert "Debris (0) Status: Exhaust." in text
 
 
+def test_card_hover_tip_lines_include_card_keywords():
+    play.LANG = "zh"
+
+    lines = play.hover_tip_display_lines(
+        {
+            "kind": "card",
+            "name": "虚空",
+            "cost": 0,
+            "type": "Status",
+            "rarity": "Status",
+            "description": "每当你抽到这张牌时，失去[E]。",
+            "keywords": ["Unplayable", "Ethereal"],
+        }
+    )
+
+    text = "\n".join(plain(line) for line in lines)
+    assert "虚空 (0) 状态 [不能被打出]: 虚无: 每当你抽到这张牌时，失去[E]。" in text
+
+
 def test_card_detail_extension_can_print_full_upgrade_description(capsys):
     play.LANG = "en"
 
@@ -693,6 +712,31 @@ def test_card_detail_extension_can_print_full_upgrade_description(capsys):
 
     text = plain(capsys.readouterr().out)
     assert "Upgrade preview: Deal 9 damage." in text
+
+
+def test_card_detail_extension_highlights_changed_upgrade_description_numbers(capsys):
+    play.LANG = "en"
+
+    play.print_card_detail_extension(
+        {
+            "name": "Reprogram Module",
+            "cost": 0,
+            "description": "Gain 1 Orb Slot.\nDraw 1 card. This card's Cost is increased by 1.",
+            "stats": {"cards": 1},
+            "after_upgrade": {
+                "cost": 0,
+                "description": "Gain 1 Orb Slot.\nDraw 2 cards. This card's Cost is increased by 1.",
+                "stats": {"cards": 2},
+                "vars": {"Cards": 2},
+            },
+        },
+        include_upgrade_description=True,
+    )
+
+    text = capsys.readouterr().out
+    assert f"Draw {play.c('2', 'green')} cards." in text
+    assert "Gain \x1b[92m1\x1b[0m Orb Slot" not in text
+    assert "cards 1\u21922" in plain(text)
 
 
 def test_card_detail_extension_omits_target_rows_from_upgrade_summary(capsys):
