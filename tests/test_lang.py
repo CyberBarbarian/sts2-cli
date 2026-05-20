@@ -8,6 +8,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _has_cjk(text):
+    return any("\u4e00" <= ch <= "\u9fff" for ch in str(text))
+
+
 class TestLanguage:
     def test_lang_en_returns_english(self, game):
         state = game.start(seed="lang_en1", lang="en")
@@ -35,6 +39,24 @@ class TestLanguage:
         # Should be English (no Chinese characters)
         has_chinese = any(any(ord(ch) > 0x4e00 for ch in name) for name in names)
         assert not has_chinese, f"Expected English by default, got: {names[:3]}"
+
+    def test_lang_zh_localizes_headless_event_choice_text(self, game):
+        state = game.start(seed="lang_zh_event1", lang="zh")
+        options = state.get("options", [])
+
+        assert state.get("decision") == "event_choice"
+        assert _has_cjk(state.get("event_name"))
+        assert any(_has_cjk(option.get("title")) for option in options)
+        assert any(_has_cjk(option.get("description")) for option in options)
+
+    def test_lang_en_keeps_headless_event_choice_text_english(self, game):
+        state = game.start(seed="lang_en_event1", lang="en")
+        options = state.get("options", [])
+
+        assert state.get("decision") == "event_choice"
+        assert state.get("event_name") == "Neow"
+        assert not _has_cjk(state.get("event_name"))
+        assert not any(_has_cjk(option.get("title")) for option in options)
 
 
 def test_zhs_relics_include_current_engine_winged_boots_text():
