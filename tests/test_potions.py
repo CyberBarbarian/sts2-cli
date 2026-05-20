@@ -256,6 +256,22 @@ class TestPotionActions:
         assert bash["description"].startswith("Deal 10 damage.")
         assert bash["stats"]["damage"] == 10
 
+    def test_touch_of_insanity_engine_auto_selects_one_playable_card(self, game):
+        state = game.start(seed="touch-selection-single-playable")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["TOUCH_OF_INSANITY"],
+            deck=["BASH", "INJURY"],
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        state = game.act("use_potion", potion_index=0)
+
+        assert state["decision"] == "combat_play"
+        assert state["player"]["potions"] == []
+        bash = next(card for card in state["hand"] if card["name"] == "Bash")
+        assert bash["cost"] == 0
+
     def test_full_potion_slots_block_potion_reward_claim(self, game):
         state = game.start(seed="full-potion-reward-1", ascension=10)
         game.skip_neow(state)

@@ -1043,6 +1043,44 @@ def test_state_change_lines_include_combat_auto_resolution():
     assert any("Fuzzy Wurm Crawler: 51/56 -> 33/56" in line for line in lines)
 
 
+def test_state_change_lines_can_include_potion_hand_cost_changes():
+    play.LANG = "en"
+
+    old_state = {
+        "player": {
+            "hp": 79,
+            "max_hp": 80,
+            "gold": 119,
+            "deck_size": 13,
+            "potions": [
+                {"id": "TOUCH_OF_INSANITY", "name": "Touch of Insanity"},
+            ],
+        },
+        "hand": [
+            {"index": 0, "name": "Bash", "cost": 2, "can_play": False},
+            {"index": 1, "name": "Injury", "cost": 0, "can_play": False},
+        ],
+    }
+    new_state = {
+        "player": {
+            "hp": 79,
+            "max_hp": 80,
+            "gold": 119,
+            "deck_size": 13,
+            "potions": [],
+        },
+        "hand": [
+            {"index": 0, "name": "Bash", "cost": 0, "can_play": True},
+            {"index": 1, "name": "Injury", "cost": 0, "can_play": False},
+        ],
+    }
+
+    lines = [plain(line) for line in play.state_change_lines(old_state, new_state, include_hand=True)]
+
+    assert any("Potions: -Touch of Insanity" in line for line in lines)
+    assert any("Hand changes: Bash: cost 2 -> 0" in line for line in lines)
+
+
 def test_prompt_start_options_lets_player_choose_character_and_ascension():
     play.LANG = "en"
     answers = iter(["2", "3", "7"])

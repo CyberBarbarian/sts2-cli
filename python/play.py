@@ -1567,12 +1567,49 @@ def combat_state_change_lines(old_state, new_state):
     return [f"{c(t('Combat changes:', 'Combat changes:'), 'yellow')} {'; '.join(changes)}"]
 
 
-def state_change_lines(old_state, new_state):
-    return player_state_change_lines(old_state, new_state) + combat_state_change_lines(old_state, new_state)
+def hand_state_change_lines(old_state, new_state):
+    old_hand = (old_state or {}).get("hand")
+    new_hand = (new_state or {}).get("hand")
+    if not isinstance(old_hand, list) or not isinstance(new_hand, list):
+        return []
+
+    new_by_index = {
+        card.get("index"): card
+        for card in new_hand
+        if isinstance(card, dict) and card.get("index") is not None
+    }
+    changes = []
+    for old_card in old_hand:
+        if not isinstance(old_card, dict):
+            continue
+        new_card = new_by_index.get(old_card.get("index"))
+        if not isinstance(new_card, dict):
+            continue
+        name = n(new_card.get("name") or old_card.get("name") or "?")
+        card_changes = []
+        if old_card.get("cost") != new_card.get("cost"):
+            card_changes.append(f"{t('cost')} {old_card.get('cost', '?')} -> {new_card.get('cost', '?')}")
+        if old_card.get("can_play") != new_card.get("can_play"):
+            old_play = t("playable") if old_card.get("can_play") else t("not playable")
+            new_play = t("playable") if new_card.get("can_play") else t("not playable")
+            card_changes.append(f"{old_play} -> {new_play}")
+        if card_changes:
+            changes.append(f"{name}: {', '.join(card_changes)}")
+
+    if not changes:
+        return []
+    return [f"{c(t('Hand changes:', 'Hand changes:'), 'yellow')} {'; '.join(changes)}"]
 
 
-def print_state_changes(old_state, new_state):
-    lines = state_change_lines(old_state, new_state)
+def state_change_lines(old_state, new_state, include_hand=False):
+    lines = player_state_change_lines(old_state, new_state) + combat_state_change_lines(old_state, new_state)
+    if include_hand:
+        lines += hand_state_change_lines(old_state, new_state)
+    return lines
+
+
+def print_state_changes(old_state, new_state, include_hand=False):
+    lines = state_change_lines(old_state, new_state, include_hand=include_hand)
     if lines:
         print()
         for line in lines:
@@ -3273,7 +3310,9 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                             state=state,
                         )
                         args["target_index"] = int(tgt)
+                    old_state = state
                     state = send({"cmd": "action", "action": "use_potion", "args": args})
+                    print_state_changes(old_state, state, include_hand=True)
                 else:
                     explicit_target = parse_card_target(choice)
                     if explicit_target:
