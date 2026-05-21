@@ -64,6 +64,22 @@ def _first_off_path_next_row(game, state):
 
 
 class TestMapStructure:
+    def test_full_map_exports_initial_ancient_start_node(self, game):
+        state = game.start(seed="ms-initial-ancient")
+
+        assert state["decision"] == "event_choice"
+        full_map = game.send({"cmd": "get_map"})
+        nodes = [
+            node
+            for row in full_map["rows"]
+            for node in row
+        ]
+        ancient = next(node for node in nodes if node["type"] == "Ancient")
+
+        assert ancient["row"] == 0
+        assert ancient["current"] is True
+        assert ancient["children"]
+
     def test_new_act_map_only_exposes_ancient_node(self, game, tmp_path):
         state = game.start(seed="ms-forced-ancient")
         state = game.skip_neow(state)
@@ -81,6 +97,17 @@ class TestMapStructure:
         assert state["decision"] == "map_select"
         assert len(state["choices"]) == 1
         assert state["choices"][0]["type"] == "Ancient"
+
+        full_map = game.send({"cmd": "get_map"})
+        nodes = [
+            node
+            for row in full_map["rows"]
+            for node in row
+        ]
+        ancient = next(node for node in nodes if node["type"] == "Ancient")
+        assert ancient["row"] == 0
+        assert ancient["current"] is False
+        assert ancient["children"]
 
     def test_map_select_fields(self, game):
         state = game.start(seed="ms1")

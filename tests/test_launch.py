@@ -34,3 +34,28 @@ def test_zh_new_game_menu_prompts_are_localized(monkeypatch, capsys):
     assert "开始:" in text
     assert prompts == ["\n输入编号 (0-4): ", "\n进阶等级 0-10。直接回车为标准模式 (0): "]
     assert started == [(["--character", "Ironclad", "--ascension", "0"], "zh")]
+
+
+def test_language_prompt_uses_script_default(monkeypatch, capsys):
+    prompts = []
+
+    def prompt_line(prompt=""):
+        prompts.append(prompt)
+        return ""
+
+    monkeypatch.setattr(launch, "_prompt_line", prompt_line)
+
+    selected = launch._select_language("zh")
+
+    text = capsys.readouterr().out
+    assert "选择语言" in text
+    assert selected == "zh"
+    assert prompts == ["选择语言 / Choose language (1-3, 默认 中文): "]
+
+
+def test_language_prompt_can_override_default(monkeypatch):
+    monkeypatch.setattr(launch, "_prompt_line", lambda prompt="": "1")
+
+    selected = launch._select_language("zh")
+
+    assert selected == "en"

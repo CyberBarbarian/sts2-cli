@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Interactive launcher for sts2-cli.
 
-The launcher selects a new game or an existing save, then delegates gameplay to
-python/play.py. The default display language is English; pass --lang zh or
---lang both when that output is explicitly desired.
+The launcher selects a display language, a new game or an existing save, then
+delegates gameplay to python/play.py. The Windows launchers only provide the
+default language; players can still change it at startup.
 """
 from __future__ import annotations
 
@@ -20,6 +20,11 @@ SAVE_DIR = os.path.join(ROOT, "saves")
 LOC_CHARS = os.path.join(ROOT, "localization_zhs", "characters.json")
 
 CLI_CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
+LANGUAGE_CHOICES = [
+    ("en", "English", "英文"),
+    ("zh", "Chinese", "中文"),
+    ("both", "English / Chinese", "双语"),
+]
 
 
 def _tr(lang: str, en: str, zh: str) -> str:
@@ -57,6 +62,52 @@ def _prompt_line(prompt: str) -> str:
     except (EOFError, KeyboardInterrupt):
         print()
         raise SystemExit(0) from None
+
+
+def _normalize_language(lang: str) -> str:
+    valid = {code for code, _en, _zh in LANGUAGE_CHOICES}
+    return lang if lang in valid else "en"
+
+
+def _language_label(code: str, lang: str) -> str:
+    for choice_code, en_label, zh_label in LANGUAGE_CHOICES:
+        if choice_code == code:
+            return zh_label if lang == "zh" else en_label
+    return code
+
+
+def _select_language(default_lang: str) -> str:
+    default_lang = _normalize_language(default_lang)
+    print(f"\n-- {_tr(default_lang, 'Choose Language', '选择语言')} --")
+    for index, (code, en_label, zh_label) in enumerate(LANGUAGE_CHOICES, 1):
+        label = zh_label if default_lang == "zh" else en_label
+        marker = _tr(default_lang, " (default)", " (默认)") if code == default_lang else ""
+        print(f"  {index}  {label}{marker}")
+
+    default_label = _language_label(default_lang, default_lang)
+    prompt = _tr(
+        default_lang,
+        f"Choose language / 选择语言 (1-{len(LANGUAGE_CHOICES)}, default {default_label}): ",
+        f"选择语言 / Choose language (1-{len(LANGUAGE_CHOICES)}, 默认 {default_label}): ",
+    )
+    while True:
+        raw = _prompt_line(prompt).strip()
+        if not raw:
+            return default_lang
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(LANGUAGE_CHOICES):
+                return LANGUAGE_CHOICES[index - 1][0]
+
+        lowered = raw.lower()
+        for code, en_label, zh_label in LANGUAGE_CHOICES:
+            if lowered in {code, en_label.lower(), zh_label.lower()}:
+                return code
+        print(_tr(
+            default_lang,
+            f"  Invalid language; enter 1-{len(LANGUAGE_CHOICES)}, en, zh, or both.",
+            f"  语言无效；请输入 1-{len(LANGUAGE_CHOICES)}、en、zh 或 both。",
+        ))
 
 
 def _pick_int(prompt: str, lo: int, hi: int, default: int | None = None, lang: str = "en") -> int:
@@ -205,6 +256,7 @@ def _menu_load_save(titles: dict[str, str], lang: str) -> None:
 
 
 def _main_interactive(lang: str) -> None:
+    lang = _select_language(lang)
     sys.path.insert(0, os.path.join(ROOT, "python"))
     import play as play_mod  # noqa: PLC0415
 
@@ -220,10 +272,11 @@ def _main_interactive(lang: str) -> None:
 
   1  {_tr(lang, 'New game', '新游戏')}
   2  {_tr(lang, 'Load save', '读取存档')}
+  3  {_tr(lang, 'Language', '语言')}: {_language_label(lang, lang)}
   0  {_tr(lang, 'Exit', '退出')}
 """
         )
-        choice = _prompt_line(_tr(lang, "Choose (0-2): ", "选择 (0-2): ")).lower()
+        choice = _prompt_line(_tr(lang, "Choose (0-3): ", "选择 (0-3): ")).lower()
         if choice in ("0", "q", "quit", "exit", ""):
             print(_tr(lang, "Goodbye.", "再见。"))
             break
@@ -231,8 +284,10 @@ def _main_interactive(lang: str) -> None:
             _menu_new_game(titles, lang)
         elif choice == "2":
             _menu_load_save(titles, lang)
+        elif choice == "3":
+            lang = _select_language(lang)
         else:
-            print(f"  {_tr(lang, 'Invalid input; enter 0, 1, or 2.', '输入无效；请输入 0、1 或 2。')}")
+            print(f"  {_tr(lang, 'Invalid input; enter 0, 1, 2, or 3.', '输入无效；请输入 0、1、2 或 3。')}")
 
 
 def main() -> None:

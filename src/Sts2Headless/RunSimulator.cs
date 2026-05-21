@@ -1208,6 +1208,14 @@ public class RunSimulator
         if (currentCoord.HasValue)
         {
             var currentPoint = map.GetPoint(currentCoord.Value);
+            if (currentPoint == null)
+            {
+                var start = map.StartingMapPoint;
+                return start != null
+                    ? new List<(MapPoint Point, bool RequiresWingedBoots)> { (start, false) }
+                    : new List<(MapPoint Point, bool RequiresWingedBoots)>();
+            }
+
             var choices = (currentPoint?.Children ?? Enumerable.Empty<MapPoint>())
                 .Select(child => (Point: child, RequiresWingedBoots: false))
                 .ToList();
@@ -1235,7 +1243,9 @@ public class RunSimulator
         }
 
         var startPoint = map.StartingMapPoint;
-        return new List<(MapPoint Point, bool RequiresWingedBoots)> { (startPoint, false) };
+        return startPoint != null
+            ? new List<(MapPoint Point, bool RequiresWingedBoots)> { (startPoint, false) }
+            : new List<(MapPoint Point, bool RequiresWingedBoots)>();
     }
 
     private static bool HasWingedBootsCharge(Player player)
@@ -2811,21 +2821,14 @@ public class RunSimulator
             if (currentPoint == null)
             {
                 Log($"GetPoint returned null for coord ({currentCoord.Value.col},{currentCoord.Value.row}), falling back to start");
-                // Current coord is invalid (stale after forced room transition); treat as no position
-                choices = new List<Dictionary<string, object?>>();
-                var sp = map.StartingMapPoint;
-                if (sp?.Children != null)
-                {
-                    foreach (var child in sp.Children)
+                choices = CurrentMapChoicePoints(player)
+                    .Select(choice => new Dictionary<string, object?>
                     {
-                        choices.Add(new Dictionary<string, object?>
-                        {
-                            ["col"] = (int)child.coord.col,
-                            ["row"] = (int)child.coord.row,
-                            ["type"] = child.PointType.ToString(),
-                        });
-                    }
-                }
+                        ["col"] = (int)choice.Point.coord.col,
+                        ["row"] = (int)choice.Point.coord.row,
+                        ["type"] = choice.Point.PointType.ToString(),
+                    })
+                    .ToList();
             }
             else
             {
@@ -9918,39 +9921,54 @@ public class RunSimulator
             return Error("No map available");
 
         var map = _runState.Map;
-        var rows = new List<List<Dictionary<string, object?>>>();
+        var rowGroups = new SortedDictionary<int, List<Dictionary<string, object?>>>();
+        var exportedCoords = new HashSet<(int Col, int Row)>();
         var currentCoord = _runState.CurrentMapCoord;
         var visited = _runState.VisitedMapCoords;
 
+        void AddPoint(MapPoint? point)
+        {
+            if (point == null)
+                return;
+            var key = ((int)point.coord.col, (int)point.coord.row);
+            if (!exportedCoords.Add(key))
+                return;
+
+            var children = point.Children?.Select(ch => new Dictionary<string, object?>
+            {
+                ["col"] = (int)ch.coord.col,
+                ["row"] = (int)ch.coord.row,
+            }).ToList();
+
+            var isVisited = visited?.Any(v => v.col == point.coord.col && v.row == point.coord.row) ?? false;
+            var isCurrent = currentCoord.HasValue &&
+                currentCoord.Value.col == point.coord.col && currentCoord.Value.row == point.coord.row;
+
+            if (!rowGroups.TryGetValue((int)point.coord.row, out var rowNodes))
+            {
+                rowNodes = new List<Dictionary<string, object?>>();
+                rowGroups[(int)point.coord.row] = rowNodes;
+            }
+            rowNodes.Add(new Dictionary<string, object?>
+            {
+                ["col"] = (int)point.coord.col,
+                ["row"] = (int)point.coord.row,
+                ["type"] = point.PointType.ToString(),
+                ["children"] = children,
+                ["visited"] = isVisited,
+                ["current"] = isCurrent,
+            });
+        }
+
+        AddPoint(map.StartingMapPoint);
         for (int row = 0; row < map.GetRowCount(); row++)
         {
-            var rowNodes = new List<Dictionary<string, object?>>();
             foreach (var point in map.GetPointsInRow(row))
-            {
-                if (point == null) continue;
-                var children = point.Children?.Select(ch => new Dictionary<string, object?>
-                {
-                    ["col"] = (int)ch.coord.col,
-                    ["row"] = (int)ch.coord.row,
-                }).ToList();
-
-                var isVisited = visited?.Any(v => v.col == point.coord.col && v.row == point.coord.row) ?? false;
-                var isCurrent = currentCoord.HasValue &&
-                    currentCoord.Value.col == point.coord.col && currentCoord.Value.row == point.coord.row;
-
-                rowNodes.Add(new Dictionary<string, object?>
-                {
-                    ["col"] = (int)point.coord.col,
-                    ["row"] = (int)point.coord.row,
-                    ["type"] = point.PointType.ToString(),
-                    ["children"] = children,
-                    ["visited"] = isVisited,
-                    ["current"] = isCurrent,
-                });
-            }
-            if (rowNodes.Count > 0)
-                rows.Add(rowNodes);
+                AddPoint(point);
         }
+        var rows = rowGroups
+            .Select(group => group.Value.OrderBy(node => Convert.ToInt32(node["col"])).ToList())
+            .ToList();
 
         // Boss node
         var bossNode = new Dictionary<string, object?>

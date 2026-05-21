@@ -1053,35 +1053,17 @@ def card_target_damage_label(card):
 def combat_hand_inline_stat_str(stats, *, card=None, osty=None, enemies=None):
     """Title-row 伤/挡 from RunSimulator ``stats`` (DynamicVars, keys lowercased).
 
-    Plain ``damage`` is used for Strike-like cards; many attacks use ``calculateddamage``
-    or companion hits use ``ostydamage``. Some Necrobinder cards add Osty HP to the card
-    total in text but only expose the base in ``stats``—merge using combat ``osty`` blob.
+    Plain ``damage`` is used for Strike-like cards; many attacks use
+    ``calculateddamage`` or companion hit values exported by the engine.
     """
     if suppress_combat_inline_stats(card):
         return ""
     if not stats:
         stats = {}
     parts = []
-    cid = (card or {}).get("id") or ""
-    osty_ok = bool(osty and osty.get("alive"))
 
     dmg = None
     if card_deals_direct_enemy_damage(card):
-        if cid == "CARD.UNLEASH" and osty_ok:
-            base = stats.get("calculateddamage")
-            if base is None:
-                base = stats.get("damage")
-            if base is not None:
-                hp = osty.get("hp")
-                dmg = int(base) + int(hp) if isinstance(hp, (int, float)) else int(base)
-        elif cid == "CARD.PROTECTOR" and osty_ok:
-            base = stats.get("calculateddamage")
-            if base is None:
-                base = stats.get("damage")
-            if base is not None:
-                mhp = osty.get("max_hp")
-                dmg = int(base) + int(mhp) if isinstance(mhp, (int, float)) else int(base)
-
         target_row = single_visible_target_row(stats, enemies)
         if target_row:
             target_damage = target_row_damage(target_row)
