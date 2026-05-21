@@ -153,6 +153,34 @@ def _build():
     return r.returncode == 0
 
 
+def _headless_build_inputs():
+    """Return source files that should make the headless build stale when newer."""
+    src_dir = os.path.join(ROOT, "src", "Sts2Headless")
+    paths = [PROJECT]
+    for root_dir, _, files in os.walk(src_dir):
+        for filename in files:
+            if filename.endswith((".cs", ".csproj")):
+                paths.append(os.path.join(root_dir, filename))
+    return paths
+
+
+def _headless_build_is_stale(exe, sts2_dll, source_paths=None):
+    """Return true when the built headless DLL is missing or older than inputs."""
+    if not os.path.isfile(exe):
+        return True
+    exe_mtime = os.path.getmtime(exe)
+    if os.path.isfile(sts2_dll) and os.path.getmtime(sts2_dll) > exe_mtime:
+        return True
+    inputs = source_paths if source_paths is not None else _headless_build_inputs()
+    for path in inputs:
+        try:
+            if os.path.getmtime(path) > exe_mtime:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def ensure_setup():
     """Check that everything is ready to run. Auto-setup if needed."""
     issues = []
@@ -191,7 +219,7 @@ def ensure_setup():
     # Check if built
     exe_dir = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug", "net9.0")
     exe = os.path.join(exe_dir, "Sts2Headless.dll")
-    if not os.path.isfile(exe) or os.path.getmtime(sts2_dll) > os.path.getmtime(exe):
+    if _headless_build_is_stale(exe, sts2_dll):
         print("🏗️  Building...")
         if not _build():
             print("❌ Build failed. Try: ./setup.sh")
@@ -445,9 +473,13 @@ def show_native_save(save_path):
         print(f"  {char_name}  HP: {hp}/{max_hp}  {t('Gold','金币')}: {gold}  {t('Energy','能量')}: {energy}")
 
         deck = player.get("deck", [])
+        if isinstance(deck, dict):
+            deck = deck.get("cards", [])
         print(f"\n  {t('Deck','牌组')} ({len(deck)}):")
         card_counts = {}
         for card in deck:
+            if not isinstance(card, dict):
+                continue
             cid = _id_to_name(card.get("id", "?"))
             up = card.get("current_upgrade_level", 0)
             key = f"{cid}{'+'*up if up else ''}"
@@ -473,7 +505,8 @@ def show_native_save(save_path):
         for i, act in enumerate(acts):
             act_id = _id_to_name(act.get("id", "?"))
             rooms_data = act.get("rooms", {})
-            boss = _id_to_name(rooms_data.get("boss_id", ""))
+            boss_id = rooms_data.get("boss_id", "") if i == act_idx else ""
+            boss = _id_to_name(boss_id) if boss_id else "?"
             normals = rooms_data.get("normal_encounters_visited", 0)
             elites = rooms_data.get("elite_encounters_visited", 0)
             events = rooms_data.get("events_visited", 0)
@@ -1174,7 +1207,7 @@ def player_power_display_text(power, include_description=False):
     return f"{label} {power_display_text(power, include_description=include_description)}"
 
 
-def enemy_intent_display_parts(intents):
+def enemy_intent_display_parts(intents, move_name=None):
     """Return text-only monster intent labels; colors are terminal styling only."""
     parts = []
     for it in intents or []:
@@ -1200,7 +1233,8 @@ def enemy_intent_display_parts(intents):
         elif itype == "DebuffStrong":
             parts.append(c(t("Strong Debuff", "\u5f3a\u8d1f\u9762\u6548\u679c"), "yellow"))
         elif itype in ("CardDebuff", "StatusCard"):
-            parts.append(c(t("Add Cards", "\u6dfb\u52a0\u5361\u724c"), "yellow"))
+            label = n(move_name) if move_name else t("Add Cards", "\u6dfb\u52a0\u5361\u724c")
+            parts.append(c(label, "yellow"))
         elif itype == "DeathBlow":
             deathblow_label = t("Deathblow", "\u81f4\u547d\u4e00\u51fb")
             if dmg is not None:
@@ -1220,6 +1254,16 @@ def enemy_intent_display_parts(intents):
         elif itype:
             parts.append(c(itype, "dim"))
     return parts
+
+
+def enemy_intent_display_text(enemy):
+    """Return a text-only monster intent string, using engine move names when helpful."""
+    if not isinstance(enemy, dict):
+        return ""
+    return " ".join(enemy_intent_display_parts(
+        enemy.get("intents") or [],
+        enemy.get("move_name"),
+    ))
 
 
 def orb_display_parts(orbs):
@@ -1381,7 +1425,7 @@ def card_select_combat_context_lines(state):
         hp = enemy.get("hp", "?")
         max_hp = enemy.get("max_hp", "?")
         block = enemy.get("block", 0)
-        intent = ", ".join(enemy_intent_display_parts(enemy.get("intents"))) or t("No intent")
+        intent = enemy_intent_display_text(enemy) or t("No intent")
         powers = []
         for power in enemy.get("powers") or []:
             powers.append(power_display_text(power, include_description=True))
@@ -2157,7 +2201,7 @@ def show_combat(state):
         blk = e.get("block", 0)
 
         # Build text intent string from detailed intents.
-        intent_parts = enemy_intent_display_parts(e.get("intents") or [])
+        intent_parts = enemy_intent_display_parts(e.get("intents") or [], e.get("move_name"))
         intent_str = " ".join(intent_parts) if intent_parts else c("? ???", "dim")
 
         # Enemy powers
@@ -2596,11 +2640,45 @@ def show_shop(state):
             print(f"      {c(p_desc, 'dim')}")
 
     removal_cost = state.get("card_removal_cost")
-    if removal_cost:
+    if removal_cost is not None:
         affordable = c(str(removal_cost), "green") if removal_cost <= gold else c(str(removal_cost), "red")
         print(f"\n  [rm] {t('Remove a card','移除一张牌')} — {affordable}{t('g','金')}")
 
     print(f"\n  [leave] {t('Leave shop','离开商店')}")
+
+def shop_action_shortcuts(state):
+    """Return shop actions that are currently legal in the exported shop state."""
+    valid = {"leave"}
+    for card in state.get("cards", []) or []:
+        if card.get("is_stocked"):
+            idx = str(card.get("index"))
+            valid.add(idx)
+            valid.add(f"c{idx}")
+    for relic in state.get("relics", []) or []:
+        if relic.get("is_stocked"):
+            valid.add(f"r{relic.get('index')}")
+    for potion in state.get("potions", []) or []:
+        if potion.get("is_stocked"):
+            valid.add(f"p{potion.get('index')}")
+    if state.get("card_removal_cost") is not None:
+        valid.add("rm")
+    return valid
+
+
+def shop_prompt(state):
+    """Return a prompt that only advertises currently legal shop shortcuts."""
+    parts = []
+    if any(card.get("is_stocked") for card in state.get("cards", []) or []):
+        parts.append("c0")
+    if any(relic.get("is_stocked") for relic in state.get("relics", []) or []):
+        parts.append("r0")
+    if any(potion.get("is_stocked") for potion in state.get("potions", []) or []):
+        parts.append("p0")
+    if state.get("card_removal_cost") is not None:
+        parts.append("rm")
+    parts.append("leave")
+    return t(f"Buy [{'/'.join(parts)}]", f"购买 [{'/'.join(parts)}]")
+
 
 REST_OPTIONS_ZH = {"HEAL": "休息", "SMITH": "升级", "LIFT": "锻炼", "DIG": "挖掘", "RECALL": "回忆", "TOKE": "吸食"}
 
@@ -2672,10 +2750,19 @@ def choose_treasure_relic(send_fn, state, choice):
 
 def choose_shop_action(send_fn, state, choice):
     old_state = state
+    if choice not in shop_action_shortcuts(state):
+        print(f"  {c(t('That shop action is not available.', 'That shop action is not available.'), 'red')}")
+        return old_state
     if choice == "leave":
         new_state = send_fn({"cmd": "action", "action": "leave_room"})
     elif choice == "rm":
         new_state = send_fn({"cmd": "action", "action": "remove_card"})
+    elif choice.startswith("c"):
+        new_state = send_fn({
+            "cmd": "action",
+            "action": "buy_card",
+            "args": {"card_index": int(choice[1:])},
+        })
     elif choice.startswith("r"):
         new_state = send_fn({
             "cmd": "action",
@@ -2694,6 +2781,9 @@ def choose_shop_action(send_fn, state, choice):
             "action": "buy_card",
             "args": {"card_index": int(choice)},
         })
+    if isinstance(new_state, dict) and new_state.get("type") == "error":
+        print(f"  {c(t('Error:', 'Error:'), 'red')} {new_state.get('message') or new_state.get('error') or '?'}")
+        return old_state
     print_state_changes(old_state, new_state, include_hand=True)
     return new_state
 
@@ -3986,7 +4076,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 if auto:
                     choice = "leave"
                 else:
-                    choice = get_input(t("Buy [index/r0/p0/rm] or (leave)", "购买 [编号/r0/p0/rm] 或 (leave)离开"), state=state)
+                    choice = get_input(shop_prompt(state), shop_action_shortcuts(state), state=state)
 
                 state = choose_shop_action(send, state, choice)
 

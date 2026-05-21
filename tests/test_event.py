@@ -988,6 +988,64 @@ class TestPaelAncient:
         assert "with 0" not in claw["description"]
         assert "Goopy" in claw["description"]
 
+    def test_pael_ancient_cannot_be_left_without_choosing(self, game, tmp_path):
+        state = game.start(
+            character="Regent",
+            seed="manual-regent-a10-serious-20260518-03",
+            ascension=10,
+        )
+        state = game.skip_neow(state)
+
+        save_path = tmp_path / "act_two_map.save"
+        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+        assert save_result["success"] is True
+
+        save_data = json.loads(save_path.read_text())
+        save_data["current_act_index"] = 1
+        save_data["visited_map_coords"] = []
+        save_path.write_text(json.dumps(save_data))
+
+        state = game.send({"cmd": "load_save", "path": str(save_path), "lang": "en"})
+        ancient = next(choice for choice in state["choices"] if choice["type"] == "Ancient")
+        state = game.act("select_map_node", col=ancient["col"], row=ancient["row"])
+        assert state["decision"] == "event_choice"
+        assert state["can_leave"] is False
+
+        result = game.act("leave_room")
+
+        assert result["type"] == "error"
+        assert "Cannot leave this event" in result["message"]
+
+
+class TestPotionCourier:
+    def test_ransack_exposes_potion_reward_when_slots_are_full(self, game):
+        state = game.start(seed="potion-courier-full-slots")
+        state = game.skip_neow(state)
+        game.set_player(potions=["CURE_ALL", "RADIANT_TINCTURE", "FIRE_POTION"])
+        state = game.enter_room("event", event="POTION_COURIER")
+        ransack = next(option for option in state["options"] if option["title"] == "Ransack")
+
+        state = game.act("choose_option", option_index=ransack["index"])
+
+        assert state["decision"] == "combat_reward"
+        reward = state["rewards"][0]
+        assert reward["kind"] == "potion"
+        assert reward["can_claim"] is False
+        assert reward["blocked_reason"] == "potion_slots_full"
+
+        state = game.act("discard_potion", potion_index=0)
+        assert state["decision"] == "combat_reward"
+        reward = state["rewards"][0]
+        assert reward["kind"] == "potion"
+        assert reward["can_claim"] is True
+        reward_id = reward["id"]
+
+        state = game.act("claim_reward", reward_index=0)
+
+        assert state["decision"] == "map_select"
+        potion_ids = [p["id"] for p in state["player"]["potions"]]
+        assert reward_id in potion_ids
+
 
 class TestWoodCarvings:
     def test_snake_enchantment_is_exported_on_deck_card(self, game):

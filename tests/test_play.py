@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import pathlib
 import re
 import sys
@@ -84,6 +86,35 @@ def test_shop_cards_use_shared_type_and_rarity_display(capsys):
     assert "88g" in text
 
 
+def test_shop_shortcuts_omit_remove_after_card_removal_is_spent():
+    state = {
+        "cards": [{"index": 0, "is_stocked": True}],
+        "relics": [{"index": 1, "is_stocked": True}],
+        "potions": [{"index": 2, "is_stocked": True}],
+        "card_removal_cost": None,
+    }
+
+    shortcuts = play.shop_action_shortcuts(state)
+
+    assert "0" in shortcuts
+    assert "c0" in shortcuts
+    assert "r1" in shortcuts
+    assert "p2" in shortcuts
+    assert "leave" in shortcuts
+    assert "rm" not in shortcuts
+
+
+def test_shop_remove_action_is_rejected_when_not_available(capsys):
+    play.LANG = "en"
+    state = {"card_removal_cost": None, "cards": [], "relics": [], "potions": []}
+
+    result = play.choose_shop_action(lambda _cmd: {"type": "error"}, state, "rm")
+    text = plain(capsys.readouterr().out)
+
+    assert result is state
+    assert "not available" in text
+
+
 def test_node_color_uses_distinct_map_type_colors():
     assert play.node_color("Monster") == "red"
     assert play.node_color("Elite") == "magenta"
@@ -92,6 +123,48 @@ def test_node_color_uses_distinct_map_type_colors():
     assert play.node_color("Treasure") == "cyan"
     assert play.node_color("Event") == "blue"
     assert play.node_color("Ancient") == "cyan"
+
+
+def test_headless_build_is_stale_when_source_is_newer(tmp_path):
+    exe = tmp_path / "Sts2Headless.dll"
+    sts2 = tmp_path / "sts2.dll"
+    src = tmp_path / "RunSimulator.cs"
+    exe.write_text("exe")
+    sts2.write_text("dll")
+    src.write_text("source")
+    old = 1_700_000_000
+    new = old + 10
+    os.utime(exe, (old, old))
+    os.utime(sts2, (old, old))
+    os.utime(src, (new, new))
+
+    assert play._headless_build_is_stale(str(exe), str(sts2), [str(src)])
+
+
+def test_native_save_summary_hides_future_act_bosses(tmp_path, capsys):
+    play.LANG = "en"
+    save_path = tmp_path / "current_run.save"
+    save_path.write_text(
+        json.dumps({
+            "seed": "boss-preview",
+            "character": {"id": "CHARACTER.IRONCLAD"},
+            "current_act_index": 0,
+            "ascension": 0,
+            "players": [{"deck": {"cards": []}, "relics": [], "potions": []}],
+            "acts": [
+                {"id": "ACT.OVERGROWTH", "rooms": {"boss_id": "ENCOUNTER.VANTOM_BOSS"}},
+                {"id": "ACT.HIVE", "rooms": {"boss_id": "ENCOUNTER.SECRET_ACT_TWO_BOSS"}},
+                {"id": "ACT.GLORY", "rooms": {"boss_id": "ENCOUNTER.SECRET_ACT_THREE_BOSS"}},
+            ],
+        })
+    )
+
+    play.show_native_save(str(save_path))
+    text = plain(capsys.readouterr().out)
+
+    assert "Vantom Boss" in text
+    assert "Secret Act Two Boss" not in text
+    assert "Secret Act Three Boss" not in text
 
 
 def test_card_cost_label_includes_star_cost():
@@ -432,6 +505,22 @@ def test_enemy_intent_labels_are_text_not_symbols():
     assert all(ord(ch) < 128 for ch in rendered)
 
 
+def test_enemy_move_name_disambiguates_card_debuff_intent():
+    play.LANG = "en"
+
+    rendered = plain(play.enemy_intent_display_text({
+        "move_name": "Thievery",
+        "intents": [
+            {"type": "Attack", "damage": 17},
+            {"type": "CardDebuff"},
+        ],
+    }))
+
+    assert "Thievery" in rendered
+    assert "Attack 17" in rendered
+    assert "Add Cards" not in rendered
+
+
 def test_orb_labels_include_next_evoke_and_position():
     play.LANG = "en"
 
@@ -476,6 +565,21 @@ def test_zh_enemy_intent_labels_are_localized_text():
     assert "\u653b\u51fb 7x2" in rendered
     assert "\u9632\u5fa1" in rendered
     assert "\u8d1f\u9762\u6548\u679c" in rendered
+
+
+def test_zh_enemy_move_name_disambiguates_card_debuff_intent():
+    play.LANG = "zh"
+
+    rendered = plain(play.enemy_intent_display_text({
+        "move_name": "\u5077\u76d7",
+        "intents": [
+            {"type": "Attack", "damage": 17},
+            {"type": "CardDebuff"},
+        ],
+    }))
+
+    assert "\u5077\u76d7" in rendered
+    assert "\u6dfb\u52a0\u5361\u724c" not in rendered
 
 
 def test_card_description_keeps_exported_keyword_lines_without_prefix_duplication():
