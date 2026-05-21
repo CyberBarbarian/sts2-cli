@@ -325,6 +325,8 @@ public class RunSimulator
     private EventModel? _pendingEventResult;
     private Task? _pendingShopPurchaseTask;
     private MerchantCardRemovalEntry? _pendingShopCardRemovalEntry;
+    private Func<RewardsSet, Task>? _previousRewardsSetTestSelector;
+    private bool _eventRewardSelectorInstalled;
 
     // Pending rewards for card selection (populated after combat, before proceeding)
     private List<Reward>? _pendingRewards;
@@ -1605,6 +1607,11 @@ public class RunSimulator
 
         // Check if more rewards pending
         _pendingRewards?.Remove(_pendingCardReward);
+        if (_pendingRewards != null && _pendingRewards.Count == 0)
+        {
+            _pendingRewards = null;
+            _rewardsProcessed = true;
+        }
         _pendingCardReward = null;
         return DetectDecisionPoint();
     }
@@ -1626,6 +1633,11 @@ public class RunSimulator
             Log("Skipping card reward");
             _pendingRewards?.Remove(_pendingCardReward);
             _pendingCardReward.OnSkipped();
+            if (_pendingRewards != null && _pendingRewards.Count == 0)
+            {
+                _pendingRewards = null;
+                _rewardsProcessed = true;
+            }
             _pendingCardReward = null;
         }
         return DetectDecisionPoint();
@@ -1657,6 +1669,11 @@ public class RunSimulator
             reward.OnSelectWrapper().GetAwaiter().GetResult();
             _syncCtx.Pump();
             _pendingRewards.RemoveAt(rewardIndex);
+            if (_pendingRewards.Count == 0)
+            {
+                _pendingRewards = null;
+                _rewardsProcessed = true;
+            }
         }
         catch (Exception ex)
         {
@@ -1682,7 +1699,13 @@ public class RunSimulator
             return Error($"Reward {rewardIndex} ({reward.GetType().Name}) cannot be skipped");
 
         Log($"Skipping combat reward {rewardIndex}: {reward.GetType().Name}");
+        reward.OnSkipped();
         _pendingRewards.RemoveAt(rewardIndex);
+        if (_pendingRewards.Count == 0)
+        {
+            _pendingRewards = null;
+            _rewardsProcessed = true;
+        }
         return DetectDecisionPoint();
     }
 
@@ -2209,6 +2232,7 @@ public class RunSimulator
                         _lastEventOptionCount = options.Count;
                         YieldPatches.ActiveCrystalSphereMinigame = null;
                         YieldPatches.SuppressYield = previousSuppressYield;
+                        InstallEventRewardSelector();
                         var task = Task.Run(() => options[optionIndex].Chosen());
                         _pendingEventOptionTask = task;
                         for (int i = 0; i < 100; i++)
@@ -2245,6 +2269,7 @@ public class RunSimulator
                             if (task.IsFaulted)
                                 Log($"Event choose failed: {task.Exception?.GetBaseException().GetType().FullName}: {task.Exception?.GetBaseException().Message}");
                             _pendingEventOptionTask = null;
+                            RestoreEventRewardSelector();
                         }
                         if (IsVictoryProceedOption(selectedTextKey))
                         {
@@ -2647,6 +2672,23 @@ public class RunSimulator
         if (_pendingCardReward != null)
         {
             return CardRewardState(player, _runState.CurrentRoom as CombatRoom);
+        }
+
+        if (_pendingRewards != null)
+        {
+            if (_pendingRewards.Count == 0)
+            {
+                _pendingRewards = null;
+                _rewardsProcessed = true;
+            }
+            else
+            {
+                var claimableRewards = _pendingRewards
+                    .Select((reward, i) => CombatRewardInfo(reward, i, player))
+                    .ToList();
+                if (claimableRewards.Count > 0)
+                    return CombatRewardState(player, claimableRewards);
+            }
         }
 
         // Check if RunManager reports game over (victory)
@@ -6390,6 +6432,68 @@ public class RunSimulator
         }
     }
 
+    private void InstallEventRewardSelector()
+    {
+        if (_eventRewardSelectorInstalled)
+            return;
+
+        _previousRewardsSetTestSelector = RewardsSet.testSelector;
+        RewardsSet.testSelector = CaptureEventRewardsForCli;
+        _eventRewardSelectorInstalled = true;
+    }
+
+    private void RestoreEventRewardSelector()
+    {
+        if (!_eventRewardSelectorInstalled)
+            return;
+
+        RewardsSet.testSelector = _previousRewardsSetTestSelector;
+        _previousRewardsSetTestSelector = null;
+        _eventRewardSelectorInstalled = false;
+    }
+
+    private Task CaptureEventRewardsForCli(RewardsSet rewardsSet)
+    {
+        var rewards = rewardsSet.Rewards?
+            .Where(reward => reward != null && reward.IsPopulated)
+            .ToList() ?? new List<Reward>();
+        if (rewards.Count == 0)
+            return Task.CompletedTask;
+
+        if (rewards.Any(reward => reward is CardReward))
+        {
+            foreach (var forcedReward in rewards.Where(reward => reward is GoldReward).ToList())
+            {
+                try
+                {
+                    forcedReward.OnSelectWrapper().GetAwaiter().GetResult();
+                    rewards.Remove(forcedReward);
+                }
+                catch (Exception ex)
+                {
+                    Log($"Auto-claim forced event reward failed: {ex.Message}");
+                }
+            }
+        }
+
+        foreach (var reward in rewards)
+        {
+            try { reward.MarkContentAsSeen(); }
+            catch (Exception ex) { Log($"Mark reward seen failed: {ex.Message}"); }
+        }
+
+        if (rewards.Count == 1 && rewards[0] is CardReward cardReward)
+        {
+            _pendingCardReward = cardReward;
+            return Task.CompletedTask;
+        }
+
+        _pendingRewards ??= new List<Reward>();
+        _pendingRewards.AddRange(rewards);
+        _rewardsProcessed = false;
+        return Task.CompletedTask;
+    }
+
     private void WaitForPendingEventOptionTask()
     {
         var task = _pendingEventOptionTask;
@@ -6413,6 +6517,7 @@ public class RunSimulator
         if (task.IsFaulted)
             Log($"Event option task failed: {task.Exception?.GetBaseException().Message}");
         _pendingEventOptionTask = null;
+        RestoreEventRewardSelector();
     }
 
     private void SpinWaitForCombatStable()
@@ -9909,6 +10014,7 @@ public class RunSimulator
 
     private void ResetTransientHeadlessState()
     {
+        RestoreEventRewardSelector();
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
         _pendingEventOptionTask = null;
