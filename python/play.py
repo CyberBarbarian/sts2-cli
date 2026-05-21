@@ -23,7 +23,7 @@ for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPO_ROOT = os.path.dirname(os.path.dirname(ROOT))
+REPO_ROOT = ROOT
 PROJECT = os.path.join(ROOT, "src", "Sts2Headless", "Sts2Headless.csproj")
 LIB_DIR = os.path.join(ROOT, "lib")
 SAVE_DIR = os.path.join(ROOT, "saves")

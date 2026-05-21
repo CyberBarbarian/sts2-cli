@@ -30,7 +30,9 @@ def _load_play_module(monkeypatch):
 
 
 def test_dotnet_probe_decodes_captured_output_as_utf8(monkeypatch):
-    _module, calls = _load_play_module(monkeypatch)
+    module, calls = _load_play_module(monkeypatch)
+
+    assert module.LOCAL_DOTNET_DIR == str(ROOT / ".tools" / "dotnet")
 
     captured_calls = [call for call in calls if call["kwargs"].get("capture_output")]
     assert captured_calls

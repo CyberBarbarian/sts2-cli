@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 STS2_CLI_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = STS2_CLI_ROOT.parents[1]
+REPO_ROOT = STS2_CLI_ROOT
 LOCAL_DOTNET_DIR = REPO_ROOT / ".tools" / "dotnet"
 LOCAL_DOTNET = LOCAL_DOTNET_DIR / ("dotnet.exe" if os.name == "nt" else "dotnet")
 MAC_ARM_DOTNET = Path(os.path.expanduser("~/.dotnet-arm64/dotnet"))

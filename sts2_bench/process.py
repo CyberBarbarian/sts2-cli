@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "src" / "Sts2Headless" / "Sts2Headless.csproj"
 LIB_DIR = ROOT / "lib"
 HEADLESS_DLL = ROOT / "src" / "Sts2Headless" / "bin" / "Debug" / "net9.0" / "Sts2Headless.dll"
-LOCAL_DOTNET_DIR = ROOT.parents[1] / ".tools" / "dotnet"
+LOCAL_DOTNET_DIR = ROOT / ".tools" / "dotnet"
 LOCAL_DOTNET = LOCAL_DOTNET_DIR / ("dotnet.exe" if os.name == "nt" else "dotnet")
 MAC_ARM_DOTNET = Path(os.path.expanduser("~/.dotnet-arm64/dotnet"))
 

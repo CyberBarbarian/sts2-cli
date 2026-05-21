@@ -14,3 +14,4 @@ obj/
 logs/
 saves/*
 artifacts/
+.tools/
