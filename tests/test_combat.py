@@ -91,10 +91,13 @@ class HeadlessSession:
                 if not rewards:
                     state = self.send({"cmd": "action", "action": "proceed"})
                 else:
+                    non_card = next((reward for reward in rewards if reward.get("kind") != "card_reward"), None)
+                    reward = non_card or rewards[0]
+                    action = "claim_reward" if reward.get("kind") != "card_reward" else "skip_reward"
                     state = self.send({
                         "cmd": "action",
-                        "action": "claim_reward",
-                        "args": {"reward_index": rewards[0]["index"]},
+                        "action": action,
+                        "args": {"reward_index": reward["index"]},
                     })
             elif decision == "card_reward":
                 state = self.send({"cmd": "action", "action": "skip_card_reward"})
@@ -216,6 +219,78 @@ class TestCombatStructure:
             self._assert_test_subject_adaptation_names_are_resolved(game)
         finally:
             game.close()
+
+    def test_test_subject_phase_transition_keeps_player_play_phase(self, game):
+        state = game.start(seed="test-subject-player-turn-transition")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            relics=["LANTERN"],
+            deck=[
+                "BLUDGEON",
+                "BLUDGEON",
+                "BLUDGEON",
+                "BLOODLETTING",
+                "BLOODLETTING",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="TEST_SUBJECT_BOSS")
+
+        for _ in range(40):
+            assert state["decision"] == "combat_play"
+            enemy = state["enemies"][0]
+            bludgeon = next(
+                (
+                    card for card in state["hand"]
+                    if card["name"] == "Bludgeon" and card.get("can_play")
+                ),
+                None,
+            )
+            if bludgeon is not None:
+                target_damage = bludgeon["stats"]["damage_by_target"][0]["unblocked_damage"]
+                has_follow_up_card = any(
+                    card.get("target_type") != "AnyEnemy" and card.get("can_play")
+                    for card in state["hand"]
+                )
+                if enemy["hp"] <= target_damage and has_follow_up_card:
+                    round_before = state["round"]
+                    state = game.act(
+                        "play_card",
+                        card_index=bludgeon["index"],
+                        target_index=enemy["index"],
+                    )
+
+                    assert state["decision"] == "combat_play"
+                    assert state["round"] == round_before
+                    assert any(
+                        card.get("target_type") != "AnyEnemy" and card.get("can_play")
+                        for card in state["hand"]
+                    )
+                    return
+
+            playable = [
+                card for card in state["hand"]
+                if card.get("can_play") and card_energy_cost(card) <= state.get("energy", 0)
+            ]
+            if not playable:
+                state = game.act("end_turn")
+                continue
+            playable.sort(key=lambda card: (
+                0 if card["name"] == "Bloodletting" else
+                1 if card["name"] == "Bludgeon" else
+                2,
+                card_energy_cost(card),
+            ))
+            card = playable[0]
+            args = {"card_index": card["index"]}
+            if card.get("target_type") == "AnyEnemy":
+                args["target_index"] = enemy["index"]
+            state = game.act("play_card", **args)
+
+        pytest.fail("Did not reach Test Subject phase transition repro state")
 
     def _assert_test_subject_adaptation_names_are_resolved(self, game):
         state = game.start(seed="test-subject-phase-name")
@@ -794,7 +869,12 @@ class TestCombatEdgeCases:
         assert state["decision"] == "card_reward"
 
         state = game.act("skip_card_reward")
-        state = game.claim_combat_rewards(state)
+        assert state["decision"] == "combat_reward"
+        card_reward = next(
+            reward for reward in state["rewards"]
+            if reward["kind"] == "card_reward"
+        )
+        state = game.act("skip_reward", reward_index=card_reward["index"])
         assert state["decision"] == "map_select"
 
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
@@ -1497,6 +1577,9 @@ class TestCombatEdgeCases:
 
                 if state.get("decision") != "combat_play":
                     state = session.send({"cmd": "action", "action": "proceed"})
+                    continue
+                if not enemies and state.get("inactive_enemies"):
+                    state = session.send({"cmd": "action", "action": "end_turn"})
                     continue
 
                 playable = [

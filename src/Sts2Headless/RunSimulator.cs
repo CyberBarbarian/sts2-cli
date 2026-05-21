@@ -1235,10 +1235,7 @@ public class RunSimulator
         }
 
         var startPoint = map.StartingMapPoint;
-        var startChoices = new List<(MapPoint Point, bool RequiresWingedBoots)> { (startPoint, false) };
-        if (startPoint.Children != null)
-            startChoices.AddRange(startPoint.Children.Select(child => (child, false)));
-        return startChoices;
+        return new List<(MapPoint Point, bool RequiresWingedBoots)> { (startPoint, false) };
     }
 
     private static bool HasWingedBootsCharge(Player player)
@@ -1630,15 +1627,17 @@ public class RunSimulator
         }
         if (_pendingCardReward != null)
         {
-            Log("Skipping card reward");
-            _pendingRewards?.Remove(_pendingCardReward);
-            _pendingCardReward.OnSkipped();
-            if (_pendingRewards != null && _pendingRewards.Count == 0)
+            if (_pendingRewards?.Contains(_pendingCardReward) == true)
             {
-                _pendingRewards = null;
-                _rewardsProcessed = true;
+                Log("Closing opened combat card reward");
+                _pendingCardReward = null;
             }
-            _pendingCardReward = null;
+            else
+            {
+                Log("Skipping direct card reward");
+                _pendingCardReward.OnSkipped();
+                _pendingCardReward = null;
+            }
         }
         return DetectDecisionPoint();
     }
@@ -2723,6 +2722,8 @@ public class RunSimulator
                 && CombatManager.Instance.IsPlayPhase
                 && !CombatHasAliveEnemies())
             {
+                if (CombatShouldStayActiveWithoutAliveEnemies())
+                    return CombatPlayState(player);
                 if (TryResolveCombatWithNoAliveEnemies(player))
                     return DetectPostCombatState(player, combatRoom);
             }
@@ -2857,19 +2858,6 @@ public class RunSimulator
                     ["type"] = startPoint.PointType.ToString(),
                 }
             };
-            // Add all children of start point as well since we can travel to them
-            if (startPoint.Children != null)
-            {
-                foreach (var child in startPoint.Children)
-                {
-                    choices.Add(new Dictionary<string, object?>
-                    {
-                        ["col"] = (int)child.coord.col,
-                        ["row"] = (int)child.coord.row,
-                        ["type"] = child.PointType.ToString(),
-                    });
-                }
-            }
         }
 
         return new Dictionary<string, object?>
@@ -3310,6 +3298,21 @@ public class RunSimulator
         catch
         {
             return true;
+        }
+    }
+
+    private static bool CombatShouldStayActiveWithoutAliveEnemies()
+    {
+        try
+        {
+            return CombatManager.Instance.DebugOnlyGetState()?.Enemies?
+                .Where(enemy => enemy != null)
+                .SelectMany(enemy => enemy.Powers ?? Enumerable.Empty<PowerModel>())
+                .Any(power => power.ShouldStopCombatFromEnding()) == true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -5329,6 +5332,8 @@ public class RunSimulator
             .Where(name => !vars.ContainsKey(name))
             .ToList();
         if (missingNames.Count != 1)
+            return;
+        if (sourceTokenNames.Contains(missingNames[0]))
             return;
 
         var referencedNames = new HashSet<string>(sourceTokenNames, StringComparer.Ordinal);

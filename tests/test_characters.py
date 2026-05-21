@@ -151,7 +151,16 @@ class TestFullRun:
                 opts = [o for o in state["options"] if not o.get("is_locked")]
                 state = game.act("choose_option", option_index=opts[0]["index"]) if opts else game.act("leave_room")
             elif dec == "combat_reward":
-                state = game.claim_combat_rewards(state)
+                rewards = state.get("rewards", [])
+                non_card = next((r for r in rewards if r.get("kind") != "card_reward"), None)
+                if non_card:
+                    state = game.act("claim_reward", reward_index=non_card["index"])
+                else:
+                    card_reward = next((r for r in rewards if r.get("kind") == "card_reward"), None)
+                    if card_reward:
+                        state = game.act("skip_reward", reward_index=card_reward["index"])
+                    else:
+                        state = game.act("proceed")
             elif dec == "card_reward":
                 state = game.act("skip_card_reward")
             elif dec == "bundle_select":

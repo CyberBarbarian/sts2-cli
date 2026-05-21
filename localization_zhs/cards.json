@@ -1005,7 +1005,7 @@
   "SPINNER.title": "旋转工艺",
   "SPIRIT_OF_ASH.description": "每当你打出一张[gold]虚无[/gold]牌时，获得{BlockOnExhaust:diff()}点[gold]格挡[/gold]。",
   "SPIRIT_OF_ASH.title": "灰烬之灵",
-  "SPITE.description": "造成{Damage:diff()}点伤害。\n如果你在本回合失去过生命值，则抽{Cards:diff()}张牌。",
+  "SPITE.description": "造成{Damage:diff()}点伤害。\n如果你在本回合失去过生命值，\n则攻击{Repeat:diff()}次。",
   "SPITE.title": "怨恨",
   "SPLASH.description": "从3张其他角色的{IfUpgraded:show:[gold]升级过的[/gold]}攻击牌中选择1张加入你的[gold]手牌[/gold]。这张牌在本回合免费打出。",
   "SPLASH.title": "飞溅",

@@ -743,6 +743,17 @@ def card_cost_label(card):
     return label
 
 
+def card_choice_line(card, indent="  "):
+    up = c("+", "green") if card.get("upgraded") else ""
+    suffix = format_card_suffix_keywords_for_card(card)
+    type_rarity = card_type_rarity_suffix(card)
+    return (
+        f"{indent}[{card['index']}] "
+        f"{c(n(card['name']), card_name_type_color(card))}{up} "
+        f"({card_cost_label(card)}){type_rarity}{suffix}"
+    )
+
+
 def card_hover_title(tip):
     """Return a hover-card title with the same cost metadata as normal card rows."""
     title = n(tip.get("name") or tip.get("title") or tip.get("id") or tip.get("kind"))
@@ -4063,10 +4074,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                 include_upgrade_description = card_select_should_show_upgrade_description(state)
                 include_upgrade_summary = card_select_should_show_upgrade_summary(state)
                 for cd in cards:
-                    up = c("+", "green") if cd.get("upgraded") else ""
-                    sp = format_card_suffix_keywords_for_card(cd)
-                    type_rarity = card_type_rarity_suffix(cd)
-                    print(f"  [{cd['index']}] {n(cd['name'])}{up} ({card_cost_label(cd)}){type_rarity}{sp}")
+                    print(card_choice_line(cd))
                     print_card_detail_extension(
                         cd,
                         indent="      ",

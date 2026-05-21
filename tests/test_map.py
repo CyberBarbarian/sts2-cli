@@ -1,4 +1,6 @@
 """Tests for map navigation."""
+import json
+
 import pytest
 
 
@@ -10,7 +12,16 @@ def _resolve_to_map(game, state):
         if decision == "combat_play":
             state = game.auto_play_combat(state)
         elif decision == "combat_reward":
-            state = game.claim_combat_rewards(state)
+            rewards = state.get("rewards", [])
+            non_card = next((r for r in rewards if r.get("kind") != "card_reward"), None)
+            if non_card:
+                state = game.act("claim_reward", reward_index=non_card["index"])
+            else:
+                card_reward = next((r for r in rewards if r.get("kind") == "card_reward"), None)
+                if card_reward:
+                    state = game.act("skip_reward", reward_index=card_reward["index"])
+                else:
+                    state = game.act("proceed")
         elif decision == "card_reward":
             state = game.act("skip_card_reward")
         elif decision == "event_choice":
@@ -53,6 +64,24 @@ def _first_off_path_next_row(game, state):
 
 
 class TestMapStructure:
+    def test_new_act_map_only_exposes_ancient_node(self, game, tmp_path):
+        state = game.start(seed="ms-forced-ancient")
+        state = game.skip_neow(state)
+        save_path = tmp_path / "act_two_start.save"
+        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+        assert save_result["success"] is True
+
+        save_data = json.loads(save_path.read_text())
+        save_data["current_act_index"] = 1
+        save_data["visited_map_coords"] = []
+        save_path.write_text(json.dumps(save_data))
+
+        state = game.send({"cmd": "load_save", "path": str(save_path), "lang": "en"})
+
+        assert state["decision"] == "map_select"
+        assert len(state["choices"]) == 1
+        assert state["choices"][0]["type"] == "Ancient"
+
     def test_map_select_fields(self, game):
         state = game.start(seed="ms1")
         state = game.skip_neow(state)

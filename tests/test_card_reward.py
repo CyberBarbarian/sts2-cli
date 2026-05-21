@@ -52,6 +52,23 @@ class TestCardReward:
         for card in state["cards"]:
             assert card["description"]
 
+    def test_skip_opened_combat_card_reward_returns_to_reward_list(self, game):
+        state = game.start(seed="cr-entry-back")
+        game.skip_neow(state)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        state = game.auto_play_combat(state)
+
+        card_reward = next(reward for reward in state["rewards"] if reward["kind"] == "card_reward")
+        state = game.act("claim_reward", reward_index=card_reward["index"])
+        assert state["decision"] == "card_reward"
+
+        state = game.act("skip_card_reward")
+
+        assert state["decision"] == "combat_reward"
+        remaining = [reward for reward in state["rewards"] if reward["kind"] == "card_reward"]
+        assert remaining
+        assert remaining[0]["index"] == card_reward["index"]
+
     def test_card_reward_structure(self, game):
         state = game.start(seed="cr2")
         game.skip_neow(state)

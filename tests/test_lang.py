@@ -1,5 +1,6 @@
 """Tests for language support."""
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _has_cjk(text):
     return any("\u4e00" <= ch <= "\u9fff" for ch in str(text))
+
+
+def _format_tokens(text):
+    return set(re.findall(r"\{([A-Za-z][A-Za-z0-9_]*)(?=[:}])", text or ""))
 
 
 class TestLanguage:
@@ -65,3 +70,10 @@ def test_zhs_relics_include_current_engine_winged_boots_text():
     assert "WINGED_BOOTS.title" in relics
     assert "Winged Boots" not in relics["WINGED_BOOTS.title"]
     assert any("\u4e00" <= ch <= "\u9fff" for ch in relics["WINGED_BOOTS.description"])
+
+
+def test_zhs_spite_uses_same_formatter_tokens_as_engine_english():
+    eng = json.loads((ROOT / "localization_eng" / "cards.json").read_text(encoding="utf-8"))
+    zhs = json.loads((ROOT / "localization_zhs" / "cards.json").read_text(encoding="utf-8"))
+
+    assert _format_tokens(zhs["SPITE.description"]) == _format_tokens(eng["SPITE.description"])

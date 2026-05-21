@@ -189,7 +189,16 @@ class Game:
                 opts = [o for o in state["options"] if not o.get("is_locked")]
                 state = self.act("choose_option", option_index=opts[0]["index"])
             elif dec == "combat_reward":
-                state = self.claim_combat_rewards(state)
+                rewards = state.get("rewards", [])
+                non_card = next((r for r in rewards if r.get("kind") != "card_reward"), None)
+                if non_card:
+                    state = self.act("claim_reward", reward_index=non_card["index"])
+                else:
+                    card_reward = next((r for r in rewards if r.get("kind") == "card_reward"), None)
+                    if card_reward:
+                        state = self.act("skip_reward", reward_index=card_reward["index"])
+                    else:
+                        state = self.act("proceed")
             elif dec == "card_reward":
                 state = self.act("skip_card_reward")
             elif dec == "bundle_select":

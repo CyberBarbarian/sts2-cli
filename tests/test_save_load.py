@@ -11,7 +11,16 @@ def _resolve_to_map(game, state):
         if decision == "combat_play":
             state = game.auto_play_combat(state)
         elif decision == "combat_reward":
-            state = game.claim_combat_rewards(state)
+            rewards = state.get("rewards", [])
+            non_card = next((r for r in rewards if r.get("kind") != "card_reward"), None)
+            if non_card:
+                state = game.act("claim_reward", reward_index=non_card["index"])
+            else:
+                card_reward = next((r for r in rewards if r.get("kind") == "card_reward"), None)
+                if card_reward:
+                    state = game.act("skip_reward", reward_index=card_reward["index"])
+                else:
+                    state = game.act("proceed")
         elif decision == "card_reward":
             state = game.act("skip_card_reward")
         elif decision == "event_choice":

@@ -51,6 +51,21 @@ def test_card_type_rarity_suffix_keeps_distinct_labels():
     assert rendered == " Attack Basic"
 
 
+def test_card_choice_line_colors_card_name_by_type():
+    play.LANG = "en"
+
+    rendered = play.card_choice_line({
+        "index": 0,
+        "name": "Strike",
+        "cost": 1,
+        "type": "Attack",
+        "rarity": "Basic",
+    })
+
+    assert f"{play.COLORS['red']}Strike{play.COLORS['reset']}" in rendered
+    assert plain(rendered) == "  [0] Strike (1) Attack Basic"
+
+
 def test_shop_cards_use_shared_type_and_rarity_display(capsys):
     play.LANG = "en"
 
