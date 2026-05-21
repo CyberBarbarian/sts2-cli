@@ -1173,6 +1173,42 @@ def test_print_card_select_combat_context_shows_live_fight(capsys):
     assert "Hand" in text
 
 
+def test_zh_card_select_combat_context_is_localized():
+    play.LANG = "zh"
+
+    lines = [plain(line) for line in play.card_select_combat_context_lines({
+        "combat": {
+            "round": 1,
+            "energy": 2,
+            "max_energy": 3,
+            "draw_pile_count": 4,
+            "discard_pile_count": 1,
+            "exhaust_pile_count": 0,
+            "enemies": [
+                {
+                    "index": 0,
+                    "name": "缩小甲虫",
+                    "hp": 40,
+                    "max_hp": 40,
+                    "intents": [{"type": "Debuff_Strong"}],
+                }
+            ],
+            "hand": [
+                {"index": 0, "name": "中和", "cost": 0, "stats": {"damage": 3}},
+            ],
+        }
+    })]
+    text = "\n".join(lines)
+
+    assert "战斗上下文" in text
+    assert "敌人 [0]" in text
+    assert "生命 40/40" in text
+    assert "手牌:" in text
+    assert "Combat context" not in text
+    assert "Enemy [0]" not in text
+    assert "Hand:" not in text
+
+
 def test_card_select_combat_context_includes_player_powers():
     play.LANG = "en"
 
@@ -1839,6 +1875,114 @@ def test_show_player_includes_potion_slot_capacity(capsys):
     text = plain(capsys.readouterr().out)
     assert "Potions 2/4" in text
     assert "2 empty" in text
+
+
+def test_zh_potion_slot_summary_is_localized():
+    play.LANG = "zh"
+
+    text = plain(play.potion_slot_summary({
+        "potion_slots": 3,
+        "potion_empty_slots": 2,
+        "potions": [{"name": "火焰药水"}],
+    }))
+
+    assert text == "药水 1/3 (2 空)"
+
+
+def test_zh_show_player_uses_localized_core_labels(capsys):
+    play.LANG = "zh"
+
+    play.show_player({
+        "name": "铁甲战士",
+        "hp": 70,
+        "max_hp": 80,
+        "gold": 99,
+        "deck_size": 10,
+        "relics": [],
+        "potion_slots": 3,
+        "potion_empty_slots": 3,
+        "potions": [],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "生命" in text
+    assert "药水 0/3 (3 空)" in text
+    assert "HP" not in text
+    assert "Potions" not in text
+
+
+def test_zh_card_select_prompt_is_localized():
+    play.LANG = "zh"
+
+    text = plain(play.card_select_input_prompt(1, 1))
+
+    assert "输入卡牌编号" in text
+    assert "选择 1 张牌" in text
+    assert "Card indices" not in text
+
+
+def test_zh_combat_prompt_is_localized():
+    play.LANG = "zh"
+
+    text = plain(play.combat_input_prompt({
+        "player": {"potions": [{"index": 0}]},
+    }))
+
+    assert "出牌 [编号/编号@目标/seq]" in text
+    assert "(e)结束回合" in text
+    assert "(p0) 药水" in text
+    assert "Play card" not in text
+
+
+def test_zh_combat_help_is_localized():
+    play.LANG = "zh"
+
+    text = plain(play.combat_help_text({
+        "player": {"potions": [{"index": 0}]},
+    }))
+
+    assert "输入: 0=打出卡牌" in text
+    assert "p0=使用药水" in text
+    assert "Inputs:" not in text
+    assert "use potion" not in text
+
+
+def test_zh_sequence_stop_message_is_localized():
+    play.LANG = "zh"
+    messages = []
+
+    state = {
+        "decision": "combat_play",
+        "energy": 3,
+        "hand": [{"index": 0, "instance_id": 10, "name": "打击", "can_play": True, "cost": 1}],
+        "enemies": [{"index": 0, "hp": 10}],
+    }
+
+    result = play.execute_card_sequence(state, [2], lambda _cmd: state, output_fn=messages.append)
+
+    assert result is state
+    assert len(messages) == 1
+    assert "连续出牌已停止" in plain(messages[0])
+    assert "Queued play stopped" not in plain(messages[0])
+
+
+def test_zh_state_change_labels_are_localized():
+    play.LANG = "zh"
+    old_state = {
+        "decision": "combat_play",
+        "player": {"hp": 70, "max_hp": 80, "gold": 99, "deck_size": 10, "deck": [], "relics": [], "potions": []},
+        "enemies": [{"index": 0, "name": "小啃兽", "hp": 12, "max_hp": 20}],
+    }
+    new_state = {
+        "decision": "combat_play",
+        "player": {"hp": 70, "max_hp": 80, "gold": 99, "deck_size": 10, "deck": [], "relics": [], "potions": []},
+        "enemies": [{"index": 0, "name": "小啃兽", "hp": 6, "max_hp": 20}],
+    }
+
+    text = plain("\n".join(play.state_change_lines(old_state, new_state)))
+
+    assert "战斗变化:" in text
+    assert "Combat changes:" not in text
 
 
 def test_show_player_marks_targeted_potions(capsys):

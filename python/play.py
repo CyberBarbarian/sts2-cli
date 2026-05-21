@@ -1147,7 +1147,7 @@ def potion_str(p):
         vars_dict = p.get("vars") or {}
         d = resolve_template(d, vars_dict) if vars_dict else d
         idx = p.get("index", "?")
-        target_hint = " -> target enemy" if p.get("target_type") == "AnyEnemy" else ""
+        target_hint = t(" -> target enemy", " -> 目标敌人") if p.get("target_type") == "AnyEnemy" else ""
         return f"[{idx}] {name}{target_hint}" + (f": {c(d, 'dim')}" if d else "")
     return n(p)
 
@@ -1168,8 +1168,8 @@ def potion_slot_summary(player):
         empty_count = int(empty) if empty is not None else max(0, slot_count - len(potions))
     except (TypeError, ValueError):
         empty_count = max(0, slot_count - len(potions))
-    suffix = f" ({empty_count} empty)" if empty_count else ""
-    return f"{t('Potions', 'Potions')} {len(potions)}/{slot_count}{suffix}"
+    suffix = f" ({empty_count} {t('empty', '空')})" if empty_count else ""
+    return f"{t('Potions', '药水')} {len(potions)}/{slot_count}{suffix}"
 
 
 def resolved_description(obj):
@@ -1410,15 +1410,15 @@ def card_select_combat_context_lines(state):
     discard = combat.get("discard_pile_count", "?")
     exhaust = combat.get("exhaust_pile_count", "?")
     lines.append(
-        f"{t('Combat context')}: {t('Round')} {round_no}  "
-        f"{t('Energy')} {energy}/{max_energy}  "
-        f"{t('Draw')} {draw}  {t('Discard')} {discard}  {t('Exhaust')} {exhaust}"
+        f"{t('Combat context', '战斗上下文')}: {t('Round', '回合')} {round_no}  "
+        f"{t('Energy', '能量')} {energy}/{max_energy}  "
+        f"{t('Draw', '抽牌堆')} {draw}  {t('Discard', '弃牌堆')} {discard}  {t('Exhaust', '消耗堆')} {exhaust}"
     )
 
     player_powers = combat.get("player_powers") or state.get("player_powers") or []
     if player_powers:
         power_parts = [player_power_display_text(power, include_description=True) for power in player_powers]
-        lines.append(f"{t('Player powers')}: " + "; ".join(power_parts))
+        lines.append(f"{t('Player powers', '玩家状态')}: " + "; ".join(power_parts))
 
     for enemy in combat.get("enemies") or []:
         idx = enemy.get("index", "?")
@@ -1430,12 +1430,15 @@ def card_select_combat_context_lines(state):
         for power in enemy.get("powers") or []:
             powers.append(power_display_text(power, include_description=True))
         power_text = f"  {', '.join(powers)}" if powers else ""
-        block_text = f"  {t('Block')} {block}" if block else ""
-        lines.append(f"Enemy [{idx}] {n(enemy.get('name', '?'))}: HP {hp}/{max_hp}{block_text}  {intent}{power_text}")
+        block_text = f"  {t('Block', '格挡')} {block}" if block else ""
+        lines.append(
+            f"{t('Enemy', '敌人')} [{idx}] {n(enemy.get('name', '?'))}: "
+            f"{t('HP', '生命')} {hp}/{max_hp}{block_text}  {intent}{power_text}"
+        )
 
     orb_parts = orb_display_parts(combat.get("orbs") or [])
     if orb_parts:
-        lines.append(f"{t('Orbs')}: " + " | ".join(orb_parts))
+        lines.append(f"{t('Orbs', '充能球')}: " + " | ".join(orb_parts))
 
     hand = combat.get("hand") or []
     if hand:
@@ -1446,8 +1449,9 @@ def card_select_combat_context_lines(state):
             stat_text = f" {stat}" if stat else ""
             hand_parts.append(f"[{card.get('index', '?')}] {n(card.get('name', '?'))} ({card_cost_label(card)}){stat_text}")
         if len(hand) > 6:
-            hand_parts.append(f"+{len(hand) - 6} more")
-        lines.append(f"{t('Hand')}: " + "; ".join(hand_parts))
+            extra = len(hand) - 6
+            hand_parts.append(t(f"+{extra} more", f"+{extra} 张"))
+        lines.append(f"{t('Hand', '手牌')}: " + "; ".join(hand_parts))
 
     return lines
 
@@ -1722,21 +1726,21 @@ def player_state_change_lines(old_state, new_state):
     changes = []
     gained_relics = new_relics - old_relics
     if gained_relics:
-        changes.append(f"{t('Relic', 'Relic')}: {', '.join(sorted(gained_relics))}")
+        changes.append(f"{t('Relic', '遗物')}: {', '.join(sorted(gained_relics))}")
 
     from collections import Counter
 
     deck_parts = deck_change_summary_parts(old_cards, new_cards)
     if deck_parts:
         parts = deck_parts
-        changes.append(f"{t('Deck', 'Deck')}: {' '.join(parts)}")
+        changes.append(f"{t('Deck', '牌组')}: {' '.join(parts)}")
     elif new_deck_size != old_deck_size:
-        changes.append(f"{t('Deck', 'Deck')}: {old_deck_size} -> {new_deck_size}")
+        changes.append(f"{t('Deck', '牌组')}: {old_deck_size} -> {new_deck_size}")
     if new_hp != old_hp or new_max_hp != old_max_hp:
-        changes.append(f"{t('HP', 'HP')}: {old_hp}/{old_max_hp} -> {new_hp}/{new_max_hp}")
+        changes.append(f"{t('HP', '生命')}: {old_hp}/{old_max_hp} -> {new_hp}/{new_max_hp}")
     if new_gold != old_gold:
         diff = new_gold - old_gold
-        changes.append(f"{t('Gold', 'Gold')}: {'+' if diff > 0 else ''}{diff}")
+        changes.append(f"{t('Gold', '金币')}: {'+' if diff > 0 else ''}{diff}")
     old_potion_counts = Counter(n(p.get("name", "?")) for p in old_potions)
     new_potion_counts = Counter(n(p.get("name", "?")) for p in new_potions)
     added_potion_counts = new_potion_counts - old_potion_counts
@@ -1747,23 +1751,23 @@ def player_state_change_lines(old_state, new_state):
             parts.append(c(f"-{potion_name}" + (f"x{cnt}" if cnt > 1 else ""), "red"))
         for potion_name, cnt in added_potion_counts.items():
             parts.append(c(f"+{potion_name}" + (f"x{cnt}" if cnt > 1 else ""), "green"))
-        changes.append(f"{t('Potions', 'Potions')}: {' '.join(parts)}")
+        changes.append(f"{t('Potions', '药水')}: {' '.join(parts)}")
 
     lines = []
     card_detail_lines = deck_change_detail_lines(old_cards, new_cards)
     if card_detail_lines:
-        lines.append(c(t("Card details:", "Card details:"), "yellow"))
+        lines.append(c(t("Card details:", "卡牌详情:"), "yellow"))
         lines.extend(f"  {line}" for line in card_detail_lines)
     relic_detail_lines = relic_change_detail_lines(old_relic_list, new_relic_list)
     if relic_detail_lines:
-        lines.append(c(t("Relic details:", "Relic details:"), "yellow"))
+        lines.append(c(t("Relic details:", "遗物详情:"), "yellow"))
         lines.extend(f"  {line}" for line in relic_detail_lines)
     potion_detail_lines = potion_change_detail_lines(old_potions, new_potions)
     if potion_detail_lines:
-        lines.append(c(t("Potion details:", "Potion details:"), "yellow"))
+        lines.append(c(t("Potion details:", "药水详情:"), "yellow"))
         lines.extend(f"  {line}" for line in potion_detail_lines)
     if changes:
-        lines.append(f"{c(t('Changes:', 'Changes:'), 'yellow')} {'; '.join(changes)}")
+        lines.append(f"{c(t('Changes:', '变化:'), 'yellow')} {'; '.join(changes)}")
     return lines
 
 
@@ -1827,7 +1831,7 @@ def combat_state_change_lines(old_state, new_state):
 
     if not changes:
         return []
-    return [f"{c(t('Combat changes:', 'Combat changes:'), 'yellow')} {'; '.join(changes)}"]
+    return [f"{c(t('Combat changes:', '战斗变化:'), 'yellow')} {'; '.join(changes)}"]
 
 
 def hand_state_change_lines(old_state, new_state):
@@ -1861,7 +1865,7 @@ def hand_state_change_lines(old_state, new_state):
 
     if not changes:
         return []
-    return [f"{c(t('Hand changes:', 'Hand changes:'), 'yellow')} {'; '.join(changes)}"]
+    return [f"{c(t('Hand changes:', '手牌变化:'), 'yellow')} {'; '.join(changes)}"]
 
 
 def state_change_lines(old_state, new_state, include_hand=False):
@@ -1898,7 +1902,7 @@ def show_player(p, show_deck=False):
     deck = p.get("deck_size", 0)
     name = n(p.get("name", "?"))
 
-    print(f"  {c(name, 'bold')}  HP {bar(hp, mhp)} {c(f'{hp}/{mhp}', 'red')}"
+    print(f"  {c(name, 'bold')}  {t('HP', '生命')} {bar(hp, mhp)} {c(f'{hp}/{mhp}', 'red')}"
           + (f"  {c(str(blk), 'blue')} {t('blk','挡')}" if blk > 0 else "")
           + f"  {t('Gold','金')} {c(str(gold), 'yellow')}  {t('Deck','牌组')} {deck}")
     for r in p.get("relics", []):
@@ -2048,10 +2052,16 @@ def _card_sequence_plan(initial_state, indices):
         card_index, target_index = _sequence_step_indices(step)
         initial_card = initial_by_index.get(card_index)
         if initial_card is None and exports_instances:
-            return None, f"Queued play stopped: card index {card_index} is not in the current hand."
+            return None, t(
+                f"Queued play stopped: card index {card_index} is not in the current hand.",
+                f"连续出牌已停止: 当前手牌中没有编号 {card_index} 的牌。",
+            )
         initial_target = initial_enemy_by_index.get(target_index) if target_index is not None else None
         if target_index is not None and initial_target is None and exports_enemy_instances:
-            return None, f"Queued play stopped: enemy target {target_index} is not in the current enemy list."
+            return None, t(
+                f"Queued play stopped: enemy target {target_index} is not in the current enemy list.",
+                f"连续出牌已停止: 当前敌人列表中没有目标 {target_index}。",
+            )
         plan.append(
             {
                 "initial_card_index": card_index,
@@ -2095,7 +2105,7 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
 
     for step in plan:
         if current.get("decision") != "combat_play":
-            output_fn("Queued play stopped: manual decision is required.")
+            output_fn(t("Queued play stopped: manual decision is required.", "连续出牌已停止: 需要手动选择。"))
             return current
 
         hand = current.get("hand", [])
@@ -2107,10 +2117,16 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
         has_explicit_target = requested_target_index is not None
         card = _find_sequence_card(hand, step)
         if card is None:
-            output_fn(f"Queued play stopped: card index {card_index} is no longer in hand.")
+            output_fn(t(
+                f"Queued play stopped: card index {card_index} is no longer in hand.",
+                f"连续出牌已停止: 编号 {card_index} 的牌已经不在手牌中。",
+            ))
             return current
         if not card.get("can_play") or card_energy_cost(card) > energy:
-            output_fn(f"Queued play stopped: {n(card.get('name', '?'))} cannot be played now.")
+            output_fn(t(
+                f"Queued play stopped: {n(card.get('name', '?'))} cannot be played now.",
+                f"连续出牌已停止: {n(card.get('name', '?'))} 现在不能打出。",
+            ))
             return current
 
         args = {"card_index": card["index"]}
@@ -2119,16 +2135,25 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
             if has_explicit_target:
                 target = next((enemy for enemy in live_enemies if enemy.get("index") == target_index), None)
                 if target is None:
-                    output_fn(f"Queued play stopped: enemy target {requested_target_index} is not available.")
+                    output_fn(t(
+                        f"Queued play stopped: enemy target {requested_target_index} is not available.",
+                        f"连续出牌已停止: 目标 {requested_target_index} 当前不可用。",
+                    ))
                     return current
                 args["target_index"] = target_index
             elif len(live_enemies) == 1:
                 args["target_index"] = live_enemies[0]["index"]
             else:
-                output_fn(f"Queued play stopped: {n(card.get('name', '?'))} needs a target. Use seq {card_index}@<enemy_index>.")
+                output_fn(t(
+                    f"Queued play stopped: {n(card.get('name', '?'))} needs a target. Use seq {card_index}@<enemy_index>.",
+                    f"连续出牌已停止: {n(card.get('name', '?'))} 需要目标。请使用 seq {card_index}@<敌人编号>。",
+                ))
                 return current
         elif has_explicit_target:
-            output_fn(f"Queued play stopped: {n(card.get('name', '?'))} does not take an enemy target.")
+            output_fn(t(
+                f"Queued play stopped: {n(card.get('name', '?'))} does not take an enemy target.",
+                f"连续出牌已停止: {n(card.get('name', '?'))} 不需要敌人目标。",
+            ))
             return current
 
         next_state = send_fn({"cmd": "action", "action": "play_card", "args": args})
@@ -2136,12 +2161,12 @@ def execute_card_sequence(state, indices, send_fn, output_fn=print):
             output_fn(line)
         current = next_state
         if not current:
-            output_fn("Queued play stopped: manual decision is required.")
+            output_fn(t("Queued play stopped: manual decision is required.", "连续出牌已停止: 需要手动选择。"))
             return current
         if current.get("decision") != "combat_play":
             if current.get("decision") in {"combat_reward", "event_choice", "map_select", "game_over"}:
                 return current
-            output_fn("Queued play stopped: manual decision is required.")
+            output_fn(t("Queued play stopped: manual decision is required.", "连续出牌已停止: 需要手动选择。"))
             return current
     return current
 
@@ -2402,7 +2427,7 @@ def upgrade_description_display_lines(card):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return []
-    return [f"Upgrade preview: {lines[0]}"] + [f"  {line}" for line in lines[1:]]
+    return [f"{t('Upgrade preview:', '升级预览:')} {lines[0]}"] + [f"  {line}" for line in lines[1:]]
 
 
 def print_card_detail_extension(
@@ -2503,22 +2528,22 @@ def card_pick_quantity_hint(mn, mx, can_skip=None):
         can_skip = mn == 0
     if is_unbounded_card_select_max(mx):
         if mn == 0:
-            hint = t("pick any number of cards", "pick any number of cards")
+            hint = t("pick any number of cards", "选择任意数量的牌")
         elif mn == 1:
-            hint = t("pick at least 1 card", "pick at least 1 card")
+            hint = t("pick at least 1 card", "至少选择 1 张牌")
         else:
-            hint = t(f"pick at least {mn} cards", f"pick at least {mn} cards")
+            hint = t(f"pick at least {mn} cards", f"至少选择 {mn} 张牌")
     elif mn == mx:
         if mn == 1:
-            hint = t("pick 1 card", "pick 1 card")
+            hint = t("pick 1 card", "选择 1 张牌")
         else:
-            hint = t(f"pick exactly {mn} cards", f"pick exactly {mn} cards")
+            hint = t(f"pick exactly {mn} cards", f"选择正好 {mn} 张牌")
     elif mn == 0:
-        hint = t(f"pick 0-{mx} cards", f"pick 0-{mx} cards")
+        hint = t(f"pick 0-{mx} cards", f"选择 0-{mx} 张牌")
     else:
-        hint = t(f"pick {mn}-{mx} cards", f"pick {mn}-{mx} cards")
+        hint = t(f"pick {mn}-{mx} cards", f"选择 {mn}-{mx} 张牌")
     if can_skip:
-        return t(f"{hint} (or s to skip)", f"{hint} (or s to skip)")
+        return t(f"{hint} (or s to skip)", f"{hint}（或输入 s 跳过）")
     return hint
 
 
@@ -2529,11 +2554,11 @@ def card_select_input_prompt(min_select, max_select, can_skip=None):
     if can_skip:
         return t(
             f"Card indices, comma - {qhint} or skip (s)",
-            f"Card indices, comma - {qhint} or skip (s)",
+            f"输入卡牌编号，多个编号用逗号分隔 - {qhint}，或输入 s 跳过",
         )
     return t(
         f"Card indices, comma - {qhint}",
-        f"Card indices, comma - {qhint}",
+        f"输入卡牌编号，多个编号用逗号分隔 - {qhint}",
     )
 
 
@@ -3437,34 +3462,40 @@ def combat_reward_error_message(state, error_state):
         shortcut_text = "/".join(shortcuts) if shortcuts else "d<slot>"
         return t(
             f"Potion slots are full; use {shortcut_text} to discard a potion before claiming this reward.",
-            f"Potion slots are full; use {shortcut_text} to discard a potion before claiming this reward.",
+            f"药水栏已满；先输入 {shortcut_text} 丢弃一瓶药水，再领取这个奖励。",
         )
-    return message or t("Action failed.", "Action failed.")
+    return message or t("Action failed.", "操作失败。")
 
 
 def combat_input_prompt(state):
     """Build the combat prompt from the currently exported affordances."""
-    parts = ["Play card [index/index@target/seq]", "(e)nd turn"]
+    parts = [
+        t("Play card [index/index@target/seq]", "出牌 [编号/编号@目标/seq]"),
+        t("(e)nd turn", "(e)结束回合"),
+    ]
     potion_keys = combat_potion_shortcuts(state)
     if len(potion_keys) == 1:
-        parts.append(f"({potion_keys[0]}) potion")
+        parts.append(t(f"({potion_keys[0]}) potion", f"({potion_keys[0]}) 药水"))
     elif potion_keys:
-        parts.append(f"potions {'/'.join(potion_keys)}")
+        parts.append(t(f"potions {'/'.join(potion_keys)}", f"药水 {'/'.join(potion_keys)}"))
     return ", ".join(parts)
 
 
 def combat_help_text(state):
     """Build state-specific combat input help."""
-    text = (
+    text = t(
         "Inputs: 0=play card, 0@1/0>1=target enemy [1], "
         "seq 1 2 4 / play 1 2 4 / 1,2,4=queued play from current hand snapshot, "
-        "seq 1@0 4@2=queued targeted play, e=end turn"
+        "seq 1@0 4@2=queued targeted play, e=end turn",
+        "输入: 0=打出卡牌，0@1/0>1=指定敌人 [1]，"
+        "seq 1 2 4 / play 1 2 4 / 1,2,4=按当前手牌快照连续出牌，"
+        "seq 1@0 4@2=连续指定目标出牌，e=结束回合",
     )
     potion_keys = combat_potion_shortcuts(state)
     if len(potion_keys) == 1:
-        text += f", {potion_keys[0]}=use potion {potion_keys[0][1:]}"
+        text += t(f", {potion_keys[0]}=use potion {potion_keys[0][1:]}", f"，{potion_keys[0]}=使用药水 {potion_keys[0][1:]}")
     elif potion_keys:
-        text += f", {'/'.join(potion_keys)}=use potion by slot"
+        text += t(f", {'/'.join(potion_keys)}=use potion by slot", f"，{'/'.join(potion_keys)}=按槽位使用药水")
     return text
 
 
@@ -3859,7 +3890,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         choice = str(explicit_target["card_index"])
                     target_index = explicit_target.get("target_index") if explicit_target else None
                     if choice not in valid:
-                        print(f"  {t('Invalid. Options:', 'Invalid. Options:')} {', '.join(sorted(valid.keys()))}")
+                        print(f"  {t('Invalid. Options:', '无效。可选项:')} {', '.join(sorted(valid.keys()))}")
                         continue
                     card = valid[choice]
                     args = {"card_index": card["index"]}
@@ -3867,7 +3898,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         if target_index is not None:
                             legal_targets = {e.get("index") for e in enemies}
                             if target_index not in legal_targets:
-                                print(f"  {t('Invalid target. Options:', 'Invalid target. Options:')} {', '.join(str(e.get('index')) for e in enemies)}")
+                                print(f"  {t('Invalid target. Options:', '目标无效。可选项:')} {', '.join(str(e.get('index')) for e in enemies)}")
                                 continue
                             args["target_index"] = target_index
                         elif len(enemies) == 1:
@@ -3875,11 +3906,11 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                         elif auto:
                             args["target_index"] = min(enemies, key=lambda e: e.get("hp", 999))["index"]
                         else:
-                            tgt = get_input("Target enemy [index]",
+                            tgt = get_input(t("Target enemy [index]", "选择敌人 [编号]"),
                                            {str(e["index"]) for e in enemies})
                             args["target_index"] = int(tgt)
                     elif target_index is not None:
-                        print(f"  {t('That card does not target an enemy.', 'That card does not target an enemy.')}")
+                        print(f"  {t('That card does not target an enemy.', '这张牌不以敌人为目标。')}")
                         continue
                     old_state = state
                     state = send({"cmd": "action", "action": "play_card", "args": args})
@@ -3904,9 +3935,15 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
                     else:
                         choice = str(rewards[0]["index"])
                 else:
-                    prompt = "Claim reward index, s<index> to skip, or d<slot> to discard potion"
+                    prompt = t(
+                        "Claim reward index, s<index> to skip, or d<slot> to discard potion",
+                        "领取奖励编号，s<编号> 跳过，或 d<药水槽> 丢弃药水",
+                    )
                     if not discard_shortcuts:
-                        prompt = "Claim reward index, or s<index> to skip an optional reward"
+                        prompt = t(
+                            "Claim reward index, or s<index> to skip an optional reward",
+                            "领取奖励编号，或 s<编号> 跳过可选奖励",
+                        )
                     choice = get_input(
                         prompt,
                         set(valid.keys()),

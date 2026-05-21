@@ -22,6 +22,14 @@ LOC_CHARS = os.path.join(ROOT, "localization_zhs", "characters.json")
 CLI_CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
 
 
+def _tr(lang: str, en: str, zh: str) -> str:
+    if lang == "zh":
+        return zh
+    if lang == "both":
+        return f"{en} / {zh}"
+    return en
+
+
 def _load_character_titles() -> dict[str, str]:
     titles: dict[str, str] = {}
     if not os.path.isfile(LOC_CHARS):
@@ -51,7 +59,7 @@ def _prompt_line(prompt: str) -> str:
         raise SystemExit(0) from None
 
 
-def _pick_int(prompt: str, lo: int, hi: int, default: int | None = None) -> int:
+def _pick_int(prompt: str, lo: int, hi: int, default: int | None = None, lang: str = "en") -> int:
     while True:
         raw = _prompt_line(prompt)
         if not raw and default is not None:
@@ -59,11 +67,11 @@ def _pick_int(prompt: str, lo: int, hi: int, default: int | None = None) -> int:
         try:
             value = int(raw)
         except ValueError:
-            print(f"  Enter an integer from {lo} to {hi}.")
+            print(f"  {_tr(lang, f'Enter an integer from {lo} to {hi}.', f'请输入 {lo} 到 {hi} 之间的整数。')}")
             continue
         if lo <= value <= hi:
             return value
-        print(f"  Enter an integer from {lo} to {hi}.")
+        print(f"  {_tr(lang, f'Enter an integer from {lo} to {hi}.', f'请输入 {lo} 到 {hi} 之间的整数。')}")
 
 
 def _collect_save_entries() -> list[dict]:
@@ -147,47 +155,52 @@ def _run_play(args: list[str], lang: str) -> int:
 
 
 def _menu_new_game(titles: dict[str, str], lang: str) -> None:
-    print("\n-- Select Character --")
+    print(f"\n-- {_tr(lang, 'Select Character', '选择角色')} --")
     for index, cli_name in enumerate(CLI_CHARACTERS):
         print(f"  {index}  {_character_display(titles, cli_name, lang)}  ({cli_name})")
 
-    index = _pick_int("\nEnter number (0-4): ", 0, 4)
+    index = _pick_int(_tr(lang, "\nEnter number (0-4): ", "\n输入编号 (0-4): "), 0, 4, lang=lang)
     character = CLI_CHARACTERS[index]
     ascension = _pick_int(
-        "\nAscension level 0-10. Press Enter for standard mode (0): ",
+        _tr(
+            lang,
+            "\nAscension level 0-10. Press Enter for standard mode (0): ",
+            "\n进阶等级 0-10。直接回车为标准模式 (0): ",
+        ),
         0,
         10,
         default=0,
+        lang=lang,
     )
-    print(f"\nStarting: {_character_display(titles, character, lang)}  |  Ascension {ascension}\n")
+    print(f"\n{_tr(lang, 'Starting', '开始')}: {_character_display(titles, character, lang)}  |  {_tr(lang, 'Ascension', '进阶')} {ascension}\n")
     _run_play(["--character", character, "--ascension", str(ascension)], lang)
 
 
 def _menu_load_save(titles: dict[str, str], lang: str) -> None:
     entries = _collect_save_entries()
     if not entries:
-        print("\n  No .save or .json files found under saves/.\n")
+        print(f"\n  {_tr(lang, 'No .save or .json files found under saves/.', 'saves/ 下没有找到 .save 或 .json 文件。')}\n")
         return
 
-    print("\n-- Load Save --")
-    print("  [continue] = native game .save")
-    print("  [replay]   = .json command replay\n")
+    print(f"\n-- {_tr(lang, 'Load Save', '读取存档')} --")
+    print(f"  [continue] = {_tr(lang, 'native game .save', '原生游戏 .save')}")
+    print(f"  [replay]   = {_tr(lang, '.json command replay', '.json 命令回放')}\n")
     for index, entry in enumerate(entries, 1):
         tag = "continue" if entry["kind"] == "native" else "replay"
         print(f"  {index:2}  [{tag}]  {_format_entry(titles, entry, lang)}")
 
-    print("\n  0  Back")
-    choice = _pick_int("\nEnter number: ", 0, len(entries))
+    print(f"\n  0  {_tr(lang, 'Back', '返回')}")
+    choice = _pick_int(_tr(lang, "\nEnter number: ", "\n输入编号: "), 0, len(entries), lang=lang)
     if choice == 0:
         return
 
     selected = entries[choice - 1]
     rel_path = os.path.relpath(selected["path"], ROOT)
     if selected["kind"] == "native":
-        print(f"\nLoading native save: {rel_path}\n")
+        print(f"\n{_tr(lang, 'Loading native save', '正在读取原生存档')}: {rel_path}\n")
         _run_play(["--continue", rel_path], lang)
     else:
-        print(f"\nLoading replay file: {rel_path}\n")
+        print(f"\n{_tr(lang, 'Loading replay file', '正在读取回放文件')}: {rel_path}\n")
         _run_play(["--load", rel_path], lang)
 
 
@@ -200,26 +213,26 @@ def _main_interactive(lang: str) -> None:
 
     while True:
         print(
-            """
+            f"""
 =============================
       Slay the Spire 2 CLI
 =============================
 
-  1  New game
-  2  Load save
-  0  Exit
+  1  {_tr(lang, 'New game', '新游戏')}
+  2  {_tr(lang, 'Load save', '读取存档')}
+  0  {_tr(lang, 'Exit', '退出')}
 """
         )
-        choice = _prompt_line("Choose (0-2): ").lower()
+        choice = _prompt_line(_tr(lang, "Choose (0-2): ", "选择 (0-2): ")).lower()
         if choice in ("0", "q", "quit", "exit", ""):
-            print("Goodbye.")
+            print(_tr(lang, "Goodbye.", "再见。"))
             break
         if choice == "1":
             _menu_new_game(titles, lang)
         elif choice == "2":
             _menu_load_save(titles, lang)
         else:
-            print("  Invalid input; enter 0, 1, or 2.")
+            print(f"  {_tr(lang, 'Invalid input; enter 0, 1, or 2.', '输入无效；请输入 0、1 或 2。')}")
 
 
 def main() -> None:
