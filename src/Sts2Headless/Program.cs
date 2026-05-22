@@ -159,6 +159,11 @@ class Program
             case "get_map":
                 return sim.GetFullMap();
 
+            case "audit_card_texts":
+                return sim.AuditCardTexts(
+                    cmd.TryGetProperty("lang", out var auditLang) ? auditLang.GetString() ?? "en" : "en"
+                );
+
             case "set_player":
             {
                 var args = new Dictionary<string, JsonElement>();
