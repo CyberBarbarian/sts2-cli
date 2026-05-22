@@ -140,8 +140,11 @@ Two benchmark-local view actions are available at every non-terminal state:
 - `view map and current position` fetches and renders the full map when the
   simulator has map data.
 
-These actions do not advance the game process.  They only change the next
-benchmark prompt/observation by adding the requested information.
+These actions do not advance the game process.  They are information-gathering
+actions: the next benchmark prompt/observation keeps the current decision
+context and appends the requested viewed information.  Once the policy chooses
+a real game action, the game advances and viewed information is cleared by the
+new engine state.
 
 ## RL Environment
 

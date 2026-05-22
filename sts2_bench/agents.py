@@ -61,7 +61,7 @@ def build_llm_prompt(
             json.dumps([action.to_prompt_dict() for action in legal_actions], ensure_ascii=False, separators=(",", ":")),
         ]
     )
-    if include_json and not (state.get("view_deck") or state.get("view_map")):
+    if include_json:
         parts.extend(
             [
                 "",

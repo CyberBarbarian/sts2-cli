@@ -88,27 +88,29 @@ def compact_deck(deck: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def compact_state(state: dict[str, Any]) -> dict[str, Any]:
     """Return a JSON-friendly state for logs and LLM prompts."""
 
+    data = _compact_obj(state)
+    viewed = []
+
     if state.get("view_deck"):
         player = state.get("player") or {}
-        return {
-            "view": "deck",
+        viewed.append("deck")
+        data["viewed_deck"] = {
             "deck_size": player.get("deck_size"),
             "deck": compact_deck(player.get("deck") or []),
         }
 
     if state.get("view_map"):
+        viewed.append("map")
         full_map = state.get("full_map")
         if isinstance(full_map, dict) and full_map.get("type") == "map":
-            return {
-                "view": "map",
-                "map": render_full_map(full_map, state.get("choices", []) or []),
-            }
-        return {
-            "view": "map",
-            "error": _compact_obj(state.get("view_map_error") or "Map view unavailable."),
-        }
+            data["viewed_map"] = render_full_map(full_map, state.get("choices", []) or [])
+        else:
+            data["viewed_map_error"] = _compact_obj(state.get("view_map_error") or "Map view unavailable.")
 
-    return _compact_obj(state)
+    if viewed:
+        data["viewed"] = viewed
+
+    return data
 
 
 def incoming_damage(state: dict[str, Any]) -> int:
@@ -472,6 +474,27 @@ def append_deck_view(lines: list[str], player: dict[str, Any]) -> None:
             lines.append(f"    description: {desc}")
 
 
+def append_viewed_information(lines: list[str], state: dict[str, Any], player: dict[str, Any]) -> None:
+    if not (state.get("view_deck") or state.get("view_map")):
+        return
+
+    lines.append("")
+    lines.append("Viewed information:")
+    if state.get("view_deck"):
+        lines.append("Viewed deck:")
+        append_deck_view(lines, player)
+
+    if state.get("view_map"):
+        lines.append("Viewed map:")
+        full_map = state.get("full_map")
+        if isinstance(full_map, dict) and full_map.get("type") == "map":
+            lines.extend(render_full_map(full_map, state.get("choices", []) or []))
+        elif state.get("view_map_error"):
+            lines.append(f"  Map view unavailable: {state.get('view_map_error')}")
+        else:
+            lines.append("  Map view unavailable.")
+
+
 def player_summary(player: dict[str, Any]) -> str:
     if not player:
         return "unknown player"
@@ -540,19 +563,6 @@ def render_state_text(state: dict[str, Any]) -> str:
     decision = state.get("decision", state.get("type", "?"))
     context = state.get("context") or {}
     player = state.get("player") or {}
-
-    if state.get("view_deck"):
-        lines: list[str] = []
-        append_deck_view(lines, player)
-        return "\n".join(lines)
-
-    if state.get("view_map"):
-        full_map = state.get("full_map")
-        if isinstance(full_map, dict) and full_map.get("type") == "map":
-            return "\n".join(render_full_map(full_map, state.get("choices", []) or []))
-        if state.get("view_map_error"):
-            return f"Map view unavailable: {state.get('view_map_error')}"
-        return "Map view unavailable."
 
     lines = [
         f"Decision: {decision}",
@@ -732,4 +742,5 @@ def render_state_text(state: dict[str, Any]) -> str:
     elif decision == "game_over":
         lines.append(f"Game over: victory={state.get('victory')} act={state.get('act')} floor={state.get('floor')}")
 
+    append_viewed_information(lines, state, player)
     return "\n".join(lines)
