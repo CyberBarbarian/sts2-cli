@@ -11,6 +11,9 @@ obj/
 *.pyc
 .DS_Store
 .obsidian/
+.env
+.env.*
+!.env.example
 logs/
 saves/*
 artifacts/

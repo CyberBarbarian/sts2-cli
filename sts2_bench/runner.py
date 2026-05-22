@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .actions import LegalAction, build_legal_actions
-from .agents import Agent, OpenAICompatAgent, RandomAgent
+from .agents import Agent, OpenAICompatAgent, PromptStyle, RandomAgent
 from .context import compact_state
 from .process import Sts2Process
 
@@ -70,6 +70,7 @@ def run_one(
     process: Sts2Process | None = None,
     logger: JsonlLogger | None = None,
     print_prompts: bool = False,
+    print_model_output: bool = False,
     include_full_map: bool = False,
 ) -> RunResult:
     """Run one game and return summary metrics."""
@@ -121,6 +122,9 @@ def run_one(
             action, meta = agent.choose(state, legal_actions, prompt=prompt)
             if not isinstance(action, LegalAction):
                 raise TypeError("Agent returned a non-LegalAction")
+
+            if print_model_output:
+                _print_model_output(step=step, decision=decision, action=action, meta=meta)
 
             logger and logger.write(
                 {
@@ -181,6 +185,29 @@ def _apply_view_action(proc: Sts2Process, state: dict[str, Any], command: dict[s
     return state
 
 
+def _print_model_output(*, step: int, decision: Any, action: LegalAction, meta: dict[str, Any]) -> None:
+    print(f"\n===== MODEL OUTPUT step={step} decision={decision} =====")
+    raw_response = meta.get("raw_response")
+    if raw_response is not None:
+        print("raw_response:")
+        print(raw_response)
+    parsed = meta.get("parsed")
+    if parsed is not None:
+        print("parsed:")
+        print(json.dumps(parsed, ensure_ascii=False, separators=(",", ":")))
+    if meta.get("fallback"):
+        print("fallback: true")
+    if meta.get("error"):
+        print(f"error: {meta.get('error')}")
+    usage = meta.get("usage")
+    if usage is not None:
+        print("usage:")
+        print(json.dumps(usage, ensure_ascii=False, separators=(",", ":")))
+    print("selected_action:")
+    print(json.dumps(action.to_prompt_dict(), ensure_ascii=False, separators=(",", ":")))
+    print(f"===== END MODEL OUTPUT step={step} =====\n", flush=True)
+
+
 def summarize(results: Iterable[RunResult]) -> dict[str, Any]:
     rows = list(results)
     if not rows:
@@ -199,11 +226,27 @@ def summarize(results: Iterable[RunResult]) -> dict[str, Any]:
     }
 
 
-def agent_from_args(kind: str, *, base_url: str | None, model: str | None, api_key: str) -> Agent:
+def agent_from_args(
+    kind: str,
+    *,
+    base_url: str | None,
+    model: str | None,
+    api_key: str,
+    prompt_style: PromptStyle = "default",
+) -> Agent:
     if kind == "random":
-        return RandomAgent(seed=0)
+        return RandomAgent(seed=0, prompt_style=prompt_style)
     if kind == "llm":
         if not base_url or not model:
-            raise ValueError("--base-url and --model are required for --agent llm")
-        return OpenAICompatAgent(base_url=base_url, model=model, api_key=api_key)
+            raise ValueError("--base-url and --model, or STS2_BENCH_BASE_URL and STS2_BENCH_MODEL, are required for --agent llm")
+        if api_key == "local" and not _is_local_url(base_url):
+            raise ValueError(
+                "Set --api-key, DEEPSEEK_API_KEY, or OPENAI_API_KEY for non-local LLM endpoints"
+            )
+        return OpenAICompatAgent(base_url=base_url, model=model, api_key=api_key, prompt_style=prompt_style)
     raise ValueError(f"Unknown agent kind: {kind}")
+
+
+def _is_local_url(url: str) -> bool:
+    lowered = url.lower()
+    return "localhost" in lowered or "127.0.0.1" in lowered or "0.0.0.0" in lowered

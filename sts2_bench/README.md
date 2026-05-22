@@ -52,6 +52,35 @@ action, and final result.
 The LLM agent expects an OpenAI-compatible chat completions endpoint.  Examples:
 Ollama, LM Studio, vLLM, llama.cpp server.
 
+CLI options can also be loaded from a local `.env` file.  Copy the template and
+fill in secrets locally:
+
+```bash
+cp .env.example .env
+```
+
+Supported `.env` keys:
+
+- `STS2_BENCH_AGENT`
+- `STS2_BENCH_BASE_URL`
+- `STS2_BENCH_MODEL`
+- `STS2_BENCH_PROMPT_STYLE`
+- `DEEPSEEK_API_KEY`
+- `OPENAI_API_KEY`
+- `STS2_BENCH_CHARACTER`
+- `STS2_BENCH_ASCENSION`
+- `STS2_BENCH_LANG`
+- `STS2_BENCH_SEEDS`
+- `STS2_BENCH_COUNT`
+- `STS2_BENCH_MAX_STEPS`
+- `STS2_BENCH_OUT`
+- `STS2_BENCH_PRINT_PROMPTS`
+- `STS2_BENCH_PRINT_MODEL_OUTPUT`
+- `STS2_BENCH_INCLUDE_FULL_MAP`
+
+Precedence is: CLI arguments, shell environment variables, `.env`, then code
+defaults.
+
 Ollama example:
 
 ```bash
@@ -71,6 +100,28 @@ python3 -m sts2_bench.run_benchmark \
   --seeds sts2_bench/seeds_ironclad_a0.json \
   --out results/qwen25_14b_ironclad_a0.jsonl
 ```
+
+DeepSeek smoke test via `.env`:
+
+```bash
+# In .env, set:
+# STS2_BENCH_AGENT=llm
+# STS2_BENCH_BASE_URL=https://api.deepseek.com/v1
+# STS2_BENCH_MODEL=deepseek-v4-flash
+# STS2_BENCH_PROMPT_STYLE=analysis
+# DEEPSEEK_API_KEY=...
+# STS2_BENCH_COUNT=1
+# STS2_BENCH_MAX_STEPS=1
+# STS2_BENCH_PRINT_PROMPTS=true
+# STS2_BENCH_PRINT_MODEL_OUTPUT=true
+python3 -m sts2_bench.run_benchmark
+```
+
+Prompt styles:
+
+- `default` asks for a compact `{"action_id": ..., "reason": ...}` response.
+- `analysis` asks for JSON with situation analysis, calculations, candidate
+  action comparison, and final `action_id`.
 
 The prompt asks the model to return only:
 

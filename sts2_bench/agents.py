@@ -9,10 +9,13 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from .actions import LegalAction
 from .context import compact_state, render_state_text
+
+
+PromptStyle = Literal["default", "analysis"]
 
 
 class Agent(Protocol):
@@ -29,7 +32,13 @@ class Agent(Protocol):
         """Return a legal action and metadata for logging."""
 
 
-def build_llm_prompt(state: dict[str, Any], legal_actions: list[LegalAction], *, include_json: bool = True) -> str:
+def build_llm_prompt(
+    state: dict[str, Any],
+    legal_actions: list[LegalAction],
+    *,
+    include_json: bool = True,
+    prompt_style: PromptStyle = "default",
+) -> str:
     """Build the action-selection prompt used by LLM policies.
 
     ``context.py`` owns only state rendering.  The policy-facing task
@@ -38,18 +47,20 @@ def build_llm_prompt(state: dict[str, Any], legal_actions: list[LegalAction], *,
     state text.
     """
 
-    action_payload = [action.to_prompt_dict() for action in legal_actions]
-    parts = [
-        "You are playing Slay the Spire 2 through a headless benchmark environment.",
-        "Choose exactly one legal action. Return only JSON with this schema:",
-        '{"action_id": <integer>, "reason": "<short reason>"}',
-        "",
-        "Game state:",
-        render_state_text(state),
-        "",
-        "Legal actions:",
-        json.dumps(action_payload, ensure_ascii=False, separators=(",", ":")),
-    ]
+    if prompt_style not in {"default", "analysis"}:
+        raise ValueError(f"Unknown prompt style: {prompt_style}")
+
+    parts = _prompt_header(prompt_style)
+    parts.extend(
+        [
+            "",
+            "Game state:",
+            render_state_text(state),
+            "",
+            "Legal actions:",
+            json.dumps([action.to_prompt_dict() for action in legal_actions], ensure_ascii=False, separators=(",", ":")),
+        ]
+    )
     if include_json and not (state.get("view_deck") or state.get("view_map")):
         parts.extend(
             [
@@ -61,14 +72,40 @@ def build_llm_prompt(state: dict[str, Any], legal_actions: list[LegalAction], *,
     return "\n".join(parts)
 
 
+def _prompt_header(prompt_style: PromptStyle) -> list[str]:
+    if prompt_style == "analysis":
+        return [
+            "You are playing Slay the Spire 2 through a headless benchmark environment.",
+            "Choose exactly one legal action. Use only an action_id from the legal action list.",
+            "Before choosing, write a compact public analysis in JSON. Analyze the current situation, do any needed arithmetic, compare a few plausible legal actions, then choose.",
+            "Return only valid JSON with this schema:",
+            (
+                '{"situation":"<current objective and main risk>",'
+                '"calculations":["<damage/block/energy/path/reward calculation if relevant>"],'
+                '"candidates":[{"action_id":<integer>,"label":"<legal action label>",'
+                '"pros":"<why it helps>","cons":"<main risk or cost>"}],'
+                '"action_id":<integer>,"reason":"<final concise reason>"}'
+            ),
+            "For combat, compute enemy attacks from intents yourself and compare playable damage, block, energy, and lethal lines.",
+            "For map choices, compare path rewards and risks. For rewards, compare deck impact. For view actions, choose them only when the missing information is worth spending a decision step.",
+        ]
+
+    return [
+        "You are playing Slay the Spire 2 through a headless benchmark environment.",
+        "Choose exactly one legal action. Return only JSON with this schema:",
+        '{"action_id": <integer>, "reason": "<short reason>"}',
+    ]
+
+
 class RandomAgent:
     """Simple non-LLM baseline."""
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int | None = None, *, prompt_style: PromptStyle = "default") -> None:
         self.rng = random.Random(seed)
+        self.prompt_style = prompt_style
 
     def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
-        return build_llm_prompt(state, legal_actions)
+        return build_llm_prompt(state, legal_actions, prompt_style=self.prompt_style)
 
     def choose(
         self,
@@ -96,9 +133,15 @@ class OpenAICompatAgent:
     timeout: float = 120.0
     include_json_state: bool = True
     max_retries: int = 2
+    prompt_style: PromptStyle = "default"
 
     def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
-        return build_llm_prompt(state, legal_actions, include_json=self.include_json_state)
+        return build_llm_prompt(
+            state,
+            legal_actions,
+            include_json=self.include_json_state,
+            prompt_style=self.prompt_style,
+        )
 
     def choose(
         self,
