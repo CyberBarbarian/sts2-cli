@@ -64,6 +64,16 @@ def _first_off_path_next_row(game, state):
 
 
 class TestMapStructure:
+    def test_new_runs_use_engine_random_act_list(self, game):
+        first_acts = set()
+        for i in range(4):
+            game.reset()
+            state = game.start(seed=f"random-act-{i}", lang="en")
+            first_acts.add(state.get("context", {}).get("act_name"))
+
+        assert "Underdocks" in first_acts
+        assert "Overgrowth" in first_acts
+
     def test_full_map_exports_initial_ancient_start_node(self, game):
         state = game.start(seed="ms-initial-ancient")
 

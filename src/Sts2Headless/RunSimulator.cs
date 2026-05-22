@@ -314,6 +314,7 @@ public class RunSimulator
 
     private RunState? _runState;
     private static bool _modelDbInitialized;
+    private static bool _locPatchesInstalled;
     private static readonly InlineSynchronizationContext _syncCtx = new();
     private readonly ManualResetEventSlim _turnStarted = new(false);
     private readonly ManualResetEventSlim _combatEnded = new(false);
@@ -351,12 +352,23 @@ public class RunSimulator
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
 
+    private static void SetOutputLanguage(string lang)
+    {
+        var normalized = string.Equals(lang, "zh", StringComparison.OrdinalIgnoreCase) ? "zh" : "en";
+        if (string.Equals(_loc.Lang, normalized, StringComparison.Ordinal))
+            return;
+
+        _loc.Lang = normalized;
+        if (_modelDbInitialized)
+            InitLocManager();
+    }
+
     public Dictionary<string, object?> StartRun(string character, int ascension = 0, string? seed = null, string lang = "en")
     {
         try
         {
             PrepareForRunReplacement();
-            _loc.Lang = lang;
+            SetOutputLanguage(lang);
             EnsureModelDbInitialized();
 
             var player = CreatePlayer(character);
@@ -366,9 +378,15 @@ public class RunSimulator
             var seedStr = seed ?? "headless_" + DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             Log($"Creating RunState with seed={seedStr}");
 
-            // Use CreateForTest which properly handles mutable copies internally
-            _runState = RunState.CreateForTest(
+            var actRng = new MegaCrit.Sts2.Core.Random.Rng((uint)StringHelper.GetDeterministicHashCode(seedStr));
+            var acts = ActModel.GetRandomList(actRng, player.UnlockState, isMultiplayer: false)
+                .Select(act => act.ToMutable())
+                .ToList();
+            _runState = RunState.CreateForNewRun(
                 players: new[] { player },
+                acts: acts,
+                modifiers: Array.Empty<ModifierModel>(),
+                gameMode: GameMode.Standard,
                 ascensionLevel: ascension,
                 seed: seedStr
             );
@@ -418,6 +436,134 @@ public class RunSimulator
 
     private static readonly System.Reflection.BindingFlags NonPublic =
         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+
+    public Dictionary<string, object?> AuditCardTexts(string lang = "en")
+    {
+        try
+        {
+            SetOutputLanguage(lang);
+            EnsureModelDbInitialized();
+            InitLocManager();
+
+            var cards = new List<Dictionary<string, object?>>();
+            var problems = new List<Dictionary<string, object?>>();
+
+            var auditPlayer = CreatePlayer("Ironclad")!;
+            var auditActs = ActModel.GetDefaultList()
+                .Select(act => act.ToMutable())
+                .ToList();
+            var auditState = RunState.CreateForNewRun(
+                players: new[] { auditPlayer },
+                acts: auditActs,
+                modifiers: Array.Empty<ModifierModel>(),
+                gameMode: GameMode.Standard,
+                ascensionLevel: 0,
+                seed: "card_text_audit"
+            );
+
+            foreach (var canonical in ModelDb.AllCards.OrderBy(c => c.Id.Entry, StringComparer.Ordinal))
+            {
+                var card = auditState.CreateCard(canonical, auditPlayer);
+
+                var requestedLang = _loc.Lang;
+                var engineLang = requestedLang;
+                var engineDescription = EngineCardDescriptionInCurrentLanguage(card, includeCombatText: false);
+                if (string.IsNullOrWhiteSpace(engineDescription) && requestedLang == "zh")
+                {
+                    engineDescription = WithTemporaryLocLanguage(
+                        "en",
+                        () => EngineCardDescriptionInCurrentLanguage(card, includeCombatText: false));
+                    if (!string.IsNullOrWhiteSpace(engineDescription))
+                        engineLang = "en";
+                }
+                string? engineError = null;
+                string? engineRaw = null;
+                if (string.IsNullOrWhiteSpace(engineDescription))
+                {
+                    try { engineRaw = card.GetDescriptionForPile(PileType.None, null); }
+                    catch (Exception ex) { engineError = $"{ex.GetType().Name}: {ex.Message}"; }
+                }
+                var exportedDescription = CardDescription(card, includeCombatText: false);
+                var resolvedEngineDescription = !string.IsNullOrWhiteSpace(engineDescription)
+                    ? ResolveEngineCardDescriptionFormatters(engineDescription, card)
+                    : null;
+
+                cards.Add(new Dictionary<string, object?>
+                {
+                    ["id"] = card.Id.Entry,
+                    ["engine_description"] = engineDescription,
+                    ["exported_description"] = exportedDescription,
+                    ["source"] = string.IsNullOrWhiteSpace(engineDescription)
+                        ? canonical.ShouldShowInCardLibrary ? "missing_engine" : "context_required"
+                        : engineLang == requestedLang ? "engine" : $"engine_fallback_{engineLang}",
+                    ["description_language"] = string.IsNullOrWhiteSpace(engineDescription) ? null : engineLang,
+                });
+
+                if (string.IsNullOrWhiteSpace(engineDescription) && !canonical.ShouldShowInCardLibrary)
+                    continue;
+
+                if (string.IsNullOrWhiteSpace(engineDescription))
+                {
+                    problems.Add(new Dictionary<string, object?>
+                    {
+                        ["id"] = card.Id.Entry,
+                        ["status"] = "missing_engine_description",
+                        ["exported_description"] = exportedDescription,
+                        ["engine_error"] = engineError,
+                        ["engine_raw"] = engineRaw,
+                    });
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(exportedDescription))
+                {
+                    problems.Add(new Dictionary<string, object?>
+                    {
+                        ["id"] = card.Id.Entry,
+                        ["status"] = "empty_exported_description",
+                        ["engine_description"] = engineDescription,
+                    });
+                    continue;
+                }
+
+                if (ShouldRejectExportedText(exportedDescription))
+                {
+                    problems.Add(new Dictionary<string, object?>
+                    {
+                        ["id"] = card.Id.Entry,
+                        ["status"] = "text_export_bug",
+                        ["exported_description"] = exportedDescription,
+                    });
+                    continue;
+                }
+
+                if (!string.Equals(exportedDescription, resolvedEngineDescription, StringComparison.Ordinal))
+                {
+                    problems.Add(new Dictionary<string, object?>
+                    {
+                        ["id"] = card.Id.Entry,
+                        ["status"] = "export_differs_from_engine",
+                        ["engine_description"] = resolvedEngineDescription,
+                        ["exported_description"] = exportedDescription,
+                    });
+                }
+            }
+
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "card_text_audit",
+                ["lang"] = _loc.Lang,
+                ["card_count"] = cards.Count,
+                ["problem_count"] = problems.Count,
+                ["problems"] = problems,
+                ["cards"] = cards,
+            };
+        }
+        catch (Exception ex)
+        {
+            return ErrorWithTrace("AuditCardTexts failed", ex);
+        }
+    }
 
     /// <summary>Get the backing List&lt;T&gt; behind an IReadOnlyList property via reflection.</summary>
     private static List<T>? GetBackingList<T>(object obj, string fieldName)
@@ -639,7 +785,7 @@ public class RunSimulator
         try
         {
             PrepareForRunReplacement();
-            _loc.Lang = lang;
+            SetOutputLanguage(lang);
             EnsureModelDbInitialized();
 
             Log("Loading save file...");
@@ -5116,6 +5262,18 @@ public class RunSimulator
 
     private static string? EngineCardDescription(CardModel card, bool includeCombatText)
     {
+        var currentLanguageDescription = EngineCardDescriptionInCurrentLanguage(card, includeCombatText);
+        if (!string.IsNullOrWhiteSpace(currentLanguageDescription))
+            return currentLanguageDescription;
+
+        if (_loc.Lang == "zh")
+            return WithTemporaryLocLanguage("en", () => EngineCardDescriptionInCurrentLanguage(card, includeCombatText));
+
+        return null;
+    }
+
+    private static string? EngineCardDescriptionInCurrentLanguage(CardModel card, bool includeCombatText)
+    {
         try
         {
             if (includeCombatText)
@@ -5139,6 +5297,23 @@ public class RunSimulator
         catch
         {
             return null;
+        }
+    }
+
+    private static T WithTemporaryLocLanguage<T>(string lang, Func<T> action)
+    {
+        var previous = _loc.Lang;
+        if (string.Equals(previous, lang, StringComparison.Ordinal))
+            return action();
+
+        try
+        {
+            SetOutputLanguage(lang);
+            return action();
+        }
+        finally
+        {
+            SetOutputLanguage(previous);
         }
     }
 
@@ -6032,6 +6207,13 @@ public class RunSimulator
                || LooksLikeUnresolvedFormatterToken(cleaned)
             ? null
             : cleaned;
+    }
+
+    private static bool ShouldRejectExportedText(string? text)
+    {
+        return LooksLikeMojibake(text)
+               || LooksLikeUnresolvedLocKey(text)
+               || LooksLikeUnresolvedFormatterToken(text);
     }
 
     private static bool LooksLikeMojibake(string? text)
@@ -8303,6 +8485,7 @@ public class RunSimulator
             }
         }
         Console.Error.WriteLine($"[INFO] ModelDb: {registered} registered, {failed} failed out of {subtypes.Count}");
+        EnsureHeadlessProgressActsDiscovered();
 
         // Initialize net ID serialization cache (needed for combat actions)
         try
@@ -8313,6 +8496,23 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] ModelIdSerializationCache.Init: {ex.Message}");
+        }
+    }
+
+    private static void EnsureHeadlessProgressActsDiscovered()
+    {
+        try
+        {
+            foreach (var act in ActModel.GetDefaultList())
+                SaveManager.Instance.Progress.MarkActAsSeen(act.Id);
+
+            var underdocks = ModelDb.GetByIdOrNull<ActModel>(new ModelId("ACT", "UNDERDOCKS"));
+            if (underdocks != null)
+                SaveManager.Instance.Progress.MarkActAsSeen(underdocks.Id);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to initialize headless discovered acts: {ex.Message}");
         }
     }
 
@@ -9625,6 +9825,9 @@ public class RunSimulator
             catch { }
 
             Console.Error.WriteLine($"[INFO] LocManager initialized with {locFolder} tables");
+            if (_locPatchesInstalled)
+                return;
+            _locPatchesInstalled = true;
 
             // Use Harmony to patch methods that need fallback behavior
             var harmony = new Harmony("sts2headless.locpatch");
