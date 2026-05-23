@@ -99,7 +99,7 @@ def _targeted_card_actions(state: dict[str, Any], card: dict[str, Any]) -> list[
     ]
 
 
-def build_legal_actions(state: dict[str, Any]) -> list[LegalAction]:
+def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = False) -> list[LegalAction]:
     """Build legal actions from the current decision point.
 
     The resulting action ids are stable only for this one state.  Store the
@@ -110,12 +110,10 @@ def build_legal_actions(state: dict[str, Any]) -> list[LegalAction]:
     raw: list[dict[str, Any]] = []
 
     if decision != "game_over":
-        raw.extend(
-            [
-                _view_action("view deck", "deck", "view_deck"),
-                _view_action("view map and current position", "map", "view_map"),
-            ]
-        )
+        if allow_repeat_views or not state.get("view_deck"):
+            raw.append(_view_action("view deck", "deck", "view_deck"))
+        if allow_repeat_views or not state.get("view_map"):
+            raw.append(_view_action("view map and current position", "map", "view_map"))
 
     if decision == "map_select":
         for choice in state.get("choices", []):

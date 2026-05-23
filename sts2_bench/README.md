@@ -19,6 +19,12 @@ and closer to an RL environment.
 
 ## Quick Smoke Test
 
+Install the benchmark Python dependency:
+
+```bash
+python3 -m pip install -r sts2_bench/requirements.txt
+```
+
 Show CLI options without starting the game:
 
 ```bash
@@ -44,16 +50,18 @@ python3 -m sts2_bench.run_benchmark \
   --out results/random_ironclad_a0.jsonl
 ```
 
-The output JSONL contains every compact state, legal action list, selected
-action, and final result.
+The output JSONL detail is controlled by `--log-level`.  Use `metrics` for the
+smallest benchmark traces, `decisions` for lightweight state/action summaries,
+and `full` when debugging exact prompts and model responses.
 
 ## Local LLM Benchmark
 
 The LLM agent expects an OpenAI-compatible chat completions endpoint.  Examples:
 Ollama, LM Studio, vLLM, llama.cpp server.
 
-CLI options can also be loaded from a local `.env` file.  Copy the template and
-fill in secrets locally:
+Non-secret defaults live in `sts2_bench/benchmark.yaml`.  The file is tracked
+by git and documents each setting inline.  Local secrets still come from `.env`;
+copy the template and fill in keys locally:
 
 ```bash
 cp .env.example .env
@@ -61,25 +69,19 @@ cp .env.example .env
 
 Supported `.env` keys:
 
-- `STS2_BENCH_AGENT`
-- `STS2_BENCH_BASE_URL`
-- `STS2_BENCH_MODEL`
-- `STS2_BENCH_PROMPT_STYLE`
 - `DEEPSEEK_API_KEY`
 - `OPENAI_API_KEY`
-- `STS2_BENCH_CHARACTER`
-- `STS2_BENCH_ASCENSION`
-- `STS2_BENCH_LANG`
-- `STS2_BENCH_SEEDS`
-- `STS2_BENCH_COUNT`
-- `STS2_BENCH_MAX_STEPS`
-- `STS2_BENCH_OUT`
-- `STS2_BENCH_PRINT_PROMPTS`
-- `STS2_BENCH_PRINT_MODEL_OUTPUT`
-- `STS2_BENCH_INCLUDE_FULL_MAP`
 
-Precedence is: CLI arguments, shell environment variables, `.env`, then code
-defaults.
+Supported `benchmark.yaml` keys are `agent`, `base_url`, `model`,
+`prompt_style`, `include_json_state`, `character`, `ascension`, `lang`,
+`seeds`, `count`, `max_steps`, `out`, `log_level`, `print_prompts`,
+`print_model_output`, `include_full_map`, and `allow_repeat_views`.  The file is
+loaded with OmegaConf; the current runner reads these settings from top-level
+scalar keys.
+
+Precedence is: CLI arguments, shell environment variables, `.env`,
+`sts2_bench/benchmark.yaml`, then code defaults.  Shell overrides can still use
+the old `STS2_BENCH_*` names for one-off runs.
 
 Ollama example:
 
@@ -101,19 +103,11 @@ python3 -m sts2_bench.run_benchmark \
   --out results/qwen25_14b_ironclad_a0.jsonl
 ```
 
-DeepSeek smoke test via `.env`:
+DeepSeek smoke test via `.env` and `benchmark.yaml`:
 
 ```bash
-# In .env, set:
-# STS2_BENCH_AGENT=llm
-# STS2_BENCH_BASE_URL=https://api.deepseek.com/v1
-# STS2_BENCH_MODEL=deepseek-v4-flash
-# STS2_BENCH_PROMPT_STYLE=analysis
-# DEEPSEEK_API_KEY=...
-# STS2_BENCH_COUNT=1
-# STS2_BENCH_MAX_STEPS=1
-# STS2_BENCH_PRINT_PROMPTS=true
-# STS2_BENCH_PRINT_MODEL_OUTPUT=true
+# In .env, set DEEPSEEK_API_KEY=...
+# In sts2_bench/benchmark.yaml, set agent/model/count/max_steps/print_*.
 python3 -m sts2_bench.run_benchmark
 ```
 
@@ -122,6 +116,37 @@ Prompt styles:
 - `default` asks for a compact `{"action_id": ..., "reason": ...}` response.
 - `analysis` asks for JSON with situation analysis, calculations, candidate
   action comparison, and final `action_id`.
+
+Set `include_json_state: true` in `sts2_bench/benchmark.yaml` to include the
+compact state JSON in the model prompt.  The benchmark-oriented default is
+`false` because the human-readable state already carries the current decision
+context and the JSON can substantially increase prompt length.
+
+JSONL logging uses `log_level`:
+
+- `metrics` records only start/action summaries/result.
+- `decisions` records lightweight state/action summaries without prompts or raw
+  model responses.
+- `full` records compact state, full legal actions, prompts, and raw model
+  responses.
+
+For a floor benchmark, keep `max_steps` high enough that it acts as a safety
+cap rather than the main stopping condition:
+
+```bash
+python3 -m sts2_bench.run_benchmark \
+  --count 10 \
+  --max-steps 10000 \
+  --no-print-prompts \
+  --no-print-model-output \
+  --log-level metrics \
+  --out results/deepseek_floor_benchmark.jsonl
+```
+
+The summary reports `max_floor`, `median_floor`, `avg_floor`, truncation/error
+rates, game-action counts, view-action counts, repeated-view counts, and model
+fallback counts.  Treat floors from truncated runs as safety-cap results rather
+than natural death/victory outcomes.
 
 The prompt asks the model to return only:
 
@@ -144,7 +169,9 @@ These actions do not advance the game process.  They are information-gathering
 actions: the next benchmark prompt/observation keeps the current decision
 context and appends the requested viewed information.  Once the policy chooses
 a real game action, the game advances and viewed information is cleared by the
-new engine state.
+new engine state.  By default, each view action is exposed at most once per
+decision point; set `allow_repeat_views: true` to allow repeated viewing at
+the same decision.
 
 ## RL Environment
 

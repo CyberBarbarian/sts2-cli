@@ -24,12 +24,14 @@ class Sts2Env:
         ascension: int = 0,
         lang: str = "en",
         max_actions: int = 512,
+        allow_repeat_views: bool = False,
         process: Sts2Process | None = None,
     ) -> None:
         self.character = character
         self.ascension = ascension
         self.lang = lang
         self.max_actions = max_actions
+        self.allow_repeat_views = allow_repeat_views
         self.process = process or Sts2Process()
         self.state: dict[str, Any] | None = None
         self.legal_actions: list[LegalAction] = []
@@ -45,7 +47,7 @@ class Sts2Env:
             seed=seed,
             lang=self.lang,
         )
-        self.legal_actions = build_legal_actions(self.state)
+        self.legal_actions = build_legal_actions(self.state, allow_repeat_views=self.allow_repeat_views)
         return self.observation(), self.info()
 
     def step(self, action_index: int) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
@@ -59,13 +61,13 @@ class Sts2Env:
         action = self.legal_actions[action_index]
         if action.command.get("cmd") == "bench_view":
             self.state = self._apply_view_action(action.command)
-            self.legal_actions = build_legal_actions(self.state)
+            self.legal_actions = build_legal_actions(self.state, allow_repeat_views=self.allow_repeat_views)
             return self.observation(), 0.0, False, False, self.info()
 
         self.state = self.process.send(action.command)
         terminated = self.state.get("decision") == "game_over"
         reward = shaped_reward(old_state, self.state, invalid=False)
-        self.legal_actions = build_legal_actions(self.state)
+        self.legal_actions = build_legal_actions(self.state, allow_repeat_views=self.allow_repeat_views)
         return self.observation(), reward, terminated, False, self.info()
 
     def _apply_view_action(self, command: dict[str, Any]) -> dict[str, Any]:

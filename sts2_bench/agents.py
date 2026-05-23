@@ -87,7 +87,7 @@ def _prompt_header(prompt_style: PromptStyle) -> list[str]:
                 '"action_id":<integer>,"reason":"<final concise reason>"}'
             ),
             "For combat, compute enemy attacks from intents yourself and compare playable damage, block, energy, and lethal lines.",
-            "For map choices, compare path rewards and risks. For rewards, compare deck impact. For view actions, choose them only when the missing information is worth spending a decision step.",
+            "For map choices, compare path rewards and risks. For rewards, compare deck impact. View actions are costly benchmark actions; choose view deck/map only when the missing information is worth spending a decision step.",
         ]
 
     return [
@@ -100,12 +100,24 @@ def _prompt_header(prompt_style: PromptStyle) -> list[str]:
 class RandomAgent:
     """Simple non-LLM baseline."""
 
-    def __init__(self, seed: int | None = None, *, prompt_style: PromptStyle = "default") -> None:
+    def __init__(
+        self,
+        seed: int | None = None,
+        *,
+        include_json_state: bool = False,
+        prompt_style: PromptStyle = "default",
+    ) -> None:
         self.rng = random.Random(seed)
+        self.include_json_state = include_json_state
         self.prompt_style = prompt_style
 
     def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
-        return build_llm_prompt(state, legal_actions, prompt_style=self.prompt_style)
+        return build_llm_prompt(
+            state,
+            legal_actions,
+            include_json=self.include_json_state,
+            prompt_style=self.prompt_style,
+        )
 
     def choose(
         self,
@@ -131,7 +143,7 @@ class OpenAICompatAgent:
     api_key: str = "local"
     temperature: float = 0.0
     timeout: float = 120.0
-    include_json_state: bool = True
+    include_json_state: bool = False
     max_retries: int = 2
     prompt_style: PromptStyle = "default"
 
@@ -196,13 +208,15 @@ class OpenAICompatAgent:
                 )
 
         # Deterministic fallback keeps long benchmark batches moving while
-        # still recording the invalid model behavior.
-        fallback = legal_actions[0]
+        # still recording the invalid model behavior.  Prefer a real game
+        # action so parse failures do not degenerate into repeated view actions.
+        fallback = first_non_view_action(legal_actions)
         return fallback, {
             "agent": "openai_compat",
             "model": self.model,
             "fallback": True,
             "error": last_error,
+            "fallback_action_id": fallback.action_id,
             "prompt_chars": len(prompt),
         }
 
@@ -251,3 +265,10 @@ def parse_json_object(text: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"Expected JSON object, got {type(value).__name__}")
     return value
+
+
+def first_non_view_action(legal_actions: list[LegalAction]) -> LegalAction:
+    return next(
+        (action for action in legal_actions if action.command.get("cmd") != "bench_view"),
+        legal_actions[0],
+    )

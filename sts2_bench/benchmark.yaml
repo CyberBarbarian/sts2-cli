@@ -1,0 +1,54 @@
+# sts2_bench 默认运行配置。
+# 这个文件会被 git 追踪，用来固定 benchmark 的非敏感实验参数。
+# API key 不要写在这里；请写到仓库根目录的 .env。
+
+# 选择使用的 agent。random 表示随机策略；llm 表示调用 OpenAI-compatible API。
+agent: llm
+
+# OpenAI-compatible API 的基础地址。DeepSeek 可以使用 https://api.deepseek.com 或 https://api.deepseek.com/v1。
+base_url: https://api.deepseek.com
+
+# 调用的模型名称。需要和对应 API provider 支持的模型名一致。
+model: deepseek-chat
+
+# Prompt 模板风格。default 输出简短 JSON；analysis 要求模型给出局势分析、计算、候选动作比较后再选择 action。
+prompt_style: analysis
+
+# 是否在 prompt 中附加 Compact state JSON。false 可以减少 token 和重复信息；true 适合调试结构化 state。
+include_json_state: false
+
+# 选择角色。可选 Ironclad、Silent、Defect、Regent、Necrobinder。
+character: Ironclad
+
+# 进阶等级。0 表示无进阶，适合初始 benchmark。
+ascension: 0
+
+# 状态文本语言。en 使用英文；zh 使用中文。
+lang: en
+
+# 固定 seed 文件路径。空字符串表示自动生成 bench_0000、bench_0001 等 seed。
+seeds: ""
+
+# 本次运行的局数。
+count: 1
+
+# 每局最多允许的决策步数。这是安全上限；做爬塔层数 benchmark 时应设置得足够大。
+max_steps: 100
+
+# JSONL 输出路径。空字符串表示不写 trace 文件，只在终端打印结果。
+out: results/deepseek_chat_ironclad_a0.jsonl
+
+# JSONL 记录详细程度。metrics 最小；decisions 记录轻量决策摘要；full 记录完整 state、prompt、raw response。
+log_level: decisions
+
+# 是否在终端打印每一步发给模型的 prompt。调试时可以 true，正式 benchmark 建议 false。
+print_prompts: false
+
+# 是否在终端打印模型原始输出、解析结果和最终选择的 action。
+print_model_output: false
+
+# 是否在 map_select 决策时自动附加完整地图。false 表示让模型主动选择 view map。
+include_full_map: true
+
+# 是否允许同一个 decision 内重复选择 view deck / view map。false 可以避免无意义重复查看。
+allow_repeat_views: false

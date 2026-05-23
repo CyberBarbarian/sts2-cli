@@ -12,6 +12,27 @@ from .runner import JsonlLogger, agent_from_args, run_one, summarize
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL_ENV = ROOT / ".env"
+TRACKED_CONFIG = ROOT / "sts2_bench" / "benchmark.yaml"
+CONFIG_ENV_KEYS = {
+    "agent": "STS2_BENCH_AGENT",
+    "base_url": "STS2_BENCH_BASE_URL",
+    "model": "STS2_BENCH_MODEL",
+    "prompt_style": "STS2_BENCH_PROMPT_STYLE",
+    "include_json_state": "STS2_BENCH_INCLUDE_JSON_STATE",
+    "character": "STS2_BENCH_CHARACTER",
+    "ascension": "STS2_BENCH_ASCENSION",
+    "lang": "STS2_BENCH_LANG",
+    "seeds": "STS2_BENCH_SEEDS",
+    "count": "STS2_BENCH_COUNT",
+    "max_steps": "STS2_BENCH_MAX_STEPS",
+    "out": "STS2_BENCH_OUT",
+    "log_level": "STS2_BENCH_LOG_LEVEL",
+    "print_prompts": "STS2_BENCH_PRINT_PROMPTS",
+    "print_model_output": "STS2_BENCH_PRINT_MODEL_OUTPUT",
+    "include_full_map": "STS2_BENCH_INCLUDE_FULL_MAP",
+    "allow_repeat_views": "STS2_BENCH_ALLOW_REPEAT_VIEWS",
+}
 
 
 def load_seeds(path: str | None, count: int) -> list[str]:
@@ -31,11 +52,11 @@ def load_seeds(path: str | None, count: int) -> list[str]:
     raise ValueError("Seed file must be a JSON list of strings or objects with a seed field")
 
 
-def load_dotenv(path: Path = ROOT / ".env") -> None:
-    """Load a simple .env file without adding a runtime dependency.
+def load_env_file(path: Path) -> None:
+    """Load a simple env file without adding a runtime dependency.
 
-    Existing shell environment variables win over .env values. CLI arguments
-    then win over both because argparse uses these values only as defaults.
+    Existing environment variables win over file values. CLI arguments then win
+    over both because argparse uses these values only as defaults.
     """
 
     if not path.is_file():
@@ -64,6 +85,65 @@ def load_dotenv(path: Path = ROOT / ".env") -> None:
         os.environ.setdefault(key, value)
 
 
+def load_dotenv(path: Path = LOCAL_ENV) -> None:
+    """Load local secrets from .env.
+
+    Kept as a small compatibility wrapper for scripts that imported the old
+    helper directly.
+    """
+
+    load_env_file(path)
+
+
+def load_benchmark_config(path: Path = TRACKED_CONFIG) -> None:
+    """Load tracked benchmark defaults from YAML.
+
+    Values are mirrored into the existing STS2_BENCH_* environment names so
+    CLI defaults and shell overrides stay backward compatible.
+    """
+
+    if not path.is_file():
+        return
+
+    try:
+        from omegaconf import OmegaConf
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "OmegaConf is required to read sts2_bench/benchmark.yaml. "
+            "Install it with `python3 -m pip install omegaconf`."
+        ) from exc
+
+    data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    if data is None:
+        return
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a YAML mapping at the top level")
+
+    for key, env_key in CONFIG_ENV_KEYS.items():
+        if key not in data or data[key] is None:
+            continue
+
+        value = data[key]
+        if isinstance(value, bool):
+            text = "true" if value else "false"
+        elif isinstance(value, (str, int, float)):
+            text = str(value)
+        else:
+            raise ValueError(f"{path}:{key} must be a scalar value, got {type(value).__name__}")
+        os.environ.setdefault(env_key, text)
+
+
+def load_benchmark_env() -> None:
+    """Load local secrets first, then tracked benchmark defaults.
+
+    Precedence is: CLI arguments, shell environment variables, .env, tracked
+    benchmark config, code defaults.
+    """
+
+    load_env_file(LOCAL_ENV)
+    load_benchmark_config(TRACKED_CONFIG)
+
+
 def env_str(name: str, default: str | None = None, *, fallbacks: tuple[str, ...] = ()) -> str | None:
     for key in (name, *fallbacks):
         value = os.environ.get(key)
@@ -90,7 +170,7 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_dotenv()
+    load_benchmark_env()
 
     parser = argparse.ArgumentParser(description="Run STS2 headless benchmark policies.")
     parser.add_argument("--agent", choices=["random", "llm"], default=env_str("STS2_BENCH_AGENT", "random"))
@@ -111,6 +191,12 @@ def main(argv: list[str] | None = None) -> int:
         help="LLM prompt style. 'analysis' asks for structured situation analysis and calculations.",
     )
     parser.add_argument(
+        "--include-json-state",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("STS2_BENCH_INCLUDE_JSON_STATE", False),
+        help="Include compact state JSON in LLM prompts",
+    )
+    parser.add_argument(
         "--character",
         default=env_str("STS2_BENCH_CHARACTER", "Ironclad"),
         choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
@@ -119,8 +205,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lang", default=env_str("STS2_BENCH_LANG", "en"), choices=["en", "zh"])
     parser.add_argument("--seeds", default=env_str("STS2_BENCH_SEEDS"), help="JSON seed file")
     parser.add_argument("--count", type=int, default=env_int("STS2_BENCH_COUNT", 1))
-    parser.add_argument("--max-steps", type=int, default=env_int("STS2_BENCH_MAX_STEPS", 2000))
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=env_int("STS2_BENCH_MAX_STEPS", 2000),
+        help="Safety cap on decision steps per run; set high for floor benchmark",
+    )
     parser.add_argument("--out", default=env_str("STS2_BENCH_OUT"), help="JSONL trace output path")
+    parser.add_argument(
+        "--log-level",
+        choices=["metrics", "decisions", "full"],
+        default=env_str("STS2_BENCH_LOG_LEVEL", "decisions"),
+        help="JSONL detail level. metrics is smallest; full includes full state, prompts, and raw responses.",
+    )
     parser.add_argument(
         "--print-prompts",
         action=argparse.BooleanOptionalAction,
@@ -139,6 +236,12 @@ def main(argv: list[str] | None = None) -> int:
         default=env_bool("STS2_BENCH_INCLUDE_FULL_MAP", False),
         help="Always fetch and render the full map at map_select decisions",
     )
+    parser.add_argument(
+        "--allow-repeat-views",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("STS2_BENCH_ALLOW_REPEAT_VIEWS", False),
+        help="Allow view deck/map actions again after that information has already been viewed in the current decision",
+    )
     args = parser.parse_args(argv)
 
     agent = agent_from_args(
@@ -146,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         base_url=args.base_url,
         model=args.model,
         api_key=args.api_key,
+        include_json_state=args.include_json_state,
         prompt_style=args.prompt_style,
     )
     seeds = load_seeds(args.seeds, args.count)
@@ -164,6 +268,8 @@ def main(argv: list[str] | None = None) -> int:
                 print_prompts=args.print_prompts,
                 print_model_output=args.print_model_output,
                 include_full_map=args.include_full_map,
+                allow_repeat_views=args.allow_repeat_views,
+                log_level=args.log_level,
             )
             results.append(result)
             print(json.dumps({"seed": seed, "result": result.to_dict()}, ensure_ascii=False), flush=True)
