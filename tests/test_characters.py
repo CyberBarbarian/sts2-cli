@@ -152,15 +152,25 @@ class TestFullRun:
                 state = game.act("choose_option", option_index=opts[0]["index"]) if opts else game.act("leave_room")
             elif dec == "combat_reward":
                 rewards = state.get("rewards", [])
-                non_card = next((r for r in rewards if r.get("kind") != "card_reward"), None)
+                non_card = next(
+                    (r for r in rewards if r.get("kind") != "card_reward" and r.get("can_claim", True)),
+                    None,
+                )
                 if non_card:
                     state = game.act("claim_reward", reward_index=non_card["index"])
                 else:
-                    card_reward = next((r for r in rewards if r.get("kind") == "card_reward"), None)
-                    if card_reward:
-                        state = game.act("skip_reward", reward_index=card_reward["index"])
+                    blocked = next(
+                        (r for r in rewards if not r.get("can_claim", True) and r.get("can_skip")),
+                        None,
+                    )
+                    if blocked:
+                        state = game.act("skip_reward", reward_index=blocked["index"])
                     else:
-                        state = game.act("proceed")
+                        card_reward = next((r for r in rewards if r.get("kind") == "card_reward"), None)
+                        if card_reward:
+                            state = game.act("skip_reward", reward_index=card_reward["index"])
+                        else:
+                            state = game.act("proceed")
             elif dec == "card_reward":
                 state = game.act("skip_card_reward")
             elif dec == "bundle_select":
