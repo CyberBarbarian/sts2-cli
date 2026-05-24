@@ -301,6 +301,11 @@ public class RunSimulator
     private const string CliStarToken = "[S]";
     private static readonly Dictionary<Type, int?> StaticAttackHitCountByCardType = new();
     private static readonly Dictionary<Type, bool> UsesAttackHitCountByCardType = new();
+    private static readonly Dictionary<Type, bool> LostHpConditionalHitCountByCardType = new();
+    private static readonly Dictionary<Type, Type?> TargetPowerConditionalHitCountByCardType = new();
+    private static readonly Dictionary<Type, bool> HandCountHitCountByCardType = new();
+    private static readonly Dictionary<Type, bool> BeforeCardPlayedStarGainByPowerType = new();
+    private static readonly Dictionary<Type, bool> AfterStarsSpentStrengthByRelicType = new();
     private static readonly Dictionary<short, OpCode> OpCodeByValue = typeof(OpCodes)
         .GetFields(BindingFlags.Public | BindingFlags.Static)
         .Where(f => f.FieldType == typeof(OpCode))
@@ -4028,7 +4033,7 @@ public class RunSimulator
                     ["vars"] = optVars?.Count > 0 ? optVars : null,
                 };
 
-                var relicTrade = BuildRelicTradePreview(eventEntry, localEvent, opt, i);
+                var relicTrade = BuildRelicPairPreview(localEvent, opt, i);
                 if (relicTrade != null)
                     exportedOption["relic_trade"] = relicTrade;
                 var hoverTips = EventOptionHoverTips(opt, relicTrade);
@@ -4822,16 +4827,12 @@ public class RunSimulator
             vars[memberName] = amount;
     }
 
-    private Dictionary<string, object?>? BuildRelicTradePreview(
-        string eventEntry,
+    private Dictionary<string, object?>? BuildRelicPairPreview(
         object localEvent,
         EventOption option,
         int optionIndex)
     {
-        if (!string.Equals(eventEntry, "RELIC_TRADER", StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        var tradeIndex = RelicTraderTradeIndex(option.TextKey, optionIndex);
+        var tradeIndex = RelicPairOptionIndex(option.TextKey, optionIndex);
         if (!tradeIndex.HasValue)
             return null;
 
@@ -4849,7 +4850,7 @@ public class RunSimulator
         };
     }
 
-    private static int? RelicTraderTradeIndex(string? textKey, int optionIndex)
+    private static int? RelicPairOptionIndex(string? textKey, int optionIndex)
     {
         if (textKey?.EndsWith(".TOP", StringComparison.OrdinalIgnoreCase) == true)
             return 0;
@@ -4904,7 +4905,7 @@ public class RunSimulator
             foreach (var value in values)
             {
                 if (value is DynamicVar dynamicVar)
-                    vars[dynamicVar.Name] = ExportEventDynamicVar(eventEntry, dynamicVar);
+                    vars[dynamicVar.Name] = ExportEventDynamicVar(dynamicVar);
             }
         }
         catch { }
@@ -5643,16 +5644,6 @@ public class RunSimulator
         }
 
         var name = _loc.Monster(entry);
-
-        if (entry == "TEST_SUBJECT" && name.Contains("{Count}", StringComparison.Ordinal))
-        {
-            var adaptableAmount = GetPowerAmount(creature, "ADAPTABLE_POWER");
-            if (adaptableAmount.HasValue)
-            {
-                vars ??= new Dictionary<string, object?>();
-                vars.TryAdd("Count", adaptableAmount.Value);
-            }
-        }
         return InterpolateDynamicVars(name, vars) ?? name;
     }
 
@@ -5666,8 +5657,6 @@ public class RunSimulator
         var monsterKey = bossIdEntry.EndsWith("_BOSS", StringComparison.Ordinal)
             ? bossIdEntry[..^5]
             : bossIdEntry;
-        if (monsterKey == "THE_KIN")
-            monsterKey = "KIN_PRIEST";
         return _loc.Monster(monsterKey);
     }
 
@@ -5974,31 +5963,6 @@ public class RunSimulator
                 vars[name] = baseValue;
             }
             return vars.Count > 0 ? vars : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static int? GetPowerAmount(object? creature, string powerEntry)
-    {
-        try
-        {
-            var powers = creature?.GetType().GetProperty("Powers")?.GetValue(creature)
-                         as System.Collections.IEnumerable;
-            if (powers == null)
-                return null;
-
-            foreach (var power in powers)
-            {
-                var entry = ModelEntry(power);
-                if (!string.Equals(entry, powerEntry, StringComparison.Ordinal))
-                    continue;
-                var amount = power?.GetType().GetProperty("Amount")?.GetValue(power);
-                return amount is int intAmount ? intAmount : Convert.ToInt32(amount);
-            }
-            return null;
         }
         catch
         {
@@ -6739,10 +6703,9 @@ public class RunSimulator
         }
         catch { }
 
-        if (string.Equals(card.Id.Entry, "SPITE", StringComparison.OrdinalIgnoreCase)
-            && player?.PlayerCombatState != null
-            && player.Creature != null
-            && !LostHpThisTurn(player.Creature))
+        if (UsesLostHpConditionalHitCount(card.GetType())
+            && !card.ShouldGlowGold
+            && stats.ContainsKey("repeat"))
         {
             stats["repeat"] = 1;
         }
@@ -6825,7 +6788,7 @@ public class RunSimulator
     {
         if (card.Type != CardType.Attack
             || !stats.ContainsKey("damage")
-            || card is not FiendFire
+            || !UsesCurrentHandCountAsHitCount(card.GetType())
             || card.Pile?.Type != PileType.Hand)
         {
             return;
@@ -6895,7 +6858,7 @@ public class RunSimulator
         if (repeat <= 0)
             return repeat;
 
-        if (card is HeavenlyDrill
+        if (card.ShouldGlowGold
             && GetCardDynamicVarInt(card, "Energy") is { } threshold
             && repeat >= threshold)
         {
@@ -7004,7 +6967,7 @@ public class RunSimulator
             var repeat = GetStatInt(stats, "repeat", 1);
             var usesRepeatAsAttackHits = UsesRepeatAsAttackHits(card);
             var pendingStrengthDelta = GetPendingStarSpendStrengthDelta(card, player);
-            var pendingRepeatDelta = GetPendingOnPlayAttackRepeatDelta(card, player);
+            var pendingRepeatDelta = GetPendingOnPlayAttackRepeatDelta(stats, card, player);
             for (int i = 0; i < enemies.Count; i++)
             {
                 var enemy = enemies[i];
@@ -7193,7 +7156,7 @@ public class RunSimulator
         {
             foreach (var relic in player.Relics ?? Enumerable.Empty<RelicModel>())
             {
-                if (!string.Equals(relic.Id.Entry, "MINI_REGENT", StringComparison.OrdinalIgnoreCase))
+                if (!AppliesStrengthAfterStarsSpent(relic.GetType()))
                     continue;
 
                 var vars = RelicVars(relic);
@@ -7206,17 +7169,19 @@ public class RunSimulator
         return delta;
     }
 
-    private int GetPendingOnPlayAttackRepeatDelta(CardModel card, Player? player)
+    private int GetPendingOnPlayAttackRepeatDelta(
+        Dictionary<string, object?> stats,
+        CardModel card,
+        Player? player)
     {
         if (card.Type != CardType.Attack || player?.Creature == null)
             return 0;
-        if (!string.Equals(card.Id.Entry, "RADIATE", StringComparison.OrdinalIgnoreCase))
+        if (!stats.ContainsKey("calculatedhits"))
+            return 0;
+        if (!CalculatedHitsUseStarsModifiedHistory(card.GetType()))
             return 0;
 
-        return GetCreaturePowerAmount(
-            player.Creature,
-            "THE_SEALED_THRONE_POWER",
-            "The Sealed Throne");
+        return GetPendingBeforeCardPlayedStarGain(player.Creature);
     }
 
     private void AddCalculatedDamageByTarget(Dictionary<string, object?> stats, CardModel card, Player? player)
@@ -7340,9 +7305,10 @@ public class RunSimulator
         var staticHitCount = GetStaticAttackHitCount(card);
         if (staticHitCount.HasValue && repeat == 1)
             repeat = staticHitCount.Value;
+        var conditionalPower = GetTargetPowerConditionalHitCountPower(card.GetType());
         if (repeat > 0
-            && card is MegaCrit.Sts2.Core.Models.Cards.Dismantle
-            && target.HasPower<VulnerablePower>())
+            && conditionalPower != null
+            && CreatureHasPowerOfType(target, conditionalPower))
             repeat *= 2;
         return repeat;
     }
@@ -7353,7 +7319,7 @@ public class RunSimulator
             return false;
         if (card.EnergyCost?.CostsX == true)
             return true;
-        if (card is FiendFire)
+        if (UsesCurrentHandCountAsHitCount(card.GetType()))
             return true;
         if (CardUsesAttackHitCount(card))
             return true;
@@ -7362,12 +7328,16 @@ public class RunSimulator
 
     private static bool CardUsesAttackHitCount(CardModel card)
     {
-        var type = card.GetType();
-        if (UsesAttackHitCountByCardType.TryGetValue(type, out var cached))
+        return CardUsesAttackHitCount(card.GetType());
+    }
+
+    private static bool CardUsesAttackHitCount(Type cardType)
+    {
+        if (UsesAttackHitCountByCardType.TryGetValue(cardType, out var cached))
             return cached;
 
-        var usesHitCount = FindUsesAttackHitCount(type);
-        UsesAttackHitCountByCardType[type] = usesHitCount;
+        var usesHitCount = FindUsesAttackHitCount(cardType);
+        UsesAttackHitCountByCardType[cardType] = usesHitCount;
         return usesHitCount;
     }
 
@@ -7387,6 +7357,91 @@ public class RunSimulator
             .Where(m => m != null);
 
         return methods.Any(method => MethodCalls(method!, withHitCount));
+    }
+
+    private static bool UsesLostHpConditionalHitCount(Type cardType)
+    {
+        if (LostHpConditionalHitCountByCardType.TryGetValue(cardType, out var cached))
+            return cached;
+
+        var result = TypeCallsMethod(cardType, method =>
+            string.Equals(method.Name, "LostHpThisTurn", StringComparison.Ordinal)
+            && method.DeclaringType == cardType);
+        LostHpConditionalHitCountByCardType[cardType] = result;
+        return result;
+    }
+
+    private static Type? GetTargetPowerConditionalHitCountPower(Type cardType)
+    {
+        if (TargetPowerConditionalHitCountByCardType.TryGetValue(cardType, out var cached))
+            return cached;
+
+        var result = FindGenericCallArgument(cardType, method =>
+            string.Equals(method.Name, "HasPower", StringComparison.Ordinal)
+            && method.DeclaringType == typeof(Creature));
+        TargetPowerConditionalHitCountByCardType[cardType] = result;
+        return result;
+    }
+
+    private static bool UsesCurrentHandCountAsHitCount(Type cardType)
+    {
+        if (HandCountHitCountByCardType.TryGetValue(cardType, out var cached))
+            return cached;
+
+        var result = CardUsesAttackHitCount(cardType)
+                     && TypeCallsMethod(cardType, method =>
+                         string.Equals(method.Name, "GetPile", StringComparison.Ordinal)
+                         && string.Equals(method.DeclaringType?.Name, "PileTypeExtensions", StringComparison.Ordinal));
+        HandCountHitCountByCardType[cardType] = result;
+        return result;
+    }
+
+    private static bool CalculatedHitsUseStarsModifiedHistory(Type cardType)
+    {
+        return TypeCallsMethod(cardType, method => GenericArgumentsInclude(method, typeof(StarsModifiedEntry)));
+    }
+
+    private static int GetPendingBeforeCardPlayedStarGain(Creature creature)
+    {
+        var total = 0;
+        try
+        {
+            foreach (var power in creature.Powers ?? Enumerable.Empty<PowerModel>())
+            {
+                if (!GainsStarsBeforeCardPlayed(power.GetType()))
+                    continue;
+                if (power.Amount > 0)
+                    total += power.Amount;
+            }
+        }
+        catch { }
+        return total;
+    }
+
+    private static bool GainsStarsBeforeCardPlayed(Type powerType)
+    {
+        if (BeforeCardPlayedStarGainByPowerType.TryGetValue(powerType, out var cached))
+            return cached;
+
+        var result = OverridesMethod(powerType, "BeforeCardPlayed")
+                     && TypeCallsMethod(powerType, method =>
+                         string.Equals(method.Name, "GainStars", StringComparison.Ordinal)
+                         && string.Equals(method.DeclaringType?.Name, "PlayerCmd", StringComparison.Ordinal));
+        BeforeCardPlayedStarGainByPowerType[powerType] = result;
+        return result;
+    }
+
+    private static bool AppliesStrengthAfterStarsSpent(Type relicType)
+    {
+        if (AfterStarsSpentStrengthByRelicType.TryGetValue(relicType, out var cached))
+            return cached;
+
+        var result = OverridesMethod(relicType, "AfterStarsSpent")
+                     && TypeCallsMethod(relicType, method =>
+                         string.Equals(method.Name, "Apply", StringComparison.Ordinal)
+                         && GenericArgumentsInclude(method, typeof(StrengthPower)));
+        AfterStarsSpentStrengthByRelicType[relicType] = result;
+        return result;
     }
 
     private static int? GetStaticAttackHitCount(CardModel card)
@@ -7515,6 +7570,160 @@ public class RunSimulator
         return false;
     }
 
+    private static bool TypeCallsMethod(Type type, Func<MethodBase, bool> predicate)
+    {
+        return GetAnalysisMethods(type).Any(method => MethodCallsWhere(method, predicate));
+    }
+
+    private static Type? FindGenericCallArgument(Type type, Func<MethodBase, bool> predicate)
+    {
+        foreach (var method in GetAnalysisMethods(type))
+        {
+            var result = FindGenericCallArgument(method, predicate);
+            if (result != null)
+                return result;
+        }
+        return null;
+    }
+
+    private static Type? FindGenericCallArgument(MethodInfo method, Func<MethodBase, bool> predicate)
+    {
+        Type? result = null;
+        MethodCallsWhere(method, called =>
+        {
+            if (!predicate(called))
+                return false;
+            try
+            {
+                if (called is MethodInfo info && info.IsGenericMethod)
+                    result = info.GetGenericArguments().FirstOrDefault();
+            }
+            catch { }
+            return result != null;
+        });
+        return result;
+    }
+
+    private static bool MethodCallsWhere(MethodInfo method, Func<MethodBase, bool> predicate)
+    {
+        byte[]? il;
+        try
+        {
+            il = method.GetMethodBody()?.GetILAsByteArray();
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (il == null)
+            return false;
+
+        var module = method.Module;
+        for (var offset = 0; offset < il.Length;)
+        {
+            if (!TryReadOpCode(il, ref offset, out var opCode))
+                return false;
+
+            var operandOffset = offset;
+            var operandSize = GetOperandSize(opCode, il, operandOffset);
+            if (operandSize < 0 || operandOffset + operandSize > il.Length)
+                return false;
+
+            if ((opCode == OpCodes.Call || opCode == OpCodes.Callvirt) && operandSize == 4)
+            {
+                try
+                {
+                    var token = BitConverter.ToInt32(il, operandOffset);
+                    var called = ResolveMethod(module, token, method);
+                    if (called != null && predicate(called))
+                        return true;
+                }
+                catch { }
+            }
+
+            offset = operandOffset + operandSize;
+        }
+
+        return false;
+    }
+
+    private static MethodBase? ResolveMethod(Module module, int token, MethodInfo caller)
+    {
+        try
+        {
+            var typeArgs = caller.DeclaringType?.GetGenericArguments();
+            var methodArgs = caller.IsGenericMethod ? caller.GetGenericArguments() : null;
+            return module.ResolveMethod(token, typeArgs, methodArgs);
+        }
+        catch
+        {
+            try
+            {
+                return module.ResolveMethod(token);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    private static IEnumerable<MethodInfo> GetMoveNextMethods(Type type)
+    {
+        return type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)
+            .Select(t => t.GetMethod("MoveNext", BindingFlags.Instance | BindingFlags.NonPublic))
+            .Where(m => m != null)
+            .Cast<MethodInfo>();
+    }
+
+    private static IEnumerable<MethodInfo> GetAnalysisMethods(Type type)
+    {
+        foreach (var method in type.GetMethods(
+                     BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+        {
+            yield return method;
+        }
+
+        foreach (var nested in type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            foreach (var method in nested.GetMethods(
+                         BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                yield return method;
+            }
+        }
+    }
+
+    private static bool GenericArgumentsInclude(MethodBase method, Type expected)
+    {
+        try
+        {
+            return method is MethodInfo info
+                   && info.IsGenericMethod
+                   && info.GetGenericArguments().Any(arg => arg == expected);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool OverridesMethod(Type type, string methodName)
+    {
+        try
+        {
+            var method = type.GetMethod(
+                methodName,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            return method != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static bool IsLikelyAttackCommandReceiverLoad(OpCode opCode)
     {
         return opCode == OpCodes.Call
@@ -7617,6 +7826,18 @@ public class RunSimulator
             return module.ResolveMethod(token) is MethodInfo method
                    && method.Module == target.Module
                    && method.MetadataToken == target.MetadataToken;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool CreatureHasPowerOfType(Creature creature, Type powerType)
+    {
+        try
+        {
+            return creature.Powers?.Any(power => powerType.IsInstanceOfType(power)) == true;
         }
         catch
         {
@@ -7751,27 +7972,18 @@ public class RunSimulator
         }
     }
 
-    private object? ExportEventDynamicVar(string eventEntry, DynamicVar dynamicVar)
+    private object? ExportEventDynamicVar(DynamicVar dynamicVar)
     {
         var name = dynamicVar.Name;
-
-        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Curse", StringComparison.OrdinalIgnoreCase))
-        {
-            return _loc.Card("DECAY");
-        }
-
-        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Relic", StringComparison.OrdinalIgnoreCase))
-        {
-            return _loc.Relic("LOST_WISP");
-        }
 
         if (dynamicVar is StringVar)
         {
             var stringValue = dynamicVar.ToString();
             if (!string.IsNullOrWhiteSpace(stringValue))
-                return _loc.BilingualFromKey(stringValue);
+            {
+                var localized = _loc.BilingualFromKey(stringValue);
+                return CleanEngineText(localized) ?? localized;
+            }
         }
 
         var rawValue = (int)dynamicVar.BaseValue;
@@ -7783,46 +7995,14 @@ public class RunSimulator
                 return _loc.Card(cards[rawValue].Id.Entry);
         }
 
-        if (string.Equals(eventEntry, "BYRDONIS_NEST", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Card", StringComparison.OrdinalIgnoreCase))
-        {
-            return _loc.Card("BYRDONIS_EGG");
-        }
-
-        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Card1", StringComparison.OrdinalIgnoreCase))
-        {
-            return _loc.Card("EXTERMINATE");
-        }
-
-        if (string.Equals(eventEntry, "BUGSLAYER", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Card2", StringComparison.OrdinalIgnoreCase))
-        {
-            return _loc.Card("SQUASH");
-        }
-
-        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Curse", StringComparison.OrdinalIgnoreCase))
-        {
-            return _loc.Card("DECAY");
-        }
-
-        if (string.Equals(eventEntry, "LOST_WISP", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Relic", StringComparison.OrdinalIgnoreCase))
-        {
-            return _loc.Relic("LOST_WISP");
-        }
-
-        if (string.Equals(eventEntry, "RANWID_THE_ELDER", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Potion", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(name, "Potion", StringComparison.OrdinalIgnoreCase))
         {
             var potions = _runState?.Players[0].Potions?.Where(p => p != null).ToList();
             if (potions != null && rawValue >= 0 && rawValue < potions.Count)
                 return _loc.Potion(potions[rawValue].Id.Entry);
         }
 
-        if (string.Equals(eventEntry, "RANWID_THE_ELDER", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(name, "Relic", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(name, "Relic", StringComparison.OrdinalIgnoreCase))
         {
             var relics = _runState?.Players[0].Relics?.Where(r => r != null).ToList();
             if (relics != null && rawValue >= 0 && rawValue < relics.Count)
