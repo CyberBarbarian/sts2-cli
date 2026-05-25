@@ -340,6 +340,7 @@ public class RunSimulator
     private bool _rewardsProcessed;
     private int _goldBeforeCombat;
     private int _lastKnownHp;
+    private string? _engineErrorReason;
     private readonly HeadlessCardSelector _cardSelector = new();
     private CardModel? _pendingCardSelectionSourceCard;
     private Dictionary<string, object?>? _pendingCardSelectionSourceEventOption;
@@ -1606,6 +1607,7 @@ public class RunSimulator
         // The WaitUntilQueue TCS is likely deadlocked.
         if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase && !player.Creature.IsDead)
         {
+            FlagEngineError("EndTurn stuck; fallback path entered to escape headless deadlock");
             Log("EndTurn stuck, cancelling and retrying with SuppressYield...");
             try
             {
@@ -1643,7 +1645,10 @@ public class RunSimulator
                 if (HasPendingHeadlessChoice())
                     return DetectDecisionPoint();
             }
-            catch (Exception ex) { Log($"Cancel retry: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                FlagEngineError($"EndTurn cancel retry failed: {ExceptionSummary(ex)}");
+            }
 
             // NUCLEAR OPTION: If STILL stuck after 2 attempts, use ThreadPool to force
             // the enemy turn processing to complete with SuppressYield permanently on.
@@ -1708,12 +1713,13 @@ public class RunSimulator
                     else
                     {
                         Log("Nuclear fallback FAILED — forcing game_over to escape deadlock");
-                        return GameOverState(false);
+                        FlagEngineError("EndTurn stuck after nuclear fallback; forced game_over to escape headless deadlock");
+                        return GameOverState(isVictory: false);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log($"Nuclear fallback error: {ex.Message}");
+                    FlagEngineError($"Nuclear fallback error: {ExceptionSummary(ex)}");
                     YieldPatches.SuppressYield = false;
                 }
             }
@@ -3493,7 +3499,7 @@ public class RunSimulator
         }
         catch (Exception ex)
         {
-            Log($"Resolve no-enemy combat cleanup failed: {ex.GetType().Name}: {ex.Message}");
+            FlagEngineError($"Resolve no-enemy combat cleanup failed: {ExceptionSummary(ex)}");
         }
         finally
         {
@@ -3623,7 +3629,7 @@ public class RunSimulator
         Player player,
         List<Dictionary<string, object?>> rewards)
     {
-        return new Dictionary<string, object?>
+        var state = new Dictionary<string, object?>
         {
             ["type"] = "decision",
             ["decision"] = "combat_reward",
@@ -3632,6 +3638,8 @@ public class RunSimulator
             ["gold_earned"] = player.Gold - _goldBeforeCombat,
             ["player"] = PlayerSummary(player),
         };
+        AddEngineErrorFields(state);
+        return state;
     }
 
     private Dictionary<string, object?> CombatRewardInfo(Reward reward, int index, Player? player = null)
@@ -6536,7 +6544,7 @@ public class RunSimulator
         {
             summary["hp"] = _lastKnownHp > 0 ? 0 : (player.Creature?.CurrentHp ?? 0);
         }
-        return new Dictionary<string, object?>
+        var state = new Dictionary<string, object?>
         {
             ["type"] = "decision",
             ["decision"] = "game_over",
@@ -6546,6 +6554,8 @@ public class RunSimulator
             ["act"] = _runState.CurrentActIndex + 1,
             ["floor"] = _runState.ActFloor,
         };
+        AddEngineErrorFields(state);
+        return state;
     }
 
     #endregion
@@ -6582,7 +6592,7 @@ public class RunSimulator
         }
         catch (Exception ex)
         {
-            Log($"WaitForActionExecutor exception: {ex.Message}");
+            FlagEngineError($"WaitForActionExecutor failed: {ExceptionSummary(ex)}");
         }
     }
 
@@ -6668,8 +6678,8 @@ public class RunSimulator
         if (!task.IsCompleted)
             return;
 
-        if (task.IsFaulted)
-            Log($"Event option task failed: {task.Exception?.GetBaseException().Message}");
+        if (task.IsFaulted && task.Exception != null)
+            FlagEngineError($"Event option task failed: {ExceptionSummary(task.Exception.GetBaseException())}");
         _pendingEventOptionTask = null;
         RestoreEventRewardSelector();
     }
@@ -10283,6 +10293,32 @@ public class RunSimulator
         Console.Error.WriteLine($"[SIM] {message}");
     }
 
+    private void FlagEngineError(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return;
+        if (_engineErrorReason != null)
+            return;
+        _engineErrorReason = reason;
+        Log($"Engine error flagged: {_engineErrorReason}");
+    }
+
+    private static string ExceptionSummary(Exception ex)
+    {
+        var inner = ex;
+        while (inner.InnerException != null) inner = inner.InnerException;
+        return $"{inner.GetType().Name}: {inner.Message}";
+    }
+
+    private void AddEngineErrorFields(Dictionary<string, object?> state)
+    {
+        if (_engineErrorReason == null)
+            return;
+        state["error"] = "engine_error";
+        state["engine_error"] = true;
+        state["engine_error_reason"] = _engineErrorReason;
+    }
+
     private static Dictionary<string, object?> Error(string message) =>
         new() { ["type"] = "error", ["message"] = message };
 
@@ -10433,6 +10469,7 @@ public class RunSimulator
         _rewardsProcessed = false;
         _goldBeforeCombat = 0;
         _lastKnownHp = 0;
+        _engineErrorReason = null;
         _pendingCardSelectionSourceCard = null;
         _pendingCardSelectionSourceEventOption = null;
         _pendingCardSelectionSourceRoomOption = null;

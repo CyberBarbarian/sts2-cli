@@ -37,6 +37,54 @@ def card_energy_cost(card, default=99):
     return default
 
 
+def combat_reward_command(state: dict) -> dict:
+    rewards = state.get("rewards", [])
+    if not rewards:
+        return {"cmd": "action", "action": "proceed"}
+
+    claimable_non_card = next(
+        (
+            reward for reward in rewards
+            if reward.get("kind") != "card_reward" and reward.get("can_claim", True)
+        ),
+        None,
+    )
+    if claimable_non_card:
+        return {
+            "cmd": "action",
+            "action": "claim_reward",
+            "args": {"reward_index": claimable_non_card["index"]},
+        }
+
+    skippable_blocked = next(
+        (
+            reward for reward in rewards
+            if not reward.get("can_claim", True) and reward.get("can_skip", False)
+        ),
+        None,
+    )
+    if skippable_blocked:
+        return {
+            "cmd": "action",
+            "action": "skip_reward",
+            "args": {"reward_index": skippable_blocked["index"]},
+        }
+
+    card_reward = next((reward for reward in rewards if reward.get("kind") == "card_reward"), None)
+    if card_reward:
+        return {
+            "cmd": "action",
+            "action": "skip_reward",
+            "args": {"reward_index": card_reward["index"]},
+        }
+
+    return {
+        "cmd": "action",
+        "action": "claim_reward",
+        "args": {"reward_index": rewards[0]["index"]},
+    }
+
+
 def _find_dotnet():
     for p in [os.path.expanduser("~/.dotnet-arm64/dotnet"),
               os.path.expanduser("~/.dotnet/dotnet"), "dotnet"]:
@@ -260,15 +308,7 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
                     state = send({"cmd": "action", "action": "leave_room"})
 
             elif decision == "combat_reward":
-                rewards = state.get("rewards", [])
-                if rewards:
-                    state = send({
-                        "cmd": "action",
-                        "action": "claim_reward",
-                        "args": {"reward_index": rewards[0]["index"]}
-                    })
-                else:
-                    state = send({"cmd": "action", "action": "proceed"})
+                state = send(combat_reward_command(state))
 
             elif decision == "card_reward":
                 # Pick the first card offered
