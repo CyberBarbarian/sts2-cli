@@ -22,6 +22,68 @@ def card_energy_cost(card, default=99):
     return default
 
 
+def combat_progress_fingerprint(state):
+    player = state.get("player", {})
+    enemies = [
+        (
+            enemy.get("name"),
+            enemy.get("hp"),
+            enemy.get("block"),
+            enemy.get("intent"),
+            enemy.get("move_id"),
+            tuple(
+                (power.get("name"), power.get("amount"))
+                for power in (enemy.get("powers") or [])
+            ),
+        )
+        for enemy in state.get("enemies", [])
+    ]
+    return (
+        state.get("decision"),
+        state.get("round"),
+        state.get("energy"),
+        state.get("draw_pile_count"),
+        state.get("discard_pile_count"),
+        state.get("exhaust_pile_count"),
+        player.get("hp"),
+        player.get("block"),
+        tuple((power.get("name"), power.get("amount")) for power in (player.get("powers") or [])),
+        tuple((potion.get("id"), potion.get("name"), potion.get("index")) for potion in player.get("potions", [])),
+        tuple((card.get("id"), card.get("name"), card.get("index")) for card in state.get("hand", [])),
+        tuple(enemies),
+    )
+
+
+def assert_combat_action_makes_progress(game, state, action, **args):
+    before = combat_progress_fingerprint(state)
+    next_state = game.act(action, **args)
+    assert next_state.get("type") != "error", next_state
+    assert not next_state.get("engine_error"), next_state.get("engine_error_reason")
+    if next_state.get("decision") == "combat_play":
+        assert combat_progress_fingerprint(next_state) != before
+    return next_state
+
+
+def play_first_simple_combat_action(game, state):
+    hand = state.get("hand", [])
+    energy = state.get("energy", 0)
+    playable = [
+        card for card in hand
+        if card.get("can_play")
+        and card_energy_cost(card) <= energy
+        and card.get("type") not in ("Status", "Curse")
+    ]
+    if playable:
+        card = playable[0]
+        args = {"card_index": card["index"]}
+        if card.get("target_type") == "AnyEnemy":
+            enemies = [enemy for enemy in state.get("enemies", []) if enemy.get("hp", 0) > 0]
+            if enemies:
+                args["target_index"] = enemies[0]["index"]
+        return assert_combat_action_makes_progress(game, state, "play_card", **args)
+    return assert_combat_action_makes_progress(game, state, "end_turn")
+
+
 class HeadlessSession:
     def __init__(self):
         env = os.environ.copy()
@@ -564,6 +626,128 @@ class TestCombatEnd:
 
 
 class TestCombatEdgeCases:
+    @pytest.mark.parametrize("encounter", [
+        "CEREMONIAL_BEAST_BOSS",
+        "SOUL_FYSH_BOSS",
+        "LAGAVULIN_MATRIARCH_BOSS",
+        "VANTOM_BOSS",
+        "THE_KIN_BOSS",
+        "TEST_SUBJECT_BOSS",
+        "KAISER_CRAB_BOSS",
+        "DOORMAKER_BOSS",
+        "KNOWLEDGE_DEMON_BOSS",
+        "QUEEN_BOSS",
+        "THE_INSATIABLE_BOSS",
+        "WATERFALL_GIANT_BOSS",
+    ])
+    def test_known_bosses_make_progress_in_headless_combat(self, game, encounter):
+        state = game.start(seed=f"boss-progress-{encounter}")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "STRIKE_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "BASH",
+                "SHRUG_IT_OFF",
+                "POMMEL_STRIKE",
+            ] * 8,
+        )
+        state = game.enter_room("combat", encounter=encounter)
+
+        assert state.get("type") != "error", state
+        assert state.get("decision") == "combat_play"
+
+        for _ in range(30):
+            if state.get("decision") != "combat_play":
+                return
+            state = play_first_simple_combat_action(game, state)
+
+    def test_lagavulin_matriarch_wakeup_turns_make_progress(self, game):
+        state = game.start(seed="lagavulin-matriarch-wakeup-progress")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=[
+                "STRIKE_IRONCLAD",
+                "BASH",
+                "POMMEL_STRIKE",
+                "DEFEND_IRONCLAD",
+                "SHRUG_IT_OFF",
+            ] * 8,
+        )
+        state = game.enter_room("combat", encounter="LAGAVULIN_MATRIARCH_BOSS")
+
+        assert state.get("decision") == "combat_play"
+        for _ in range(12):
+            state = play_first_simple_combat_action(game, state)
+            if state.get("decision") != "combat_play":
+                break
+
+        assert state.get("decision") == "combat_play"
+        assert state.get("round", 0) >= 2
+        assert state["enemies"][0]["hp"] < state["enemies"][0]["max_hp"]
+
+    def test_second_wind_exhaust_vfx_does_not_block_followup_actions(self, game):
+        state = game.start(seed="second-wind-exhaust-vfx")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            potions=["SPEED_POTION"],
+            deck=[
+                "SECOND_WIND",
+                "DEFEND_IRONCLAD",
+                "DEFEND_IRONCLAD",
+                "STRIKE_IRONCLAD",
+                "STRIKE_IRONCLAD",
+            ],
+        )
+        state = game.enter_room("combat", encounter="LAGAVULIN_MATRIARCH_BOSS")
+        second_wind = next(card for card in state["hand"] if card["name"] == "Second Wind")
+
+        state = assert_combat_action_makes_progress(
+            game,
+            state,
+            "play_card",
+            card_index=second_wind["index"],
+        )
+
+        assert state.get("decision") == "combat_play"
+        assert state.get("exhaust_pile_count", 0) >= 1
+
+        state = assert_combat_action_makes_progress(game, state, "use_potion", potion_index=0)
+
+        assert state.get("decision") == "combat_play"
+        assert state["player"]["potions"] == []
+
+        state = assert_combat_action_makes_progress(game, state, "end_turn")
+
+        assert state.get("decision") == "combat_play"
+        assert state.get("round", 0) >= 2
+
+    def test_end_turn_clears_stale_ready_flag_in_play_phase(self, game):
+        state = game.start(seed="stale-ready-end-turn")
+        game.skip_neow(state)
+        game.set_player(
+            hp=999,
+            max_hp=999,
+            deck=["STRIKE_IRONCLAD"] * 5,
+        )
+        state = game.enter_room("combat", encounter="LAGAVULIN_MATRIARCH_BOSS")
+
+        marked = game.send({"cmd": "debug_mark_ready_to_end_turn"})
+        assert marked == {"type": "ok", "ready": True}
+
+        state = game.act("end_turn")
+
+        assert state.get("type") != "error", state
+        assert not state.get("engine_error"), state.get("engine_error_reason")
+        assert state.get("decision") == "combat_play"
+        assert state.get("round", 0) >= 2
+
     def test_chomper_screech_talk_vfx_does_not_force_game_over_headless(self, game):
         state = game.start(seed="chomper-screech-talk")
         game.skip_neow(state)
@@ -1495,6 +1679,61 @@ class TestCombatEdgeCases:
         assert outputs[-2]["decision"] == "combat_play"
         assert "NullReferenceException" not in result.stderr
         assert "LagavulinMatriarch.AfterAddedToRoom" not in result.stderr
+
+    def test_lagavulin_matriarch_awake_damage_does_not_log_headless_exception(self):
+        session = HeadlessSession()
+        stderr = ""
+        try:
+            state = session.send({
+                "cmd": "start_run",
+                "character": "Ironclad",
+                "seed": "lagavulin-matriarch-awake-damage-stderr",
+                "lang": "en",
+            })
+            state = session.skip_neow(state)
+            state = session.send({
+                "cmd": "set_player",
+                "hp": 999,
+                "max_hp": 999,
+                "deck": [
+                    "STRIKE_IRONCLAD",
+                    "STRIKE_IRONCLAD",
+                    "STRIKE_IRONCLAD",
+                    "DEFEND_IRONCLAD",
+                    "DEFEND_IRONCLAD",
+                ] * 4,
+            })
+            state = session.send({
+                "cmd": "enter_room",
+                "type": "combat",
+                "encounter": "LAGAVULIN_MATRIARCH_BOSS",
+            })
+
+            for _ in range(3):
+                state = session.send({"cmd": "action", "action": "end_turn"})
+
+            assert state["decision"] == "combat_play"
+            assert state["round"] == 4
+            enemy = state["enemies"][0]
+            assert not any(power["id"] == "ASLEEP_POWER" for power in enemy.get("powers") or [])
+            strike = next(card for card in state["hand"] if card["name"] == "Strike" and card["can_play"])
+
+            state = session.send({
+                "cmd": "action",
+                "action": "play_card",
+                "args": {"card_index": strike["index"], "target_index": enemy["index"]},
+            })
+            assert state["decision"] == "combat_play"
+            assert state["enemies"][0]["hp"] < enemy["hp"]
+
+            state = session.send({"cmd": "action", "action": "end_turn"})
+            assert state["decision"] == "combat_play"
+            assert state["round"] == 5
+        finally:
+            stderr = session.close()
+
+        assert "NullReferenceException" not in stderr
+        assert "LagavulinMatriarch.AfterDamageReceived" not in stderr
 
     def test_rolling_boulder_turn_start_does_not_log_headless_connect_exception(self):
         session = HeadlessSession()

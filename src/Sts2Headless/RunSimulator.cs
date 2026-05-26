@@ -692,6 +692,38 @@ public class RunSimulator
         catch (Exception ex) { return ErrorWithTrace("SetPlayer failed", ex); }
     }
 
+    public Dictionary<string, object?> DebugMarkReadyToEndTurn()
+    {
+        try
+        {
+            if (_runState == null) return Error("No run in progress");
+            var player = _runState.Players[0];
+            if (player.PlayerCombatState == null) return Error("Not in combat");
+
+            var manager = CombatManager.Instance;
+            var field = manager.GetType().GetField("_playersReadyToEndTurn", NonPublic);
+            var readySet = field?.GetValue(manager);
+            if (readySet == null)
+                return Error("Cannot access _playersReadyToEndTurn");
+
+            var addMethod = readySet.GetType().GetMethod("Add", new[] { typeof(Player) })
+                ?? readySet.GetType().GetMethod("Add");
+            if (addMethod == null)
+                return Error($"Cannot add to ready set of type {readySet.GetType().FullName}");
+
+            addMethod.Invoke(readySet, new object[] { player });
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "ok",
+                ["ready"] = manager.IsPlayerReadyToEndTurn(player),
+            };
+        }
+        catch (Exception ex)
+        {
+            return ErrorWithTrace("DebugMarkReadyToEndTurn failed", ex);
+        }
+    }
+
     public Dictionary<string, object?> EnterRoom(string roomType, string? encounter, string? eventId)
     {
         try
@@ -1565,9 +1597,21 @@ public class RunSimulator
         // Ensure no actions are still running before ending turn
         WaitForActionExecutor();
 
+        var mutationBefore = CombatMutationSignature(player);
         Log($"Ending turn (round={CombatManager.Instance.DebugOnlyGetState()?.RoundNumber ?? 0})");
         _turnStarted.Reset();
         _combatEnded.Reset();
+
+        // In headless mode the ready flag can occasionally survive into the
+        // next visible play phase. PlayerCmd.EndTurn returns immediately when
+        // this flag is set, so clear stale readiness before asking the engine
+        // to end the current turn.
+        if (CombatManager.Instance.IsPlayerReadyToEndTurn(player))
+        {
+            Log("Clearing stale player ready-to-end-turn flag before EndTurn");
+            CombatManager.Instance.UndoReadyToEndTurn(player);
+            _syncCtx.Pump();
+        }
 
         // Enable SuppressYield so Task.Yield() runs inline during enemy turn processing.
         // This prevents deadlocks during boss fights (e.g., Vantom) where continuations
@@ -1725,7 +1769,54 @@ public class RunSimulator
             }
         }
 
-        return DetectDecisionPoint();
+        var decision = DetectDecisionPoint();
+        if (decision.TryGetValue("decision", out var decisionType)
+            && string.Equals(decisionType?.ToString(), "combat_play", StringComparison.Ordinal)
+            && mutationBefore == CombatMutationSignature(player)
+            && !HasPendingHeadlessChoice())
+        {
+            if (CombatManager.Instance.IsPlayerReadyToEndTurn(player))
+            {
+                Log("EndTurn produced no progress with player still marked ready; clearing flag and retrying once");
+                CombatManager.Instance.UndoReadyToEndTurn(player);
+                _syncCtx.Pump();
+
+                YieldPatches.SuppressYield = true;
+                try
+                {
+                    PlayerCmd.EndTurn(player, canBackOut: false);
+                    _syncCtx.Pump();
+                    for (int i = 0; i < 100; i++)
+                    {
+                        _syncCtx.Pump();
+                        if (HasPendingHeadlessChoice()) break;
+                        if (_turnStarted.IsSet || _combatEnded.IsSet) break;
+                        if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
+                        if (!CombatManager.Instance.IsPlayPhase) break;
+                        if (mutationBefore != CombatMutationSignature(player)) break;
+                        Thread.Sleep(5);
+                    }
+                }
+                finally
+                {
+                    YieldPatches.SuppressYield = false;
+                }
+
+                var retriedDecision = DetectDecisionPoint();
+                if (retriedDecision.TryGetValue("decision", out var retriedDecisionType)
+                    && string.Equals(retriedDecisionType?.ToString(), "combat_play", StringComparison.Ordinal)
+                    && mutationBefore == CombatMutationSignature(player)
+                    && !HasPendingHeadlessChoice())
+                {
+                    return EngineError("EndTurn produced no observable combat state change after stale-ready retry");
+                }
+                return retriedDecision;
+            }
+
+            return EngineError("EndTurn produced no observable combat state change");
+        }
+
+        return decision;
     }
 
     private Dictionary<string, object?> DoSelectCardReward(Player player, Dictionary<string, object?>? args)
@@ -2280,7 +2371,7 @@ public class RunSimulator
             if (afterPotions.Contains(potion))
             {
                 Log("Potion action completed but potion was not consumed");
-                return Error("Potion action completed but potion was not consumed; state left unchanged");
+                return EngineError("Potion action completed but potion was not consumed; state left unchanged");
             }
         }
         catch (Exception ex)
@@ -6588,12 +6679,53 @@ public class RunSimulator
                     if (!executor.IsRunning) break;
                     Thread.Sleep(1);
                 }
+
+                if (executor.IsRunning)
+                    Log($"ActionExecutor still running after wait: {DescribeObjectFields(executor)}");
             }
         }
         catch (Exception ex)
         {
             FlagEngineError($"WaitForActionExecutor failed: {ExceptionSummary(ex)}");
         }
+    }
+
+    private static string DescribeObjectFields(object? obj)
+    {
+        if (obj == null)
+            return "null";
+
+        try
+        {
+            var type = obj.GetType();
+            var fields = type
+                .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Select(field =>
+                {
+                    object? value;
+                    try { value = field.GetValue(obj); }
+                    catch (Exception ex) { value = $"<error:{ex.GetType().Name}>"; }
+                    return $"{field.Name}={DescribeDiagnosticValue(value)}";
+                });
+            return $"{type.FullName}{{{string.Join(", ", fields)}}}";
+        }
+        catch (Exception ex)
+        {
+            return $"{obj.GetType().FullName}<diagnostic failed: {ex.GetType().Name}: {ex.Message}>";
+        }
+    }
+
+    private static string DescribeDiagnosticValue(object? value)
+    {
+        if (value == null)
+            return "null";
+        if (value is string s)
+            return $"\"{s}\"";
+        if (value is ValueType)
+            return value.ToString() ?? "";
+        if (value is System.Collections.ICollection collection)
+            return $"{value.GetType().Name}(Count={collection.Count})";
+        return value.GetType().FullName ?? value.GetType().Name;
     }
 
     private void InstallEventRewardSelector()
@@ -8642,6 +8774,7 @@ public class RunSimulator
         // because there's no Godot scene tree, causing the ActionExecutor to deadlock.
         PatchCmdWait();
         PatchCardPileAddVisuals();
+        PatchCardExhaustPresentation();
         PatchCardSelectContext();
         PatchTalkCmdPlay();
         PatchSoulNexusPresentation();
@@ -8901,6 +9034,35 @@ public class RunSimulator
         }
     }
 
+    private static void PatchCardExhaustPresentation()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.cardexhaust.presentation");
+            var taskPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationTaskPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var exhaustVfxType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Nodes.Vfx.Cards.NExhaustVfx");
+            if (taskPrefix == null || exhaustVfxType == null)
+                return;
+
+            var patched = 0;
+            foreach (var method in GetDeclaredMethods(exhaustVfxType)
+                .Where(method => method.Name == "SelfDestruct"
+                                 && typeof(Task).IsAssignableFrom(method.ReturnType)
+                                 && method.GetMethodBody() != null))
+            {
+                harmony.Patch(method, new HarmonyMethod(taskPrefix));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched card exhaust presentation ({patched} methods)");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch card exhaust presentation: {ex.Message}");
+        }
+    }
+
     private static void PatchCardSelectContext()
     {
         try
@@ -9095,16 +9257,40 @@ public class RunSimulator
             var harmony = new Harmony("sts2headless.lagavulinmatriarch.presentation");
             var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.LagavulinMatriarchAfterAddedToRoomPrefix),
                 BindingFlags.Static | BindingFlags.Public);
+            var afterDamageFinalizer = typeof(YieldPatches).GetMethod(
+                nameof(YieldPatches.LagavulinMatriarchAfterDamageReceivedFinalizer),
+                BindingFlags.Static | BindingFlags.Public);
+            var hookAfterDamagePrefix = typeof(YieldPatches).GetMethod(
+                nameof(YieldPatches.LagavulinMatriarchAfterDamageReceivedHookPrefix),
+                BindingFlags.Static | BindingFlags.Public);
             var afterAdded = AccessTools.Method("MegaCrit.Sts2.Core.Models.Monsters.LagavulinMatriarch:AfterAddedToRoom");
             if (prefix == null || afterAdded == null)
                 return;
 
             harmony.Patch(afterAdded, new HarmonyMethod(prefix));
-            Console.Error.WriteLine("[INFO] Patched Lagavulin Matriarch sleep presentation");
+            var patched = 1;
+
+            var afterDamage = AccessTools.Method("MegaCrit.Sts2.Core.Models.Monsters.LagavulinMatriarch:AfterDamageReceived");
+            if (afterDamage != null && afterDamageFinalizer != null)
+            {
+                harmony.Patch(afterDamage, finalizer: new HarmonyMethod(afterDamageFinalizer));
+                patched++;
+            }
+            var hookAfterDamage = AccessTools.Method("MegaCrit.Sts2.Core.Hooks.Hook:AfterDamageReceived");
+            if (hookAfterDamage != null && afterDamageFinalizer != null && hookAfterDamagePrefix != null)
+            {
+                harmony.Patch(
+                    hookAfterDamage,
+                    prefix: new HarmonyMethod(hookAfterDamagePrefix),
+                    finalizer: new HarmonyMethod(afterDamageFinalizer));
+                patched++;
+            }
+
+            Console.Error.WriteLine($"[INFO] Patched Lagavulin Matriarch headless hooks ({patched} methods)");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[WARN] Failed to patch Lagavulin Matriarch sleep presentation: {ex.Message}");
+            Console.Error.WriteLine($"[WARN] Failed to patch Lagavulin Matriarch headless hooks: {ex.Message}");
         }
     }
 
@@ -9620,6 +9806,13 @@ public class RunSimulator
             return false;
         }
 
+        /// <summary>Harmony prefix: skip UI-only async presentation hooks in headless mode.</summary>
+        public static bool SkipPresentationTaskPrefix(ref Task __result)
+        {
+            __result = Task.CompletedTask;
+            return false;
+        }
+
         /// <summary>Harmony prefix: preserve Slumbering Beetle setup powers while skipping sleep audio/VFX nodes.</summary>
         public static bool SlumberingBeetleAfterAddedToRoomPrefix(MonsterModel __instance, ref Task __result)
         {
@@ -9649,6 +9842,43 @@ public class RunSimulator
         {
             await PowerCmd.Apply<PlatingPower>(monster.Creature, 12m, monster.Creature, null);
             await PowerCmd.Apply<AsleepPower>(monster.Creature, 3m, monster.Creature, null);
+        }
+
+        /// <summary>Harmony finalizer: keep headless combat alive when Lagavulin's presentation-side damage hook dereferences missing scene state.</summary>
+        public static Exception? LagavulinMatriarchAfterDamageReceivedFinalizer(
+            Exception __exception,
+            object? __instance = null,
+            Creature? target = null)
+        {
+            var isLagavulin = string.Equals(__instance?.GetType().Name, "LagavulinMatriarch", StringComparison.Ordinal)
+                || string.Equals(target?.Monster?.GetType().Name, "LagavulinMatriarch", StringComparison.Ordinal);
+            if (__exception is NullReferenceException && isLagavulin)
+            {
+                Console.Error.WriteLine("[WARN] Suppressed Lagavulin Matriarch AfterDamageReceived NullReferenceException in headless mode");
+                return null;
+            }
+
+            return __exception;
+        }
+
+        /// <summary>Harmony prefix: skip Lagavulin's post-damage async hook after wakeup when no scene-backed presentation state exists.</summary>
+        public static bool LagavulinMatriarchAfterDamageReceivedHookPrefix(Creature? target, ref Task __result)
+        {
+            if (!string.Equals(target?.Monster?.GetType().Name, "LagavulinMatriarch", StringComparison.Ordinal))
+                return true;
+
+            var isStillAsleep = target!.Powers?.Any(power =>
+            {
+                var typeName = power.GetType().Name;
+                var entry = power.Id.Entry;
+                return string.Equals(typeName, nameof(AsleepPower), StringComparison.Ordinal)
+                    || string.Equals(entry, "ASLEEP_POWER", StringComparison.OrdinalIgnoreCase);
+            }) == true;
+            if (isStillAsleep)
+                return true;
+
+            __result = Task.CompletedTask;
+            return false;
         }
 
         /// <summary>Harmony prefix: preserve Test Subject's growl effects while skipping room VFX/audio/animation.</summary>
@@ -10321,6 +10551,14 @@ public class RunSimulator
 
     private static Dictionary<string, object?> Error(string message) =>
         new() { ["type"] = "error", ["message"] = message };
+
+    private Dictionary<string, object?> EngineError(string message)
+    {
+        FlagEngineError(message);
+        var state = Error(message);
+        AddEngineErrorFields(state);
+        return state;
+    }
 
     private static Dictionary<string, object?> ErrorWithTrace(string context, Exception ex)
     {

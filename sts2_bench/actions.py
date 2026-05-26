@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,6 +70,38 @@ def _card_cost_value(card: dict[str, Any]) -> int:
     if isinstance(cost, str) and cost.upper() == "X":
         return 0
     return 99
+
+
+def _card_select_label(cards: list[dict[str, Any]]) -> str:
+    indices = ",".join(str(card.get("index")) for card in cards)
+    names = " + ".join(_name(card.get("name")) for card in cards)
+    return f"select cards {indices}: {names}"
+
+
+def _card_select_actions(cards: list[dict[str, Any]], min_select: int, max_select: int) -> list[dict[str, Any]]:
+    if not cards or max_select <= 0:
+        return []
+
+    # Keep the action surface valid for fixed-size selections.  The engine
+    # expects all required cards in one command, so exposing single-card picks
+    # for min_select > 1 creates illegal benchmark actions.
+    max_actions = 64
+    actions: list[dict[str, Any]] = []
+    upper = min(max_select, len(cards))
+    lower = max(1, min_select)
+    for count in range(lower, upper + 1):
+        for combo in itertools.combinations(cards, count):
+            selected = list(combo)
+            indices = ",".join(str(card.get("index")) for card in selected)
+            label = (
+                f"select card {selected[0].get('index')}: {_name(selected[0].get('name'))}"
+                if count == 1
+                else _card_select_label(selected)
+            )
+            actions.append(_action(label, "select_cards", "card_select", indices=indices))
+            if len(actions) >= max_actions:
+                return actions
+    return actions
 
 
 def _targeted_card_actions(state: dict[str, Any], card: dict[str, Any]) -> list[dict[str, Any]]:
@@ -271,20 +304,7 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
         max_select = int(state.get("max_select", min_select) or min_select)
         if min_select == 0:
             raw.append(_action("skip selection", "skip_select", "card_select_skip"))
-        if cards:
-            # Conservative generic action set: individual cards and first-k selection.
-            for card in cards:
-                raw.append(
-                    _action(
-                        f"select card {card.get('index')}: {_name(card.get('name'))}",
-                        "select_cards",
-                        "card_select",
-                        indices=str(card.get("index")),
-                    )
-                )
-            if min_select > 1:
-                indices = ",".join(str(card.get("index")) for card in cards[: min(max_select, len(cards))])
-                raw.append(_action(f"select first {min_select} cards", "select_cards", "card_select", indices=indices))
+        raw.extend(_card_select_actions(cards, min_select, max_select))
 
     elif decision == "bundle_select":
         for bundle in state.get("bundles", []) or state.get("options", []) or []:

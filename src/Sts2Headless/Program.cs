@@ -189,6 +189,9 @@ class Program
                 return sim.SetDrawOrder(cards);
             }
 
+            case "debug_mark_ready_to_end_turn":
+                return sim.DebugMarkReadyToEndTurn();
+
             case "write_continue_save":
             {
                 var outputPath = cmd.TryGetProperty("path", out var op) ? op.GetString() : null;

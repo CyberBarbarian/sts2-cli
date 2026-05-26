@@ -20,6 +20,8 @@ CONFIG_ENV_KEYS = {
     "model": "STS2_BENCH_MODEL",
     "prompt_style": "STS2_BENCH_PROMPT_STYLE",
     "include_json_state": "STS2_BENCH_INCLUDE_JSON_STATE",
+    "memory_enabled": "STS2_BENCH_MEMORY_ENABLED",
+    "memory_window": "STS2_BENCH_MEMORY_WINDOW",
     "character": "STS2_BENCH_CHARACTER",
     "ascension": "STS2_BENCH_ASCENSION",
     "lang": "STS2_BENCH_LANG",
@@ -197,6 +199,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Include compact state JSON in LLM prompts",
     )
     parser.add_argument(
+        "--memory-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("STS2_BENCH_MEMORY_ENABLED", False),
+        help="Include a short per-episode action memory in LLM prompts",
+    )
+    parser.add_argument(
+        "--memory-window",
+        type=int,
+        default=env_int("STS2_BENCH_MEMORY_WINDOW", 8),
+        help="Number of recent selected actions to keep in agent memory",
+    )
+    parser.add_argument(
         "--character",
         default=env_str("STS2_BENCH_CHARACTER", "Ironclad"),
         choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
@@ -251,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
         api_key=args.api_key,
         include_json_state=args.include_json_state,
         prompt_style=args.prompt_style,
+        memory_enabled=args.memory_enabled,
+        memory_window=args.memory_window,
     )
     seeds = load_seeds(args.seeds, args.count)
     logger = JsonlLogger(args.out)

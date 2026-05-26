@@ -18,3 +18,4 @@ logs/
 saves/*
 artifacts/
 .tools/
+results/

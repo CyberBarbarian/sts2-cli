@@ -93,6 +93,7 @@ def run_one(
 
     try:
         proc.start()
+        _reset_agent_episode(agent)
         state = proc.start_run(character=character, seed=seed, ascension=ascension, lang=lang)
         logger and logger.write(
             {
@@ -151,6 +152,7 @@ def run_one(
                 _print_model_output(step=step, decision=decision, action=action, meta=meta)
 
             logger and logger.write(_action_log_entry(log_level=log_level, step=step, decision=decision, action=action, meta=meta))
+            _record_agent_transition(agent, state, action, meta)
 
             if action.command.get("cmd") == "bench_view":
                 _count_view_action(result, state, action.command)
@@ -164,9 +166,9 @@ def run_one(
             if state.get("type") == "error":
                 result.invalid_states += 1
                 logger and logger.write({"type": "error", "step": step, "state": state})
-                # Let the engine advance if possible.  Some pending screens need a
-                # specific action, so this is only a recovery path for model errors.
-                state = proc.action("proceed")
+                result.error = state.get("message") or "Headless engine returned an error state"
+                _fill_result(result, state)
+                return result
 
         result.truncated = True
         result.extra["truncation_reason"] = f"max_steps exceeded ({max_steps})"
@@ -192,6 +194,23 @@ def _fill_result(result: RunResult, state: dict[str, Any]) -> None:
     result.max_hp = player.get("max_hp")
     result.gold = player.get("gold")
     result.deck_size = player.get("deck_size")
+
+
+def _reset_agent_episode(agent: Agent) -> None:
+    reset = getattr(agent, "reset_episode", None)
+    if callable(reset):
+        reset()
+
+
+def _record_agent_transition(
+    agent: Agent,
+    state: dict[str, Any],
+    action: LegalAction,
+    meta: dict[str, Any],
+) -> None:
+    record = getattr(agent, "record_transition", None)
+    if callable(record):
+        record(state, action, meta)
 
 
 def _apply_view_action(proc: Sts2Process, state: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
@@ -395,9 +414,17 @@ def agent_from_args(
     api_key: str,
     include_json_state: bool = False,
     prompt_style: PromptStyle = "default",
+    memory_enabled: bool = False,
+    memory_window: int = 8,
 ) -> Agent:
     if kind == "random":
-        return RandomAgent(seed=0, include_json_state=include_json_state, prompt_style=prompt_style)
+        return RandomAgent(
+            seed=0,
+            include_json_state=include_json_state,
+            prompt_style=prompt_style,
+            memory_enabled=memory_enabled,
+            memory_window=memory_window,
+        )
     if kind == "llm":
         if not base_url or not model:
             raise ValueError("--base-url and --model, or STS2_BENCH_BASE_URL and STS2_BENCH_MODEL, are required for --agent llm")
@@ -411,6 +438,8 @@ def agent_from_args(
             api_key=api_key,
             include_json_state=include_json_state,
             prompt_style=prompt_style,
+            memory_enabled=memory_enabled,
+            memory_window=memory_window,
         )
     raise ValueError(f"Unknown agent kind: {kind}")
 

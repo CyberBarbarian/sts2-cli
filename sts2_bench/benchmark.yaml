@@ -17,6 +17,12 @@ prompt_style: analysis
 # 是否在 prompt 中附加 Compact state JSON。false 可以减少 token 和重复信息；true 适合调试结构化 state。
 include_json_state: false
 
+# 是否在 agent prompt 中加入局内短期记忆。这个记忆属于 agent 方法，不属于环境原始 state。
+memory_enabled: true
+
+# 短期记忆保留最近多少个已选择 action。数值越大越能记住近期操作，但 prompt 会更长。
+memory_window: 8
+
 # 选择角色。可选 Ironclad、Silent、Defect、Regent、Necrobinder。
 character: Ironclad
 
@@ -27,19 +33,19 @@ ascension: 0
 lang: en
 
 # 固定 seed 文件路径。空字符串表示自动生成 bench_0000、bench_0001 等 seed。
-seeds: ""
+seeds: "/Users/shenqi/Desktop/Projects/sts2-cli/sts2_bench/seeds_ironclad_a0.json"
 
 # 本次运行的局数。
 count: 1
 
 # 每局最多允许的决策步数。这是安全上限；做爬塔层数 benchmark 时应设置得足够大。
-max_steps: 100
+max_steps: 300
 
 # JSONL 输出路径。空字符串表示不写 trace 文件，只在终端打印结果。
-out: results/deepseek_chat_ironclad_a0.jsonl
+out: results/deepseek_chat_ironclad_a0_mem.jsonl
 
 # JSONL 记录详细程度。metrics 最小；decisions 记录轻量决策摘要；full 记录完整 state、prompt、raw response。
-log_level: decisions
+log_level: full
 
 # 是否在终端打印每一步发给模型的 prompt。调试时可以 true，正式 benchmark 建议 false。
 print_prompts: false

@@ -169,36 +169,6 @@ def card_line(card: dict[str, Any], state: dict[str, Any] | None = None) -> str:
     return " ".join(bits)
 
 
-def deck_card_line(card: dict[str, Any]) -> str:
-    stats = card.get("stats") or {}
-    bits = [
-        name(card.get("name")),
-        f"cost={card_cost_label(card)}",
-        str(card.get("type", "?")),
-    ]
-    if card.get("rarity"):
-        bits.append(f"rarity={card.get('rarity')}")
-    if card.get("upgraded") is not None:
-        bits.append(f"upgraded={card.get('upgraded')}")
-    for key in ("damage", "calculateddamage", "block", "magic", "draw"):
-        value = stats.get(key)
-        if value is not None:
-            label = "damage" if key == "calculateddamage" else key
-            bits.append(f"{label}={value}")
-    for key in ("cards", "vulnerablepower", "weakpower", "strengthpower", "dexteritypower"):
-        value = stats.get(key)
-        if value is not None:
-            bits.append(f"{key}={value}")
-    if card.get("target_type"):
-        bits.append(f"target={card.get('target_type')}")
-    if card.get("star_cost"):
-        bits.append(f"star_cost={card.get('star_cost')}")
-    keywords = card.get("keywords") or []
-    if keywords:
-        bits.append("keywords=" + ",".join(str(k) for k in keywords))
-    return " ".join(bits)
-
-
 def one_line(value: Any) -> str:
     if not value:
         return ""
@@ -426,8 +396,8 @@ def render_full_map(map_data: dict[str, Any], choices: list[dict[str, Any]]) -> 
     return out
 
 
-def append_card_lines(lines: list[str], card: dict[str, Any], *, prefix: str = "  ") -> None:
-    lines.append(prefix + card_line(card))
+def append_card_lines(lines: list[str], card: dict[str, Any], *, prefix: str = "  ", suffix: str = "") -> None:
+    lines.append(prefix + card_line(card) + suffix)
     description = card_description(card)
     if description:
         lines.append(prefix + f"  description: {description}")
@@ -465,13 +435,49 @@ def append_deck_view(lines: list[str], player: dict[str, Any]) -> None:
     if not deck:
         lines.append("  No deck details available in this state.")
         return
-    for card in deck:
+    for idx, card in enumerate(deck):
+        card_for_render = dict(card)
+        if card_for_render.get("index") is None:
+            card_for_render["index"] = idx
         count = card.get("count")
         suffix = f" x{count}" if count else ""
-        lines.append(f"  {deck_card_line(card)}{suffix}")
-        desc = card_description(card)
-        if desc:
-            lines.append(f"    description: {desc}")
+        append_card_lines(lines, card_for_render, suffix=suffix)
+
+
+def power_kind(power: dict[str, Any]) -> str:
+    power_type = str(power.get("type") or power.get("power_type") or "").lower()
+    if "debuff" in power_type:
+        return "Debuff"
+    if "buff" in power_type:
+        return "Buff"
+    amount = power.get("amount", 0)
+    if isinstance(amount, (int, float)) and amount < 0:
+        return "Debuff"
+    return "Power"
+
+
+def power_label(power: dict[str, Any], *, include_type: bool = False) -> str:
+    amount = power.get("amount")
+    suffix = f"({amount})" if amount not in (None, "", 0) else ""
+    label = f"{name(power.get('name'))}{suffix}"
+    if include_type:
+        label = f"{power_kind(power)} {label}"
+    return label
+
+
+def append_power_lines(lines: list[str], powers: list[dict[str, Any]], *, prefix: str = "  ", include_type: bool = False) -> None:
+    for power in powers:
+        label = power_label(power, include_type=include_type)
+        description = description_of(power)
+        if description:
+            lines.append(prefix + f"{label}: {description}")
+        else:
+            vars_text = vars_line(power)
+            if vars_text:
+                lines.append(prefix + f"{label} vars={vars_text}")
+            else:
+                lines.append(prefix + label)
+        append_hover_tip_lines(lines, power, prefix=prefix + "  ")
 
 
 def append_viewed_information(lines: list[str], state: dict[str, Any], player: dict[str, Any]) -> None:
@@ -578,7 +584,8 @@ def render_state_text(state: dict[str, Any]) -> str:
         )
         powers = state.get("player_powers") or []
         if powers:
-            lines.append("Player powers: " + "; ".join(f"{name(p.get('name'))}({p.get('amount', '')})" for p in powers))
+            lines.append(f"Player powers ({len(powers)}):")
+            append_power_lines(lines, powers, include_type=True)
         if state.get("orbs"):
             lines.append("Orbs: " + "; ".join(f"{name(o.get('name'))} passive={o.get('passive')} evoke={o.get('evoke')}" for o in state.get("orbs", [])))
         if state.get("stars") is not None:
@@ -599,11 +606,13 @@ def render_state_text(state: dict[str, Any]) -> str:
             powers = enemy.get("powers") or []
             power_text = ""
             if powers:
-                power_text = " powers=" + ",".join(f"{name(p.get('name'))}({p.get('amount', '')})" for p in powers)
+                power_text = " powers=" + ",".join(power_label(power) for power in powers)
             move = enemy.get("move_name") or "?"
             lines.append(
                 f"  [{enemy.get('index')}] {name(enemy.get('name'))} hp={enemy.get('hp')}/{enemy.get('max_hp')} block={enemy.get('block', 0)} intent={','.join(intents) or 'none'} move={move}{power_text}"
             )
+            if powers:
+                append_power_lines(lines, powers, prefix="    ", include_type=True)
 
         hand = state.get("hand", []) or []
         lines.append(f"Hand ({len(hand)}):")
@@ -731,9 +740,19 @@ def render_state_text(state: dict[str, Any]) -> str:
             lines.append(
                 f"Combat context: round={combat.get('round', '?')} energy={combat.get('energy', '?')}/{combat.get('max_energy', '?')} draw={combat.get('draw_pile_count', '?')} discard={combat.get('discard_pile_count', '?')} exhaust={combat.get('exhaust_pile_count', '?')}"
             )
+            combat_powers = combat.get("player_powers") or state.get("player_powers") or []
+            if combat_powers:
+                lines.append(f"Player powers ({len(combat_powers)}):")
+                append_power_lines(lines, combat_powers, include_type=True)
             for enemy in combat.get("enemies") or []:
                 intents = ",".join(str(intent.get("type")) for intent in enemy.get("intents") or []) or "none"
-                lines.append(f"  enemy [{enemy.get('index')}] {name(enemy.get('name'))} hp={enemy.get('hp')}/{enemy.get('max_hp')} block={enemy.get('block', 0)} intents={intents}")
+                powers = enemy.get("powers") or []
+                power_text = ""
+                if powers:
+                    power_text = " powers=" + ",".join(power_label(power) for power in powers)
+                lines.append(f"  enemy [{enemy.get('index')}] {name(enemy.get('name'))} hp={enemy.get('hp')}/{enemy.get('max_hp')} block={enemy.get('block', 0)} intents={intents}{power_text}")
+                if powers:
+                    append_power_lines(lines, powers, prefix="    ", include_type=True)
         cards = state.get("cards", []) or []
         lines.append(f"Selectable cards ({len(cards)}):")
         for card in cards:
