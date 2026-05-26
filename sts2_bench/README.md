@@ -59,9 +59,10 @@ and `full` when debugging exact prompts and model responses.
 The LLM agent expects an OpenAI-compatible chat completions endpoint.  Examples:
 Ollama, LM Studio, vLLM, llama.cpp server.
 
-Non-secret defaults live in `sts2_bench/benchmark.yaml`.  The file is tracked
-by git and documents each setting inline.  Local secrets still come from `.env`;
-copy the template and fill in keys locally:
+Non-secret defaults live in `sts2_bench/benchmark.yaml`.  The tracked defaults
+run the random baseline with generated seeds so a fresh checkout is safe to
+smoke test before any LLM credentials are configured.  Local secrets still come
+from `.env`; copy the template and fill in keys locally:
 
 ```bash
 cp .env.example .env
@@ -73,11 +74,12 @@ Supported `.env` keys:
 - `OPENAI_API_KEY`
 
 Supported `benchmark.yaml` keys are `agent`, `base_url`, `model`,
-`prompt_style`, `include_json_state`, `character`, `ascension`, `lang`,
-`seeds`, `count`, `max_steps`, `out`, `log_level`, `print_prompts`,
-`print_model_output`, `include_full_map`, and `allow_repeat_views`.  The file is
-loaded with OmegaConf; the current runner reads these settings from top-level
-scalar keys.
+`prompt_style`, `include_json_state`, `memory_enabled`, `memory_window`,
+`character`, `ascension`, `lang`, `seeds`, `count`, `max_steps`, `out`,
+`log_level`, `print_prompts`, `print_model_output`, `include_full_map`, and
+`allow_repeat_views`.  The file is loaded with OmegaConf when available, with a
+small top-level scalar fallback for basic commands before dependencies are
+installed.
 
 Precedence is: CLI arguments, shell environment variables, `.env`,
 `sts2_bench/benchmark.yaml`, then code defaults.  Shell overrides can still use
@@ -107,7 +109,8 @@ DeepSeek smoke test via `.env` and `benchmark.yaml`:
 
 ```bash
 # In .env, set DEEPSEEK_API_KEY=...
-# In sts2_bench/benchmark.yaml, set agent/model/count/max_steps/print_*.
+# In sts2_bench/benchmark.yaml, set agent=llm, base_url, model,
+# count, max_steps, and print_* as needed.
 python3 -m sts2_bench.run_benchmark
 ```
 

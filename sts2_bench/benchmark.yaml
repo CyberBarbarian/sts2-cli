@@ -3,22 +3,22 @@
 # API key 不要写在这里；请写到仓库根目录的 .env。
 
 # 选择使用的 agent。random 表示随机策略；llm 表示调用 OpenAI-compatible API。
-agent: llm
+agent: random
 
 # OpenAI-compatible API 的基础地址。DeepSeek 可以使用 https://api.deepseek.com 或 https://api.deepseek.com/v1。
-base_url: https://api.deepseek.com
+base_url: ""
 
 # 调用的模型名称。需要和对应 API provider 支持的模型名一致。
-model: deepseek-chat
+model: ""
 
 # Prompt 模板风格。default 输出简短 JSON；analysis 要求模型给出局势分析、计算、候选动作比较后再选择 action。
-prompt_style: analysis
+prompt_style: default
 
 # 是否在 prompt 中附加 Compact state JSON。false 可以减少 token 和重复信息；true 适合调试结构化 state。
 include_json_state: false
 
 # 是否在 agent prompt 中加入局内短期记忆。这个记忆属于 agent 方法，不属于环境原始 state。
-memory_enabled: true
+memory_enabled: false
 
 # 短期记忆保留最近多少个已选择 action。数值越大越能记住近期操作，但 prompt 会更长。
 memory_window: 8
@@ -33,7 +33,7 @@ ascension: 0
 lang: en
 
 # 固定 seed 文件路径。空字符串表示自动生成 bench_0000、bench_0001 等 seed。
-seeds: "/Users/shenqi/Desktop/Projects/sts2-cli/sts2_bench/seeds_ironclad_a0.json"
+seeds: ""
 
 # 本次运行的局数。
 count: 1
@@ -42,10 +42,10 @@ count: 1
 max_steps: 300
 
 # JSONL 输出路径。空字符串表示不写 trace 文件，只在终端打印结果。
-out: results/deepseek_chat_ironclad_a0_mem.jsonl
+out: results/random_ironclad_a0.jsonl
 
 # JSONL 记录详细程度。metrics 最小；decisions 记录轻量决策摘要；full 记录完整 state、prompt、raw response。
-log_level: full
+log_level: metrics
 
 # 是否在终端打印每一步发给模型的 prompt。调试时可以 true，正式 benchmark 建议 false。
 print_prompts: false

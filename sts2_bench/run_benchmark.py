@@ -97,6 +97,57 @@ def load_dotenv(path: Path = LOCAL_ENV) -> None:
     load_env_file(path)
 
 
+def _parse_config_scalar(value: str) -> object:
+    value = value.strip()
+    if not value:
+        return None
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+
+    normalized = value.lower()
+    if normalized in {"true", "false"}:
+        return normalized == "true"
+    if normalized in {"null", "none", "~"}:
+        return None
+
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _load_simple_yaml_mapping(path: Path) -> dict[str, object]:
+    """Parse the tracked benchmark config without requiring a YAML dependency.
+
+    The committed config intentionally uses only top-level scalar values, so a
+    small fallback parser keeps basic commands such as `--help` usable before
+    optional benchmark dependencies are installed.
+    """
+
+    data: dict[str, object] = {}
+    for lineno, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            raise ValueError(f"{path}:{lineno} must use 'key: value' syntax")
+
+        key, raw_value = line.split(":", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"{path}:{lineno} has an empty key")
+
+        value = raw_value.strip()
+        if value and not value.startswith(("'", '"')):
+            value = value.split(" #", 1)[0].strip()
+        data[key] = _parse_config_scalar(value)
+    return data
+
+
 def load_benchmark_config(path: Path = TRACKED_CONFIG) -> None:
     """Load tracked benchmark defaults from YAML.
 
@@ -109,13 +160,10 @@ def load_benchmark_config(path: Path = TRACKED_CONFIG) -> None:
 
     try:
         from omegaconf import OmegaConf
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "OmegaConf is required to read sts2_bench/benchmark.yaml. "
-            "Install it with `python3 -m pip install omegaconf`."
-        ) from exc
-
-    data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    except ModuleNotFoundError:
+        data = _load_simple_yaml_mapping(path)
+    else:
+        data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
     if data is None:
         return
     if not isinstance(data, dict):
