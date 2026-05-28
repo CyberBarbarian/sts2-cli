@@ -115,6 +115,37 @@ def test_card_select_can_skip_even_when_min_select_is_positive():
     assert any(action.kind == "card_select_skip" for action in actions)
 
 
+def test_bundle_select_action_labels_include_pack_card_names():
+    state = {
+        "decision": "bundle_select",
+        "bundles": [
+            {
+                "index": 0,
+                "cards": [
+                    {"name": "Setup Strike"},
+                    {"name": "Cinder"},
+                    {"name": "Ashen Strike"},
+                ],
+            },
+            {
+                "index": 1,
+                "cards": [
+                    {"name": "Iron Wave"},
+                    {"name": "Shrug It Off"},
+                    {"name": "Dismantle"},
+                ],
+            },
+        ],
+    }
+
+    actions = [action for action in build_legal_actions(state) if action.kind == "bundle_select"]
+
+    assert [action.label for action in actions] == [
+        "select bundle 0: Setup Strike, Cinder, Ashen Strike",
+        "select bundle 1: Iron Wave, Shrug It Off, Dismantle",
+    ]
+
+
 def test_combat_reward_exposes_skip_and_potion_discard_shortcuts():
     state = {
         "decision": "combat_reward",
@@ -266,6 +297,51 @@ def test_openai_compat_agent_prompt_includes_short_term_memory():
     assert "floor=3" in prompt
     assert "action=go to Monster at col=1 row=3" in prompt
     assert "Need one more hallway reward before resting." in prompt
+
+
+def test_openai_compat_agent_factual_memory_records_transition_diffs_not_reasons():
+    agent = OpenAICompatAgent(
+        base_url="http://127.0.0.1:1",
+        model="test",
+        memory_enabled=True,
+        memory_window=2,
+        memory_mode="factual_diff",
+    )
+    old_state = {
+        "decision": "combat_play",
+        "context": {"act": 1, "floor": 2, "room_type": "Monster"},
+        "player": {"hp": 80, "max_hp": 80, "gold": 0, "deck_size": 10},
+        "round": 1,
+        "energy": 3,
+        "max_energy": 3,
+        "draw_pile_count": 5,
+        "discard_pile_count": 0,
+        "hand": [{"index": 0, "name": "Strike", "cost": 1, "type": "Attack", "target_type": "AnyEnemy", "can_play": True}],
+        "enemies": [{"index": 0, "name": "Jaw Worm", "hp": 20, "max_hp": 40, "block": 0}],
+    }
+    new_state = {
+        **old_state,
+        "energy": 2,
+        "hand": [],
+        "discard_pile_count": 1,
+        "enemies": [{"index": 0, "name": "Jaw Worm", "hp": 14, "max_hp": 40, "block": 0}],
+    }
+    action = next(action for action in build_legal_actions(old_state) if action.label.startswith("play card 0"))
+
+    agent.record_transition(
+        old_state,
+        action,
+        {"parsed": {"reason": "This reason should not be stored."}},
+        new_state,
+    )
+    prompt = agent.build_prompt(new_state, build_legal_actions(new_state))
+
+    assert "Episode memory:" in prompt
+    assert "action=play card 0: Strike on enemy 0: Jaw Worm" in prompt
+    assert "changes=energy: 3/3 -> 2/3" in prompt
+    assert "discard_pile: 0 -> 1" in prompt
+    assert "enemy Jaw Worm[0]: hp 20/40 -> 14/40" in prompt
+    assert "This reason should not be stored." not in prompt
 
 
 def test_agent_memory_resets_between_runs():

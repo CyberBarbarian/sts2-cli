@@ -503,6 +503,28 @@ def append_pile_view(lines: list[str], state: dict[str, Any], pile_name: str) ->
         append_card_lines(lines, card_for_render)
 
 
+def append_bundle_lines(lines: list[str], bundles: list[dict[str, Any]]) -> None:
+    lines.append(f"Card packs ({len(bundles)}):")
+    if not bundles:
+        lines.append("  No card packs available.")
+        return
+
+    for bundle_idx, bundle in enumerate(bundles):
+        index = bundle.get("index", bundle_idx)
+        lines.append(f"  Pack [{index}]:")
+        cards = bundle.get("cards") or []
+        if not cards:
+            lines.append("    No cards in this pack.")
+            continue
+        for card_idx, card in enumerate(cards):
+            if not isinstance(card, dict):
+                continue
+            card_for_render = dict(card)
+            if card_for_render.get("index") is None:
+                card_for_render["index"] = card_idx
+            append_card_lines(lines, card_for_render, prefix="    ")
+
+
 def power_kind(power: dict[str, Any]) -> str:
     power_type = str(power.get("type") or power.get("power_type") or "").lower()
     if "debuff" in power_type:
@@ -871,6 +893,10 @@ def render_state_text(state: dict[str, Any]) -> str:
         for card in cards:
             append_card_lines(lines, card)
         lines.append(f"Can skip: {state.get('can_skip', True)}")
+
+    elif decision == "bundle_select":
+        bundles = state.get("bundles", []) or state.get("options", []) or []
+        append_bundle_lines(lines, bundles)
 
     elif decision == "combat_reward":
         rewards = state.get("rewards", []) or []

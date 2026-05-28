@@ -78,6 +78,21 @@ def _card_select_label(cards: list[dict[str, Any]]) -> str:
     return f"select cards {indices}: {names}"
 
 
+def _bundle_label(bundle: dict[str, Any]) -> str:
+    index = bundle.get("index")
+    title = _name(bundle.get("name") or bundle.get("title"))
+    if title != "?":
+        return f"select bundle {index}: {title}"
+
+    cards = bundle.get("cards") or []
+    card_names = [_name(card.get("name")) for card in cards if isinstance(card, dict)]
+    card_names = [card_name for card_name in card_names if card_name != "?"]
+    if card_names:
+        return f"select bundle {index}: {', '.join(card_names)}"
+
+    return f"select bundle {index}"
+
+
 def _card_select_actions(cards: list[dict[str, Any]], min_select: int, max_select: int) -> list[dict[str, Any]]:
     if not cards or max_select <= 0:
         return []
@@ -342,7 +357,7 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
         for bundle in state.get("bundles", []) or state.get("options", []) or []:
             raw.append(
                 _action(
-                    f"select bundle {bundle.get('index')}: {_name(bundle.get('name') or bundle.get('title'))}",
+                    _bundle_label(bundle),
                     "select_bundle",
                     "bundle_select",
                     bundle_index=bundle.get("index"),

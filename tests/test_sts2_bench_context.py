@@ -154,6 +154,59 @@ def test_view_draw_pile_uses_card_rendering_and_compact_state_keeps_requested_pi
     assert "draw_pile" in compact["viewed"]
 
 
+def test_bundle_select_renders_visible_card_pack_details():
+    state = {
+        "decision": "bundle_select",
+        "context": {"act": 1, "floor": 1, "room_type": "Event"},
+        "player": {"hp": 80, "max_hp": 80, "gold": 0, "deck_size": 11},
+        "bundles": [
+            {
+                "index": 0,
+                "cards": [
+                    {
+                        "name": "Setup Strike",
+                        "cost": 1,
+                        "type": "Attack",
+                        "rarity": "Common",
+                        "stats": {"damage": 7, "strengthpower": 2},
+                        "description": "Deal 7 damage.\nGain 2 Strength this turn.",
+                        "after_upgrade": {
+                            "cost": 1,
+                            "stats": {"damage": 10, "strengthpower": 2},
+                            "description": "Deal 10 damage.\nGain 2 Strength this turn.",
+                        },
+                    }
+                ],
+            },
+            {
+                "index": 1,
+                "cards": [
+                    {
+                        "name": "Shrug It Off",
+                        "cost": 1,
+                        "type": "Skill",
+                        "rarity": "Common",
+                        "stats": {"block": 8, "cards": 1},
+                        "description": "Gain 8 Block.\nDraw 1 card.",
+                    }
+                ],
+            },
+        ],
+    }
+
+    text = render_state_text(state)
+
+    assert "Card packs (2):" in text
+    assert "Pack [0]:" in text
+    assert "[0] Setup Strike cost=1 Attack rarity=Common damage=7 strengthpower=2" in text
+    assert "description: Deal 7 damage. Gain 2 Strength this turn." in text
+    assert "upgrade: damage 7 -> 10" in text
+    assert "upgrade_description: Deal 10 damage. Gain 2 Strength this turn." in text
+    assert "Pack [1]:" in text
+    assert "[0] Shrug It Off cost=1 Skill rarity=Common block=8 cards=1" in text
+    assert "description: Gain 8 Block. Draw 1 card." in text
+
+
 def test_view_discard_pile_with_hidden_details_matches_cli_message():
     state = {
         "decision": "map_select",

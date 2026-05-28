@@ -1923,21 +1923,53 @@ public class RunSimulator
         try
         {
             Log($"Claiming combat reward {rewardIndex}: {reward.GetType().Name}");
-            reward.OnSelectWrapper().GetAwaiter().GetResult();
-            _syncCtx.Pump();
-            _pendingRewards.RemoveAt(rewardIndex);
-            if (_pendingRewards.Count == 0)
+            var task = Task.Run(() => reward.OnSelectWrapper());
+            _pendingEventOptionTask = task;
+            for (int i = 0; i < 100; i++)
             {
-                _pendingRewards = null;
-                _rewardsProcessed = true;
+                _syncCtx.Pump();
+                if (HasPendingHeadlessChoice()) break;
+                if (task.IsCompleted) break;
+                Thread.Sleep(10);
             }
+
+            if (HasPendingHeadlessChoice())
+            {
+                RemovePendingCombatReward(reward);
+                WaitForActionExecutor();
+                return DetectDecisionPoint();
+            }
+
+            if (!task.IsCompleted) task.Wait(2000);
+            _syncCtx.Pump();
+            if (!task.IsCompleted)
+                return Error($"Claim reward did not complete: {reward.GetType().Name}");
+            if (task.IsFaulted)
+                return Error($"Claim reward failed: {task.Exception?.GetBaseException().Message}");
+
+            _pendingEventOptionTask = null;
+            RemovePendingCombatReward(reward);
         }
         catch (Exception ex)
         {
+            _pendingEventOptionTask = null;
             return Error($"Claim reward failed: {ex.Message}");
         }
 
         return DetectDecisionPoint();
+    }
+
+    private void RemovePendingCombatReward(Reward reward)
+    {
+        if (_pendingRewards == null)
+            return;
+
+        _pendingRewards.Remove(reward);
+        if (_pendingRewards.Count == 0)
+        {
+            _pendingRewards = null;
+            _rewardsProcessed = true;
+        }
     }
 
     private Dictionary<string, object?> DoSkipCombatReward(Player player, Dictionary<string, object?>? args)
@@ -6665,7 +6697,7 @@ public class RunSimulator
 
             // Executor may stay "running" while the game awaits headless card selection / reward (e.g. Attack Potion).
             // Spinning here would time out and downstream code could mis-handle an in-flight potion use (BUG-026).
-            if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
+            if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
                 return;
 
             var executor = RunManager.Instance.ActionExecutor;

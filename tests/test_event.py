@@ -90,6 +90,22 @@ class TestNeowEvent:
         assert source["title"] == lead_paperweight["title"]
         assert source["description"] == lead_paperweight["description"]
 
+    def test_neow_scroll_boxes_reward_returns_bundle_selection(self, game):
+        state = game.start(seed="bench_0000")
+        neows_bones = next(o for o in state["options"] if o["title"] == "Neow's Bones")
+
+        state = game.act("choose_option", option_index=neows_bones["index"])
+
+        scroll_boxes = next(r for r in state["rewards"] if r["name"] == "Scroll Boxes")
+        state = game.act("claim_reward", reward_index=scroll_boxes["index"])
+
+        assert state["decision"] == "bundle_select"
+        assert len(state["bundles"]) == 2
+
+        state = game.act("select_bundle", bundle_index=0)
+
+        assert state["decision"] in {"combat_reward", "map_select"}
+
     def test_neow_hefty_tablet_card_select_exports_engine_skip_affordance(self, game):
         state = game.start(character="Defect", seed="manual-functional-defect-20260519-2")
         hefty_tablet = next(o for o in state["options"] if o["title"] == "Hefty Tablet")

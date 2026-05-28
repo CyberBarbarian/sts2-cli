@@ -11,6 +11,12 @@ base_url: https://api.deepseek.com
 # 调用的模型名称。需要和对应 API provider 支持的模型名一致。
 model: deepseek-chat
 
+# 单次 LLM HTTP 请求超时时间，单位秒。调试 DeepSeek 卡住时可以先设为 15-30。
+llm_timeout: 30
+
+# LLM 请求或 JSON 解析失败后的重试次数。调试连通性时建议设为 0，避免每一步等待太久。
+llm_max_retries: 0
+
 # Prompt 模板风格。default 输出简短 JSON；analysis 要求模型给出局势分析、计算、候选动作比较后再选择 action。
 prompt_style: analysis
 
@@ -22,6 +28,9 @@ memory_enabled: true
 
 # 短期记忆保留最近多少个已选择 action。数值越大越能记住近期操作，但 prompt 会更长。
 memory_window: 8
+
+# 记忆内容类型。action_reason 记录模型旧理由；factual_diff 记录 action 后真实 state 变化，更适合严肃 benchmark。
+memory_mode: factual_diff
 
 # 选择角色。可选 Ironclad、Silent、Defect、Regent、Necrobinder。
 character: Ironclad
@@ -39,19 +48,19 @@ seeds: ""
 count: 1
 
 # 每局最多允许的决策步数。这是安全上限；做爬塔层数 benchmark 时应设置得足够大。
-max_steps: 300
+max_steps: 500
 
 # JSONL 输出路径。空字符串表示不写 trace 文件，只在终端打印结果。
-out: results/deepseek_chat_ironclad_a0_mem.jsonl
+out:
 
 # JSONL 记录详细程度。metrics 最小；decisions 记录轻量决策摘要；full 记录完整 state、prompt、raw response。
 log_level: full
 
 # 是否在终端打印每一步发给模型的 prompt。调试时可以 true，正式 benchmark 建议 false。
-print_prompts: false
+print_prompts: true
 
 # 是否在终端打印模型原始输出、解析结果和最终选择的 action。
-print_model_output: false
+print_model_output: true
 
 # 是否在 map_select 决策时自动附加完整地图。false 表示让模型主动选择 view map。
 include_full_map: true

@@ -10,7 +10,7 @@ from statistics import median
 from typing import Any, Iterable, Literal
 
 from .actions import LegalAction, build_legal_actions
-from .agents import Agent, OpenAICompatAgent, PromptStyle, RandomAgent
+from .agents import Agent, MemoryMode, OpenAICompatAgent, PromptStyle, RandomAgent
 from .context import build_last_action_result, compact_state
 from .process import Sts2Process
 
@@ -155,12 +155,13 @@ def run_one(
                 _print_model_output(step=step, decision=decision, action=action, meta=meta)
 
             logger and logger.write(_action_log_entry(log_level=log_level, step=step, decision=decision, action=action, meta=meta))
-            _record_agent_transition(agent, state, action, meta)
 
             if action.command.get("cmd") == "bench_view":
+                old_state = state
                 _count_view_action(result, state, action.command)
                 result.steps = step + 1
                 state = _apply_view_action(proc, state, action.command)
+                _record_agent_transition(agent, old_state, action, meta, state)
                 continue
 
             result.game_action_count += 1
@@ -174,6 +175,7 @@ def run_one(
                 _fill_result(result, next_state)
                 return result
             state = _attach_last_action_result(old_state, next_state, action)
+            _record_agent_transition(agent, old_state, action, meta, state)
 
         result.truncated = True
         result.extra["truncation_reason"] = f"max_steps exceeded ({max_steps})"
@@ -212,10 +214,14 @@ def _record_agent_transition(
     state: dict[str, Any],
     action: LegalAction,
     meta: dict[str, Any],
+    next_state: dict[str, Any] | None = None,
 ) -> None:
     record = getattr(agent, "record_transition", None)
     if callable(record):
-        record(state, action, meta)
+        try:
+            record(state, action, meta, next_state)
+        except TypeError:
+            record(state, action, meta)
 
 
 def _apply_view_action(proc: Sts2Process, state: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
@@ -475,10 +481,13 @@ def agent_from_args(
     base_url: str | None,
     model: str | None,
     api_key: str,
+    llm_timeout: float = 120.0,
+    llm_max_retries: int = 2,
     include_json_state: bool = False,
     prompt_style: PromptStyle = "default",
     memory_enabled: bool = False,
     memory_window: int = 8,
+    memory_mode: MemoryMode = "action_reason",
 ) -> Agent:
     if kind == "random":
         return RandomAgent(
@@ -487,6 +496,7 @@ def agent_from_args(
             prompt_style=prompt_style,
             memory_enabled=memory_enabled,
             memory_window=memory_window,
+            memory_mode=memory_mode,
         )
     if kind == "llm":
         if not base_url or not model:
@@ -499,10 +509,13 @@ def agent_from_args(
             base_url=base_url,
             model=model,
             api_key=api_key,
+            timeout=llm_timeout,
+            max_retries=llm_max_retries,
             include_json_state=include_json_state,
             prompt_style=prompt_style,
             memory_enabled=memory_enabled,
             memory_window=memory_window,
+            memory_mode=memory_mode,
         )
     raise ValueError(f"Unknown agent kind: {kind}")
 

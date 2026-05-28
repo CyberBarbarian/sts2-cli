@@ -12,10 +12,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from .actions import LegalAction
-from .context import compact_state, render_state_text
+from .context import build_last_action_result, compact_state, render_state_text
 
 
 PromptStyle = Literal["default", "analysis"]
+MemoryMode = Literal["action_reason", "factual_diff"]
 
 
 class Agent(Protocol):
@@ -37,25 +38,37 @@ class ShortTermMemory:
     """Small per-episode memory owned by an agent, not by state rendering."""
 
     max_entries: int = 8
+    mode: MemoryMode = "action_reason"
     entries: list[str] = field(default_factory=list)
 
     def reset(self) -> None:
         self.entries.clear()
 
-    def remember(self, state: dict[str, Any], action: LegalAction, meta: dict[str, Any]) -> None:
+    def remember(
+        self,
+        state: dict[str, Any],
+        action: LegalAction,
+        meta: dict[str, Any],
+        next_state: dict[str, Any] | None = None,
+    ) -> None:
         if self.max_entries <= 0:
             return
+        if self.mode == "factual_diff":
+            entry = self._factual_entry(state, action, next_state)
+        else:
+            entry = self._action_reason_entry(state, action, meta)
+        if not entry:
+            return
 
-        context = state.get("context") or {}
+        self.entries.append(entry)
+        if len(self.entries) > self.max_entries:
+            del self.entries[: len(self.entries) - self.max_entries]
+
+    def _action_reason_entry(self, state: dict[str, Any], action: LegalAction, meta: dict[str, Any]) -> str:
         player = state.get("player") or {}
         parsed = meta.get("parsed") if isinstance(meta.get("parsed"), dict) else {}
         reason = _one_line(parsed.get("reason") or meta.get("reason") or "")
-        parts = [
-            f"decision={state.get('decision', '?')}",
-            f"act={state.get('act') or context.get('act', '?')}",
-            f"floor={state.get('floor') or context.get('floor', '?')}",
-            f"room={context.get('room_type', '?')}",
-        ]
+        parts = self._location_parts(state)
         if player:
             parts.append(f"hp={player.get('hp', '?')}/{player.get('max_hp', '?')}")
             parts.append(f"gold={player.get('gold', '?')}")
@@ -63,10 +76,44 @@ class ShortTermMemory:
         parts.append(f"action={action.label}")
         if reason:
             parts.append(f"reason={reason}")
+        return " | ".join(parts)
 
-        self.entries.append(" | ".join(parts))
-        if len(self.entries) > self.max_entries:
-            del self.entries[: len(self.entries) - self.max_entries]
+    def _factual_entry(
+        self,
+        state: dict[str, Any],
+        action: LegalAction,
+        next_state: dict[str, Any] | None,
+    ) -> str:
+        if next_state is None or action.command.get("cmd") == "bench_view":
+            return ""
+
+        result = next_state.get("last_action_result")
+        if not isinstance(result, dict):
+            result = build_last_action_result(
+                state,
+                next_state,
+                action_label=action.label,
+                action_kind=action.kind,
+            )
+        parts = self._location_parts(next_state)
+        parts.append(f"action={result.get('action_label') or action.label}")
+        before = result.get("decision_before")
+        after = result.get("decision_after")
+        if before is not None or after is not None:
+            parts.append(f"transition={before} -> {after}")
+        changes = [_one_line(change) for change in result.get("changes") or [] if _one_line(change)]
+        if changes:
+            parts.append("changes=" + "; ".join(changes))
+        return " | ".join(parts)
+
+    def _location_parts(self, state: dict[str, Any]) -> list[str]:
+        context = state.get("context") or {}
+        return [
+            f"decision={state.get('decision', '?')}",
+            f"act={state.get('act') or context.get('act', '?')}",
+            f"floor={state.get('floor') or context.get('floor', '?')}",
+            f"room={context.get('room_type', '?')}",
+        ]
 
     def render(self) -> str:
         if not self.entries:
@@ -168,11 +215,12 @@ class RandomAgent:
         prompt_style: PromptStyle = "default",
         memory_enabled: bool = False,
         memory_window: int = 8,
+        memory_mode: MemoryMode = "action_reason",
     ) -> None:
         self.rng = random.Random(seed)
         self.include_json_state = include_json_state
         self.prompt_style = prompt_style
-        self.memory = ShortTermMemory(memory_window) if memory_enabled else None
+        self.memory = ShortTermMemory(memory_window, mode=memory_mode) if memory_enabled else None
 
     def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
         return build_llm_prompt(
@@ -197,9 +245,15 @@ class RandomAgent:
         if self.memory:
             self.memory.reset()
 
-    def record_transition(self, state: dict[str, Any], action: LegalAction, meta: dict[str, Any]) -> None:
+    def record_transition(
+        self,
+        state: dict[str, Any],
+        action: LegalAction,
+        meta: dict[str, Any],
+        next_state: dict[str, Any] | None = None,
+    ) -> None:
         if self.memory:
-            self.memory.remember(state, action, meta)
+            self.memory.remember(state, action, meta, next_state)
 
 
 @dataclass
@@ -220,9 +274,10 @@ class OpenAICompatAgent:
     prompt_style: PromptStyle = "default"
     memory_enabled: bool = False
     memory_window: int = 8
+    memory_mode: MemoryMode = "action_reason"
 
     def __post_init__(self) -> None:
-        self.memory = ShortTermMemory(self.memory_window) if self.memory_enabled else None
+        self.memory = ShortTermMemory(self.memory_window, mode=self.memory_mode) if self.memory_enabled else None
 
     def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
         return build_llm_prompt(
@@ -302,9 +357,15 @@ class OpenAICompatAgent:
         if self.memory:
             self.memory.reset()
 
-    def record_transition(self, state: dict[str, Any], action: LegalAction, meta: dict[str, Any]) -> None:
+    def record_transition(
+        self,
+        state: dict[str, Any],
+        action: LegalAction,
+        meta: dict[str, Any],
+        next_state: dict[str, Any] | None = None,
+    ) -> None:
         if self.memory:
-            self.memory.remember(state, action, meta)
+            self.memory.remember(state, action, meta, next_state)
 
     def _chat(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         base = self.base_url.rstrip("/")
