@@ -11,7 +11,7 @@ from typing import Any, Iterable, Literal
 
 from .actions import LegalAction, build_legal_actions
 from .agents import Agent, OpenAICompatAgent, PromptStyle, RandomAgent
-from .context import compact_state
+from .context import build_last_action_result, compact_state
 from .process import Sts2Process
 
 
@@ -34,6 +34,9 @@ class RunResult:
     game_action_count: int = 0
     view_deck_count: int = 0
     view_map_count: int = 0
+    view_draw_pile_count: int = 0
+    view_discard_pile_count: int = 0
+    view_exhaust_pile_count: int = 0
     repeated_view_count: int = 0
     model_fallback_count: int = 0
     invalid_states: int = 0
@@ -162,13 +165,15 @@ def run_one(
 
             result.game_action_count += 1
             result.steps = step + 1
-            state = proc.send(action.command)
-            if state.get("type") == "error":
+            old_state = state
+            next_state = proc.send(action.command)
+            if next_state.get("type") == "error":
                 result.invalid_states += 1
-                logger and logger.write({"type": "error", "step": step, "state": state})
-                result.error = state.get("message") or "Headless engine returned an error state"
-                _fill_result(result, state)
+                logger and logger.write({"type": "error", "step": step, "state": next_state})
+                result.error = next_state.get("message") or "Headless engine returned an error state"
+                _fill_result(result, next_state)
                 return result
+            state = _attach_last_action_result(old_state, next_state, action)
 
         result.truncated = True
         result.extra["truncation_reason"] = f"max_steps exceeded ({max_steps})"
@@ -222,7 +227,21 @@ def _apply_view_action(proc: Sts2Process, state: dict[str, Any], command: dict[s
         if map_state.get("type") == "map":
             return {**state, "view_map": True, "full_map": map_state}
         return {**state, "view_map": True, "view_map_error": map_state}
+    if view in {"draw", "discard", "exhaust"}:
+        return {**state, f"view_{view}_pile": True}
     return state
+
+
+def _attach_last_action_result(old_state: dict[str, Any], new_state: dict[str, Any], action: LegalAction) -> dict[str, Any]:
+    return {
+        **new_state,
+        "last_action_result": build_last_action_result(
+            old_state,
+            new_state,
+            action_label=action.label,
+            action_kind=action.kind,
+        ),
+    }
 
 
 def _print_model_output(*, step: int, decision: Any, action: LegalAction, meta: dict[str, Any]) -> None:
@@ -258,6 +277,18 @@ def _count_view_action(result: RunResult, state: dict[str, Any], command: dict[s
         if state.get("view_map"):
             result.repeated_view_count += 1
         result.view_map_count += 1
+    elif view == "draw":
+        if state.get("view_draw_pile"):
+            result.repeated_view_count += 1
+        result.view_draw_pile_count += 1
+    elif view == "discard":
+        if state.get("view_discard_pile"):
+            result.repeated_view_count += 1
+        result.view_discard_pile_count += 1
+    elif view == "exhaust":
+        if state.get("view_exhaust_pile"):
+            result.repeated_view_count += 1
+        result.view_exhaust_pile_count += 1
 
 
 def _decision_log_entry(
@@ -314,7 +345,7 @@ def _action_log_entry(
 def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
     context = state.get("context") or {}
     player = state.get("player") or {}
-    return {
+    summary = {
         "decision": state.get("decision"),
         "act": state.get("act") or context.get("act"),
         "floor": state.get("floor") or context.get("floor"),
@@ -330,9 +361,31 @@ def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
         "reward_count": len(state.get("rewards") or []),
         "viewed": [
             label
-            for label, key in (("deck", "view_deck"), ("map", "view_map"))
+            for label, key in (
+                ("deck", "view_deck"),
+                ("map", "view_map"),
+                ("draw_pile", "view_draw_pile"),
+                ("discard_pile", "view_discard_pile"),
+                ("exhaust_pile", "view_exhaust_pile"),
+            )
             if state.get(key)
         ],
+    }
+    last_action_result = _last_action_result_summary(state.get("last_action_result"))
+    if last_action_result is not None:
+        summary["last_action_result"] = last_action_result
+    return summary
+
+
+def _last_action_result_summary(result: Any) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return None
+    return {
+        "action_label": result.get("action_label"),
+        "action_kind": result.get("action_kind"),
+        "decision_before": result.get("decision_before"),
+        "decision_after": result.get("decision_after"),
+        "changes": result.get("changes", [])[:8],
     }
 
 
@@ -367,7 +420,14 @@ def summarize(results: Iterable[RunResult]) -> dict[str, Any]:
     complete = [row for row in rows if row.error is None and not row.truncated]
     floors = [row.floor or 0 for row in rows]
     total_steps = sum(row.steps for row in rows)
-    total_view_actions = sum(row.view_deck_count + row.view_map_count for row in rows)
+    total_view_actions = sum(
+        row.view_deck_count
+        + row.view_map_count
+        + row.view_draw_pile_count
+        + row.view_discard_pile_count
+        + row.view_exhaust_pile_count
+        for row in rows
+    )
     total_game_actions = sum(row.game_action_count for row in rows)
     truncated = sum(1 for row in rows if row.truncated)
     errors = sum(1 for row in rows if row.error is not None)
@@ -394,6 +454,9 @@ def summarize(results: Iterable[RunResult]) -> dict[str, Any]:
         "avg_game_action_count": total_game_actions / len(rows),
         "avg_view_deck_count": sum(row.view_deck_count for row in rows) / len(rows),
         "avg_view_map_count": sum(row.view_map_count for row in rows) / len(rows),
+        "avg_view_draw_pile_count": sum(row.view_draw_pile_count for row in rows) / len(rows),
+        "avg_view_discard_pile_count": sum(row.view_discard_pile_count for row in rows) / len(rows),
+        "avg_view_exhaust_pile_count": sum(row.view_exhaust_pile_count for row in rows) / len(rows),
         "avg_view_action_count": total_view_actions / len(rows),
         "avg_repeated_view_count": sum(row.repeated_view_count for row in rows) / len(rows),
         "view_action_rate": total_view_actions / total_steps if total_steps else 0.0,

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .actions import LegalAction, build_legal_actions
-from .context import compact_state
+from .context import build_last_action_result, compact_state
 from .process import Sts2Process
 
 
@@ -64,7 +64,20 @@ class Sts2Env:
             self.legal_actions = build_legal_actions(self.state, allow_repeat_views=self.allow_repeat_views)
             return self.observation(), 0.0, False, False, self.info()
 
-        self.state = self.process.send(action.command)
+        next_state = self.process.send(action.command)
+        if next_state.get("type") == "error":
+            self.state = next_state
+            self.legal_actions = []
+            return self.observation(), -5.0, True, False, {**self.info(), "engine_error": True}
+        self.state = {
+            **next_state,
+            "last_action_result": build_last_action_result(
+                old_state,
+                next_state,
+                action_label=action.label,
+                action_kind=action.kind,
+            ),
+        }
         terminated = self.state.get("decision") == "game_over"
         reward = shaped_reward(old_state, self.state, invalid=False)
         self.legal_actions = build_legal_actions(self.state, allow_repeat_views=self.allow_repeat_views)
@@ -80,6 +93,8 @@ class Sts2Env:
             if map_state.get("type") == "map":
                 return {**self.state, "view_map": True, "full_map": map_state}
             return {**self.state, "view_map": True, "view_map_error": map_state}
+        if view in {"draw", "discard", "exhaust"}:
+            return {**self.state, f"view_{view}_pile": True}
         return self.state
 
     def observation(self) -> dict[str, Any]:

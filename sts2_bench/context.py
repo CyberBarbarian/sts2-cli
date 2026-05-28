@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from typing import Any
 
 
@@ -30,6 +31,12 @@ MAP_ICONS = {
     "Event": "?",
     "Unknown": "?",
     "Ancient": "A",
+}
+
+PILE_VIEW_SPECS = {
+    "draw": ("view_draw_pile", "Draw pile"),
+    "discard": ("view_discard_pile", "Discard pile"),
+    "exhaust": ("view_exhaust_pile", "Exhaust pile"),
 }
 
 
@@ -85,6 +92,30 @@ def compact_deck(deck: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def pile_cards_from_state(state: dict[str, Any], pile_name: str) -> list[dict[str, Any]]:
+    direct = state.get(f"{pile_name}_pile")
+    if isinstance(direct, list):
+        return direct
+    combat = state.get("combat")
+    if isinstance(combat, dict):
+        nested = combat.get(f"{pile_name}_pile")
+        if isinstance(nested, list):
+            return nested
+    return []
+
+
+def pile_count_from_state(state: dict[str, Any], pile_name: str, cards: list[dict[str, Any]] | None = None) -> int:
+    count = state.get(f"{pile_name}_pile_count")
+    if isinstance(count, (int, float)):
+        return int(count)
+    combat = state.get("combat")
+    if isinstance(combat, dict):
+        nested_count = combat.get(f"{pile_name}_pile_count")
+        if isinstance(nested_count, (int, float)):
+            return int(nested_count)
+    return len(cards if cards is not None else pile_cards_from_state(state, pile_name))
+
+
 def compact_state(state: dict[str, Any]) -> dict[str, Any]:
     """Return a JSON-friendly state for logs and LLM prompts."""
 
@@ -106,6 +137,16 @@ def compact_state(state: dict[str, Any]) -> dict[str, Any]:
             data["viewed_map"] = render_full_map(full_map, state.get("choices", []) or [])
         else:
             data["viewed_map_error"] = _compact_obj(state.get("view_map_error") or "Map view unavailable.")
+
+    for pile_name, (flag, _title) in PILE_VIEW_SPECS.items():
+        if not state.get(flag):
+            continue
+        cards = pile_cards_from_state(state, pile_name)
+        viewed.append(f"{pile_name}_pile")
+        data[f"viewed_{pile_name}_pile"] = {
+            "count": pile_count_from_state(state, pile_name, cards),
+            "cards": _compact_obj(cards),
+        }
 
     if viewed:
         data["viewed"] = viewed
@@ -444,6 +485,24 @@ def append_deck_view(lines: list[str], player: dict[str, Any]) -> None:
         append_card_lines(lines, card_for_render, suffix=suffix)
 
 
+def append_pile_view(lines: list[str], state: dict[str, Any], pile_name: str) -> None:
+    _flag, title = PILE_VIEW_SPECS[pile_name]
+    cards = pile_cards_from_state(state, pile_name)
+    count = pile_count_from_state(state, pile_name, cards)
+    lines.append(f"{title} ({count}):")
+    if not cards:
+        if count == 0:
+            lines.append("  Empty")
+        else:
+            lines.append("  Card details are only available during combat.")
+        return
+    for idx, card in enumerate(cards):
+        card_for_render = dict(card)
+        if card_for_render.get("index") is None:
+            card_for_render["index"] = idx
+        append_card_lines(lines, card_for_render)
+
+
 def power_kind(power: dict[str, Any]) -> str:
     power_type = str(power.get("type") or power.get("power_type") or "").lower()
     if "debuff" in power_type:
@@ -481,7 +540,8 @@ def append_power_lines(lines: list[str], powers: list[dict[str, Any]], *, prefix
 
 
 def append_viewed_information(lines: list[str], state: dict[str, Any], player: dict[str, Any]) -> None:
-    if not (state.get("view_deck") or state.get("view_map")):
+    has_pile_view = any(state.get(flag) for flag, _title in PILE_VIEW_SPECS.values())
+    if not (state.get("view_deck") or state.get("view_map") or has_pile_view):
         return
 
     lines.append("")
@@ -499,6 +559,182 @@ def append_viewed_information(lines: list[str], state: dict[str, Any], player: d
             lines.append(f"  Map view unavailable: {state.get('view_map_error')}")
         else:
             lines.append("  Map view unavailable.")
+
+    for pile_name, (flag, _title) in PILE_VIEW_SPECS.items():
+        if not state.get(flag):
+            continue
+        lines.append(f"Viewed {pile_name} pile:")
+        append_pile_view(lines, state, pile_name)
+
+
+def _value_text(value: Any) -> str:
+    return "?" if value is None else str(value)
+
+
+def _add_change(changes: list[str], label: str, old: Any, new: Any) -> None:
+    if old != new:
+        changes.append(f"{label}: {_value_text(old)} -> {_value_text(new)}")
+
+
+def _hp_pair(entity: dict[str, Any]) -> str:
+    return f"{entity.get('hp', '?')}/{entity.get('max_hp', '?')}"
+
+
+def _named_counter(items: list[dict[str, Any]], *, upgrade_sensitive: bool = False) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    for item in items:
+        if not item:
+            continue
+        if not isinstance(item, dict):
+            counter[name(item)] += 1
+            continue
+        label = name(item.get("name"))
+        if upgrade_sensitive:
+            upgraded = item.get("upgrade_level", item.get("upgraded", 0)) or 0
+            if isinstance(upgraded, bool):
+                upgraded = 1 if upgraded else 0
+            if upgraded:
+                label += "+" if upgraded == 1 else f"+{upgraded}"
+        counter[label] += 1
+    return counter
+
+
+def _counter_delta_text(old_items: list[dict[str, Any]], new_items: list[dict[str, Any]], *, upgrade_sensitive: bool = False) -> str:
+    old_counter = _named_counter(old_items, upgrade_sensitive=upgrade_sensitive)
+    new_counter = _named_counter(new_items, upgrade_sensitive=upgrade_sensitive)
+    removed = old_counter - new_counter
+    added = new_counter - old_counter
+    parts = []
+    for item, count in sorted(removed.items()):
+        parts.append(f"-{item}" + (f"x{count}" if count > 1 else ""))
+    for item, count in sorted(added.items()):
+        parts.append(f"+{item}" + (f"x{count}" if count > 1 else ""))
+    return " ".join(parts)
+
+
+def _combat_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    combat = state.get("combat")
+    if isinstance(combat, dict) and combat:
+        return combat
+    if isinstance(state.get("enemies"), list):
+        return state
+    return {}
+
+
+def _enemy_key(enemy: dict[str, Any]) -> tuple[str, Any]:
+    return (name(enemy.get("name")), enemy.get("index"))
+
+
+def build_last_action_result(
+    old_state: dict[str, Any],
+    new_state: dict[str, Any],
+    *,
+    action_label: str,
+    action_kind: str,
+) -> dict[str, Any]:
+    """Build a compact transition summary for the next model-facing state."""
+
+    changes: list[str] = []
+    old_context = old_state.get("context") or {}
+    new_context = new_state.get("context") or {}
+    old_player = old_state.get("player") or {}
+    new_player = new_state.get("player") or {}
+
+    _add_change(changes, "act", old_state.get("act") or old_context.get("act"), new_state.get("act") or new_context.get("act"))
+    _add_change(changes, "floor", old_state.get("floor") or old_context.get("floor"), new_state.get("floor") or new_context.get("floor"))
+    _add_change(changes, "room", old_context.get("room_type"), new_context.get("room_type"))
+
+    if new_player:
+        if _hp_pair(old_player) != _hp_pair(new_player):
+            changes.append(f"hp: {_hp_pair(old_player)} -> {_hp_pair(new_player)}")
+        _add_change(changes, "block", old_player.get("block", 0), new_player.get("block", 0))
+        old_gold = old_player.get("gold")
+        new_gold = new_player.get("gold")
+        if old_gold != new_gold:
+            suffix = ""
+            if isinstance(old_gold, (int, float)) and isinstance(new_gold, (int, float)):
+                suffix = f" ({new_gold - old_gold:+})"
+            changes.append(f"gold: {_value_text(old_gold)} -> {_value_text(new_gold)}{suffix}")
+        _add_change(changes, "deck_size", old_player.get("deck_size"), new_player.get("deck_size"))
+
+        deck_delta = _counter_delta_text(old_player.get("deck", []) or [], new_player.get("deck", []) or [], upgrade_sensitive=True)
+        if deck_delta:
+            changes.append(f"deck: {deck_delta}")
+        relic_delta = _counter_delta_text(old_player.get("relics", []) or [], new_player.get("relics", []) or [])
+        if relic_delta:
+            changes.append(f"relics: {relic_delta}")
+        potion_delta = _counter_delta_text(old_player.get("potions", []) or [], new_player.get("potions", []) or [])
+        if potion_delta:
+            changes.append(f"potions: {potion_delta}")
+
+    old_combat = _combat_snapshot(old_state)
+    new_combat = _combat_snapshot(new_state)
+    if old_combat and new_combat:
+        _add_change(changes, "round", old_combat.get("round"), new_combat.get("round"))
+        old_energy = f"{old_combat.get('energy', '?')}/{old_combat.get('max_energy', '?')}"
+        new_energy = f"{new_combat.get('energy', '?')}/{new_combat.get('max_energy', '?')}"
+        if old_energy != new_energy:
+            changes.append(f"energy: {old_energy} -> {new_energy}")
+        for pile_name in ("draw", "discard", "exhaust"):
+            old_count = pile_count_from_state(old_combat, pile_name)
+            new_count = pile_count_from_state(new_combat, pile_name)
+            if old_count != new_count:
+                changes.append(f"{pile_name}_pile: {old_count} -> {new_count}")
+
+        old_hand = old_combat.get("hand")
+        new_hand = new_combat.get("hand")
+        if isinstance(old_hand, list) and isinstance(new_hand, list) and len(old_hand) != len(new_hand):
+            changes.append(f"hand_count: {len(old_hand)} -> {len(new_hand)}")
+
+    if old_combat and new_combat:
+        new_enemies = {
+            _enemy_key(enemy): enemy
+            for enemy in new_combat.get("enemies", []) or []
+            if isinstance(enemy, dict)
+        }
+        for old_enemy in old_combat.get("enemies", []) or []:
+            if not isinstance(old_enemy, dict):
+                continue
+            enemy_label = f"{name(old_enemy.get('name'))}[{old_enemy.get('index', '?')}]"
+            new_enemy = new_enemies.get(_enemy_key(old_enemy))
+            if not new_enemy:
+                changes.append(f"enemy {enemy_label}: defeated")
+                continue
+            enemy_parts = []
+            if _hp_pair(old_enemy) != _hp_pair(new_enemy):
+                enemy_parts.append(f"hp {_hp_pair(old_enemy)} -> {_hp_pair(new_enemy)}")
+            if old_enemy.get("block", 0) != new_enemy.get("block", 0):
+                enemy_parts.append(f"block {old_enemy.get('block', 0)} -> {new_enemy.get('block', 0)}")
+            if enemy_parts:
+                changes.append(f"enemy {enemy_label}: {'; '.join(enemy_parts)}")
+
+    if not changes:
+        changes.append("no visible state changes")
+
+    return {
+        "action_label": action_label,
+        "action_kind": action_kind,
+        "decision_before": old_state.get("decision", old_state.get("type")),
+        "decision_after": new_state.get("decision", new_state.get("type")),
+        "changes": changes,
+    }
+
+
+def append_last_action_result(lines: list[str], result: Any) -> None:
+    if not isinstance(result, dict):
+        return
+    lines.append("")
+    lines.append("Last game action result:")
+    if result.get("action_label"):
+        lines.append(f"  action: {result.get('action_label')}")
+    if result.get("action_kind"):
+        lines.append(f"  kind: {result.get('action_kind')}")
+    before = result.get("decision_before")
+    after = result.get("decision_after")
+    if before is not None or after is not None:
+        lines.append(f"  decision: {_value_text(before)} -> {_value_text(after)}")
+    for change in result.get("changes") or []:
+        lines.append(f"  {change}")
 
 
 def player_summary(player: dict[str, Any]) -> str:
@@ -576,6 +812,7 @@ def render_state_text(state: dict[str, Any]) -> str:
         f"Player: {player_summary(player)}",
     ]
     append_player_details(lines, player)
+    append_last_action_result(lines, state.get("last_action_result"))
 
     if decision == "combat_play":
         lines.append(
