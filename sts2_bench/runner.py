@@ -488,6 +488,7 @@ def agent_from_args(
     memory_enabled: bool = False,
     memory_window: int = 8,
     memory_mode: MemoryMode = "action_reason",
+    run_summary_enabled: bool = True,
 ) -> Agent:
     if kind == "random":
         return RandomAgent(
@@ -497,6 +498,7 @@ def agent_from_args(
             memory_enabled=memory_enabled,
             memory_window=memory_window,
             memory_mode=memory_mode,
+            run_summary_enabled=run_summary_enabled,
         )
     if kind == "llm":
         if not base_url or not model:
@@ -516,6 +518,7 @@ def agent_from_args(
             memory_enabled=memory_enabled,
             memory_window=memory_window,
             memory_mode=memory_mode,
+            run_summary_enabled=run_summary_enabled,
         )
     raise ValueError(f"Unknown agent kind: {kind}")
 

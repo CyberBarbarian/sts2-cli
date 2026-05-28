@@ -527,13 +527,13 @@ def append_bundle_lines(lines: list[str], bundles: list[dict[str, Any]]) -> None
 
 def power_kind(power: dict[str, Any]) -> str:
     power_type = str(power.get("type") or power.get("power_type") or "").lower()
+    amount = power.get("amount", 0)
+    if isinstance(amount, (int, float)) and amount < 0:
+        return "Debuff"
     if "debuff" in power_type:
         return "Debuff"
     if "buff" in power_type:
         return "Buff"
-    amount = power.get("amount", 0)
-    if isinstance(amount, (int, float)) and amount < 0:
-        return "Debuff"
     return "Power"
 
 

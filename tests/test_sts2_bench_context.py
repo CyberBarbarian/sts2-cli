@@ -71,7 +71,13 @@ def test_combat_power_descriptions_are_rendered_without_target_damage_preview():
                 "amount": 2,
                 "type": "Debuff",
                 "description": "Attacks deal 25% less damage.",
-            }
+            },
+            {
+                "name": "Strength",
+                "amount": -4,
+                "type": "Buff",
+                "description": "Strength adds additional damage to Attacks.",
+            },
         ],
         "enemies": [
             {
@@ -108,8 +114,9 @@ def test_combat_power_descriptions_are_rendered_without_target_damage_preview():
 
     text = render_state_text(state)
 
-    assert "Player powers (1):" in text
+    assert "Player powers (2):" in text
     assert "Debuff Weak(2): Attacks deal 25% less damage." in text
+    assert "Debuff Strength(-4): Strength adds additional damage to Attacks." in text
     assert "powers=Slippery(6)" in text
     assert "Buff Slippery(6): The next 6 times Vantom loses HP, it only loses 1 HP instead." in text
     assert "damage_by_target" not in text

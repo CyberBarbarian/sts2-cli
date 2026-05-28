@@ -299,6 +299,75 @@ def test_openai_compat_agent_prompt_includes_short_term_memory():
     assert "Need one more hallway reward before resting." in prompt
 
 
+def test_openai_compat_agent_prompt_includes_rule_based_run_summary():
+    agent = OpenAICompatAgent(
+        base_url="http://127.0.0.1:1",
+        model="test",
+        run_summary_enabled=True,
+    )
+    state = {
+        "decision": "combat_play",
+        "context": {
+            "act": 1,
+            "floor": 17,
+            "room_type": "Boss",
+            "boss": {"name": "Lagavulin Matriarch"},
+        },
+        "player": {
+            "hp": 18,
+            "max_hp": 85,
+            "gold": 66,
+            "deck_size": 22,
+            "potion_slots": 4,
+            "potions": [],
+            "relics": [{"name": "Burning Blood"}, {"name": "Reptile Trinket"}],
+        },
+        "round": 9,
+        "energy": 3,
+        "max_energy": 3,
+        "player_powers": [{"name": "Dexterity", "amount": -4, "type": "Buff"}],
+        "enemies": [
+            {
+                "index": 0,
+                "name": "Lagavulin Matriarch",
+                "hp": 101,
+                "max_hp": 222,
+                "block": 12,
+                "intents": [{"type": "Buff"}, {"type": "Debuff"}],
+            }
+        ],
+        "hand": [],
+    }
+
+    prompt = agent.build_prompt(state, build_legal_actions(state))
+
+    assert "Run summary:" in prompt
+    assert "- position: act=1 floor=17 room=Boss boss=Lagavulin Matriarch" in prompt
+    assert "- resources: hp=18/85 gold=66 deck_size=22 potions=0/4 relic_count=2" in prompt
+    assert "low HP; survival and rest decisions need extra scrutiny" in prompt
+    assert "no potions available for this high-risk fight" in prompt
+    assert "negative player powers: Dexterity(-4)" in prompt
+    assert "visible enemy intents include no attack damage this turn" in prompt
+
+
+def test_openai_compat_agent_run_summary_can_be_disabled():
+    agent = OpenAICompatAgent(
+        base_url="http://127.0.0.1:1",
+        model="test",
+        run_summary_enabled=False,
+    )
+    state = {
+        "decision": "map_select",
+        "context": {"act": 1, "floor": 3, "room_type": "Map"},
+        "player": {"hp": 70, "max_hp": 80, "gold": 120, "deck_size": 12},
+        "choices": [],
+    }
+
+    prompt = agent.build_prompt(state, build_legal_actions(state))
+
+    assert "Run summary:" not in prompt
+
+
 def test_openai_compat_agent_factual_memory_records_transition_diffs_not_reasons():
     agent = OpenAICompatAgent(
         base_url="http://127.0.0.1:1",

@@ -25,6 +25,7 @@ CONFIG_ENV_KEYS = {
     "memory_enabled": "STS2_BENCH_MEMORY_ENABLED",
     "memory_window": "STS2_BENCH_MEMORY_WINDOW",
     "memory_mode": "STS2_BENCH_MEMORY_MODE",
+    "run_summary_enabled": "STS2_BENCH_RUN_SUMMARY_ENABLED",
     "character": "STS2_BENCH_CHARACTER",
     "ascension": "STS2_BENCH_ASCENSION",
     "lang": "STS2_BENCH_LANG",
@@ -237,6 +238,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Agent memory content: previous action reasons or factual state-transition diffs",
     )
     parser.add_argument(
+        "--run-summary",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("STS2_BENCH_RUN_SUMMARY_ENABLED", True),
+        help="Include a small rule-based run summary in the LLM prompt",
+    )
+    parser.add_argument(
         "--character",
         default=env_str("STS2_BENCH_CHARACTER", "Ironclad"),
         choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
@@ -296,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         memory_enabled=args.memory_enabled,
         memory_window=args.memory_window,
         memory_mode=args.memory_mode,
+        run_summary_enabled=args.run_summary,
     )
     seeds = load_seeds(args.seeds, args.count)
     logger = JsonlLogger(args.out)

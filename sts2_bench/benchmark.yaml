@@ -32,6 +32,9 @@ memory_window: 8
 # 记忆内容类型。action_reason 记录模型旧理由；factual_diff 记录 action 后真实 state 变化，更适合严肃 benchmark。
 memory_mode: factual_diff
 
+# 是否在 prompt 中加入规则生成的短 run summary。属于 agent 方法，可用 --no-run-summary 做消融。
+run_summary_enabled: true
+
 # 选择角色。可选 Ironclad、Silent、Defect、Regent、Necrobinder。
 character: Ironclad
 
