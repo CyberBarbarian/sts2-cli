@@ -192,6 +192,14 @@ class Program
             case "debug_mark_ready_to_end_turn":
                 return sim.DebugMarkReadyToEndTurn();
 
+            case "debug_set_enemy_hp":
+            {
+                var args = new Dictionary<string, JsonElement>();
+                foreach (var prop in cmd.EnumerateObject())
+                    if (prop.Name != "cmd") args[prop.Name] = prop.Value;
+                return sim.DebugSetEnemyHp(args);
+            }
+
             case "write_continue_save":
             {
                 var outputPath = cmd.TryGetProperty("path", out var op) ? op.GetString() : null;

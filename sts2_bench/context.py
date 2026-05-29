@@ -546,10 +546,22 @@ def power_label(power: dict[str, Any], *, include_type: bool = False) -> str:
     return label
 
 
+def power_description_text(power: dict[str, Any]) -> str:
+    amount = power.get("amount")
+    power_name = name(power.get("name")).strip().lower()
+    if isinstance(amount, (int, float)) and amount < 0:
+        value = abs(int(amount))
+        if power_name == "dexterity":
+            return f"Reduces Block gained from cards by {value}."
+        if power_name == "strength":
+            return f"Decreases attack damage by {value}."
+    return description_of(power)
+
+
 def append_power_lines(lines: list[str], powers: list[dict[str, Any]], *, prefix: str = "  ", include_type: bool = False) -> None:
     for power in powers:
         label = power_label(power, include_type=include_type)
-        description = description_of(power)
+        description = power_description_text(power)
         if description:
             lines.append(prefix + f"{label}: {description}")
         else:

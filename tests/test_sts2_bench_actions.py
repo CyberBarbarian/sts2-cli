@@ -342,6 +342,7 @@ def test_openai_compat_agent_prompt_includes_rule_based_run_summary():
     prompt = agent.build_prompt(state, build_legal_actions(state))
 
     assert "Run summary:" in prompt
+    assert "Card damage and block values shown in the state are engine preview values" in prompt
     assert "- position: act=1 floor=17 room=Boss boss=Lagavulin Matriarch" in prompt
     assert "- resources: hp=18/85 gold=66 deck_size=22 potions=0/4 relic_count=2" in prompt
     assert "low HP; survival and rest decisions need extra scrutiny" in prompt

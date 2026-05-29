@@ -724,6 +724,46 @@ public class RunSimulator
         }
     }
 
+    public Dictionary<string, object?> DebugSetEnemyHp(Dictionary<string, System.Text.Json.JsonElement> args)
+    {
+        try
+        {
+            if (_runState == null) return Error("No run in progress");
+            if (!CombatManager.Instance.IsInProgress) return Error("Not in combat");
+            if (!args.TryGetValue("hp", out var hpEl)) return Error("debug_set_enemy_hp requires 'hp'");
+
+            var enemyIndex = 0;
+            if (args.TryGetValue("enemy_index", out var enemyIndexEl))
+                enemyIndex = enemyIndexEl.GetInt32();
+            else if (args.TryGetValue("index", out var indexEl))
+                enemyIndex = indexEl.GetInt32();
+
+            var enemies = CombatManager.Instance.DebugOnlyGetState()?.Enemies?
+                .Where(enemy => enemy != null)
+                .ToList();
+            if (enemies == null || enemyIndex < 0 || enemyIndex >= enemies.Count)
+                return Error($"Invalid enemy index {enemyIndex}");
+
+            var enemy = enemies[enemyIndex];
+            SetField(enemy, "_currentHp", hpEl.GetInt32());
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "ok",
+                ["enemy_index"] = enemyIndex,
+                ["enemy"] = new Dictionary<string, object?>
+                {
+                    ["name"] = MonsterDisplayName(enemy.Monster, enemy),
+                    ["hp"] = enemy.CurrentHp,
+                    ["max_hp"] = enemy.MaxHp,
+                },
+            };
+        }
+        catch (Exception ex)
+        {
+            return ErrorWithTrace("DebugSetEnemyHp failed", ex);
+        }
+    }
+
     public Dictionary<string, object?> EnterRoom(string roomType, string? encounter, string? eventId)
     {
         try
@@ -9295,6 +9335,10 @@ public class RunSimulator
             var hookAfterDamagePrefix = typeof(YieldPatches).GetMethod(
                 nameof(YieldPatches.LagavulinMatriarchAfterDamageReceivedHookPrefix),
                 BindingFlags.Static | BindingFlags.Public);
+            var skipVoidPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var skipTaskPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationTaskPrefix),
+                BindingFlags.Static | BindingFlags.Public);
             var afterAdded = AccessTools.Method("MegaCrit.Sts2.Core.Models.Monsters.LagavulinMatriarch:AfterAddedToRoom");
             if (prefix == null || afterAdded == null)
                 return;
@@ -9315,6 +9359,15 @@ public class RunSimulator
                     hookAfterDamage,
                     prefix: new HarmonyMethod(hookAfterDamagePrefix),
                     finalizer: new HarmonyMethod(afterDamageFinalizer));
+                patched++;
+            }
+            var afterDeath = AccessTools.Method(
+                "MegaCrit.Sts2.Core.Models.Monsters.LagavulinMatriarch:AfterDeath",
+                new[] { typeof(PlayerChoiceContext), typeof(Creature), typeof(bool), typeof(float) });
+            var afterDeathPrefix = afterDeath?.ReturnType == typeof(Task) ? skipTaskPrefix : skipVoidPrefix;
+            if (afterDeath != null && afterDeathPrefix != null)
+            {
+                harmony.Patch(afterDeath, new HarmonyMethod(afterDeathPrefix));
                 patched++;
             }
 
