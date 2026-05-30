@@ -10,7 +10,16 @@ from statistics import median
 from typing import Any, Iterable, Literal
 
 from .actions import LegalAction, build_legal_actions
-from .agents import Agent, MemoryMode, OpenAICompatAgent, PromptStyle, RandomAgent
+from .agents import (
+    Agent,
+    ConversationMode,
+    MemoryMode,
+    OpenAICompatAgent,
+    PromptStyle,
+    RandomAgent,
+    TurnChatAssistantHistory,
+    TurnChatUpdateMode,
+)
 from .context import build_last_action_result, compact_state
 from .process import Sts2Process
 
@@ -405,7 +414,22 @@ def _legal_action_summary(action: LegalAction) -> dict[str, Any]:
 
 def _agent_meta_summary(meta: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
-    for key in ("agent", "model", "attempt", "elapsed_sec", "prompt_chars", "fallback", "fallback_action_id", "error", "usage"):
+    for key in (
+        "agent",
+        "model",
+        "conversation_mode",
+        "message_count",
+        "turn_chat_history_turns",
+        "turn_key",
+        "conversation_prompt_chars",
+        "attempt",
+        "elapsed_sec",
+        "prompt_chars",
+        "fallback",
+        "fallback_action_id",
+        "error",
+        "usage",
+    ):
         if key in meta and meta[key] is not None:
             summary[key] = meta[key]
 
@@ -483,14 +507,21 @@ def agent_from_args(
     api_key: str,
     llm_timeout: float = 120.0,
     llm_max_retries: int = 2,
+    llm_temperature: float = 0.0,
     include_json_state: bool = False,
     prompt_style: PromptStyle = "default",
     memory_enabled: bool = False,
     memory_window: int = 8,
     memory_mode: MemoryMode = "action_reason",
     run_summary_enabled: bool = True,
+    conversation_mode: ConversationMode = "single_turn",
+    turn_chat_window: int = 4,
+    turn_chat_update_mode: TurnChatUpdateMode = "delta",
+    turn_chat_assistant_history: TurnChatAssistantHistory = "compact",
 ) -> Agent:
     if kind == "random":
+        if conversation_mode != "single_turn":
+            raise ValueError("turn_chat context management is only supported by the llm agent")
         return RandomAgent(
             seed=0,
             include_json_state=include_json_state,
@@ -513,12 +544,17 @@ def agent_from_args(
             api_key=api_key,
             timeout=llm_timeout,
             max_retries=llm_max_retries,
+            temperature=llm_temperature,
             include_json_state=include_json_state,
             prompt_style=prompt_style,
             memory_enabled=memory_enabled,
             memory_window=memory_window,
             memory_mode=memory_mode,
             run_summary_enabled=run_summary_enabled,
+            conversation_mode=conversation_mode,
+            turn_chat_window=turn_chat_window,
+            turn_chat_update_mode=turn_chat_update_mode,
+            turn_chat_assistant_history=turn_chat_assistant_history,
         )
     raise ValueError(f"Unknown agent kind: {kind}")
 

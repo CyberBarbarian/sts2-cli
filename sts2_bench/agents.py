@@ -12,11 +12,23 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from .actions import LegalAction
-from .context import build_last_action_result, compact_state, name, render_state_text
+from .context import (
+    append_last_action_result,
+    append_viewed_information,
+    build_last_action_result,
+    card_line,
+    compact_state,
+    name,
+    power_label,
+    render_state_text,
+)
 
 
 PromptStyle = Literal["default", "analysis"]
 MemoryMode = Literal["action_reason", "factual_diff"]
+ConversationMode = Literal["single_turn", "turn_chat"]
+TurnChatUpdateMode = Literal["delta"]
+TurnChatAssistantHistory = Literal["compact"]
 
 
 class Agent(Protocol):
@@ -121,6 +133,132 @@ class ShortTermMemory:
         return "\n".join(f"- {entry}" for entry in self.entries)
 
 
+@dataclass
+class TurnChatBuffer:
+    """Current-player-turn chat history for an LLM agent.
+
+    This is an agent-side context-management buffer only.  It does not change
+    the benchmark action surface or the headless environment command protocol.
+    """
+
+    max_turns: int
+    messages: list[dict[str, str]] = field(default_factory=list)
+    active_turn_key: tuple[Any, ...] | None = None
+
+    def reset(self) -> None:
+        self.messages.clear()
+        self.active_turn_key = None
+
+    def history_turns(self) -> int:
+        return sum(1 for message in self.messages if message.get("role") == "assistant")
+
+    def messages_for_decision(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[LegalAction],
+        *,
+        prompt_style: PromptStyle,
+        run_summary_text: str,
+        update_mode: TurnChatUpdateMode,
+        record_user: bool,
+    ) -> list[dict[str, str]]:
+        system = {"role": "system", "content": build_turn_chat_system_message(prompt_style)}
+        turn_key = turn_chat_key(state)
+        if turn_key is None:
+            if record_user:
+                self.reset()
+            prompt = build_llm_prompt(
+                state,
+                legal_actions,
+                include_json=False,
+                prompt_style=prompt_style,
+                memory_text="",
+                run_summary_text=run_summary_text,
+            )
+            return [
+                {
+                    "role": "system",
+                    "content": "You are a careful game-playing policy. Return only valid JSON. Never invent actions.",
+                },
+                {"role": "user", "content": prompt},
+            ]
+
+        history = list(self.messages) if self.active_turn_key == turn_key else []
+        user_message = self._build_user_message(
+            state,
+            legal_actions,
+            run_summary_text=run_summary_text,
+            update_mode=update_mode,
+            is_initial=not history,
+        )
+        if record_user:
+            if self.active_turn_key != turn_key:
+                self.reset()
+                self.active_turn_key = turn_key
+            self.messages.append({"role": "user", "content": user_message})
+            history = list(self.messages)
+        else:
+            history.append({"role": "user", "content": user_message})
+        return [system, *history]
+
+    def remember_assistant(self, action: LegalAction, parsed: dict[str, Any]) -> None:
+        if self.active_turn_key is None:
+            return
+        self.messages.append(
+            {
+                "role": "assistant",
+                "content": build_compact_assistant_message(action, parsed),
+            }
+        )
+        self._trim()
+
+    def after_transition(self, action: LegalAction, next_state: dict[str, Any] | None) -> None:
+        if action.kind == "combat_end_turn":
+            self.reset()
+            return
+        if next_state is None:
+            return
+        next_turn_key = turn_chat_key(next_state)
+        if next_turn_key is None:
+            self.reset()
+            return
+        if self.active_turn_key is not None and next_turn_key != self.active_turn_key:
+            self.reset()
+
+    def _trim(self) -> None:
+        if self.max_turns <= 0:
+            self.messages.clear()
+            return
+
+        assistant_seen = 0
+        keep_from = 0
+        for index in range(len(self.messages) - 1, -1, -1):
+            if self.messages[index].get("role") == "assistant":
+                assistant_seen += 1
+                if assistant_seen > self.max_turns:
+                    keep_from = index + 1
+                    break
+        if keep_from:
+            del self.messages[:keep_from]
+
+    def _build_user_message(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[LegalAction],
+        *,
+        run_summary_text: str,
+        update_mode: TurnChatUpdateMode,
+        is_initial: bool,
+    ) -> str:
+        if is_initial:
+            return build_turn_initial_user_message(state, legal_actions, run_summary_text)
+        if update_mode != "delta":
+            raise ValueError(f"Unsupported turn_chat update mode: {update_mode}")
+        if _viewed_labels(state):
+            return build_view_update_user_message(state, legal_actions)
+        return build_turn_update_user_message(state, legal_actions)
+
+
 def build_llm_prompt(
     state: dict[str, Any],
     legal_actions: list[LegalAction],
@@ -164,6 +302,214 @@ def build_llm_prompt(
                 json.dumps(compact_state(state), ensure_ascii=False, separators=(",", ":")),
             ]
         )
+    return "\n".join(parts)
+
+
+def build_turn_chat_system_message(prompt_style: PromptStyle) -> str:
+    return "\n".join(_prompt_header(prompt_style))
+
+
+def build_turn_initial_user_message(
+    state: dict[str, Any],
+    legal_actions: list[LegalAction],
+    run_summary_text: str = "",
+) -> str:
+    parts = ["New player turn."]
+    if run_summary_text:
+        parts.extend(["", "Run summary:", run_summary_text])
+    parts.extend(
+        [
+            "",
+            "Game state:",
+            render_state_text(state),
+            "",
+            "Legal actions:",
+            _legal_actions_text(legal_actions),
+        ]
+    )
+    return "\n".join(parts)
+
+
+def build_turn_update_user_message(state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
+    if state.get("decision") == "card_select":
+        return "\n".join(
+            [
+                "Turn modal.",
+                "",
+                render_state_text(state),
+                "",
+                "Legal actions:",
+                _legal_actions_text(legal_actions),
+            ]
+        )
+
+    lines = ["Turn update."]
+    last_action_lines: list[str] = []
+    append_last_action_result(last_action_lines, state.get("last_action_result"))
+    if last_action_lines:
+        lines.extend(last_action_lines)
+    lines.extend(
+        [
+            "",
+            "Current turn state:",
+            _render_current_turn_state(state),
+            "",
+            "Legal actions:",
+            _legal_actions_text(legal_actions),
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_view_update_user_message(state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
+    viewed = _viewed_labels(state)
+    lines = ["Requested information: " + ", ".join(viewed) + "."]
+    append_viewed_information(lines, state, state.get("player") or {})
+    lines.extend(
+        [
+            "",
+            "Current turn reminder:",
+            _render_current_turn_state(state),
+            "",
+            "Legal actions:",
+            _legal_actions_text(legal_actions),
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_compact_assistant_message(action: LegalAction, parsed: dict[str, Any]) -> str:
+    reason = _one_line(parsed.get("reason") if isinstance(parsed, dict) else "")
+    payload: dict[str, Any] = {
+        "action_id": action.action_id,
+        "action": action.label,
+    }
+    if reason:
+        payload["reason"] = reason
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def turn_chat_key(state: dict[str, Any]) -> tuple[Any, ...] | None:
+    decision = state.get("decision")
+    combat = state.get("combat") if isinstance(state.get("combat"), dict) else {}
+    if decision == "combat_play":
+        round_number = state.get("round")
+    elif decision == "card_select" and combat:
+        round_number = combat.get("round")
+    else:
+        return None
+
+    if round_number is None:
+        return None
+
+    context = state.get("context") or {}
+    boss = context.get("boss") if isinstance(context.get("boss"), dict) else {}
+    return (
+        context.get("act", state.get("act")),
+        context.get("floor", state.get("floor")),
+        context.get("room_type"),
+        name(boss.get("name")) if boss else "",
+        round_number,
+    )
+
+
+def _legal_actions_text(legal_actions: list[LegalAction]) -> str:
+    return json.dumps([action.to_prompt_dict() for action in legal_actions], ensure_ascii=False, separators=(",", ":"))
+
+
+def _viewed_labels(state: dict[str, Any]) -> list[str]:
+    labels = []
+    for label, key in (
+        ("deck", "view_deck"),
+        ("map", "view_map"),
+        ("draw pile", "view_draw_pile"),
+        ("discard pile", "view_discard_pile"),
+        ("exhaust pile", "view_exhaust_pile"),
+    ):
+        if state.get(key):
+            labels.append(label)
+    return labels
+
+
+def _render_current_turn_state(state: dict[str, Any]) -> str:
+    if state.get("decision") != "combat_play":
+        return render_state_text(state)
+
+    player = state.get("player") or {}
+    lines = [
+        (
+            f"Player: hp={player.get('hp', '?')}/{player.get('max_hp', '?')} "
+            f"block={player.get('block', 0)} energy={state.get('energy', '?')}/{state.get('max_energy', '?')} "
+            f"potions={_potion_count_text(player)}"
+        )
+    ]
+
+    powers = state.get("player_powers") or []
+    if powers:
+        lines.append("Player powers:")
+        for power in powers:
+            lines.append(f"  {power_label(power, include_type=True)}")
+
+    enemies = state.get("enemies") or []
+    lines.append("Enemies:")
+    if not enemies:
+        lines.append("  none")
+    for enemy in enemies:
+        if enemy.get("hp", 0) <= 0:
+            continue
+        powers_text = ""
+        powers = enemy.get("powers") or []
+        if powers:
+            powers_text = " powers=" + ",".join(power_label(power) for power in powers)
+        lines.append(
+            f"  [{enemy.get('index')}] {name(enemy.get('name'))} "
+            f"hp={enemy.get('hp')}/{enemy.get('max_hp')} block={enemy.get('block', 0)} "
+            f"intent={_intent_text(enemy)}{powers_text}"
+        )
+
+    hand = state.get("hand") or []
+    lines.append("Hand:")
+    if not hand:
+        lines.append("  empty")
+    for card in hand:
+        lines.append("  " + card_line(card))
+
+    lines.append(
+        f"Piles: draw={state.get('draw_pile_count', '?')} "
+        f"discard={state.get('discard_pile_count', '?')} exhaust={state.get('exhaust_pile_count', '?')}"
+    )
+    return "\n".join(lines)
+
+
+def _potion_count_text(player: dict[str, Any]) -> str:
+    potions = [potion for potion in player.get("potions", []) or [] if potion]
+    slots = player.get("potion_slots")
+    return f"{len(potions)}/{slots}" if slots is not None else str(len(potions))
+
+
+def _intent_text(enemy: dict[str, Any]) -> str:
+    intents = []
+    for intent in enemy.get("intents") or []:
+        if intent.get("type") == "Attack":
+            hits = intent.get("hits", 1)
+            if hits and hits > 1:
+                intents.append(f"Attack {intent.get('damage')}x{hits}")
+            else:
+                intents.append(f"Attack {intent.get('damage')}")
+        else:
+            intents.append(str(intent.get("type")))
+    return ",".join(intents) or "none"
+
+
+def _messages_char_count(messages: list[dict[str, str]]) -> int:
+    return sum(len(message.get("content", "")) for message in messages)
+
+
+def _messages_preview(messages: list[dict[str, str]]) -> str:
+    parts = []
+    for index, message in enumerate(messages):
+        parts.append(f"===== message[{index}] role={message.get('role', '?')} =====")
+        parts.append(message.get("content", ""))
     return "\n".join(parts)
 
 
@@ -369,11 +715,38 @@ class OpenAICompatAgent:
     memory_window: int = 8
     memory_mode: MemoryMode = "action_reason"
     run_summary_enabled: bool = True
+    conversation_mode: ConversationMode = "single_turn"
+    turn_chat_window: int = 4
+    turn_chat_update_mode: TurnChatUpdateMode = "delta"
+    turn_chat_assistant_history: TurnChatAssistantHistory = "compact"
+    turn_chat_buffer: TurnChatBuffer = field(init=False)
 
     def __post_init__(self) -> None:
+        if self.conversation_mode not in {"single_turn", "turn_chat"}:
+            raise ValueError(f"Unknown conversation mode: {self.conversation_mode}")
+        if self.turn_chat_update_mode != "delta":
+            raise ValueError(f"Unsupported turn_chat_update_mode: {self.turn_chat_update_mode}")
+        if self.turn_chat_assistant_history != "compact":
+            raise ValueError(f"Unsupported turn_chat_assistant_history: {self.turn_chat_assistant_history}")
+        if self.turn_chat_window < 1:
+            raise ValueError("turn_chat_window must be at least 1")
+        if self.conversation_mode == "turn_chat" and self.memory_enabled:
+            raise ValueError("turn_chat is a context-management method parallel to memory_enabled; disable memory_enabled when using turn_chat")
         self.memory = ShortTermMemory(self.memory_window, mode=self.memory_mode) if self.memory_enabled else None
+        self.turn_chat_buffer = TurnChatBuffer(max_turns=self.turn_chat_window)
 
     def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
+        if self.conversation_mode == "turn_chat":
+            messages = self.turn_chat_buffer.messages_for_decision(
+                state,
+                legal_actions,
+                prompt_style=self.prompt_style,
+                run_summary_text=build_run_summary(state) if self.run_summary_enabled else "",
+                update_mode=self.turn_chat_update_mode,
+                record_user=False,
+            )
+            return _messages_preview(messages)
+
         return build_llm_prompt(
             state,
             legal_actions,
@@ -392,6 +765,9 @@ class OpenAICompatAgent:
     ) -> tuple[LegalAction, dict[str, Any]]:
         if not legal_actions:
             raise ValueError("No legal actions available")
+
+        if self.conversation_mode == "turn_chat":
+            return self._choose_turn_chat(state, legal_actions)
 
         prompt = prompt if prompt is not None else self.build_prompt(state, legal_actions)
         messages = [
@@ -416,6 +792,9 @@ class OpenAICompatAgent:
                 return legal_actions[action_id], {
                     "agent": "openai_compat",
                     "model": self.model,
+                    "conversation_mode": self.conversation_mode,
+                    "message_count": len(messages),
+                    "conversation_prompt_chars": _messages_char_count(messages),
                     "attempt": attempt,
                     "elapsed_sec": elapsed,
                     "raw_response": text,
@@ -442,15 +821,94 @@ class OpenAICompatAgent:
         return fallback, {
             "agent": "openai_compat",
             "model": self.model,
+            "conversation_mode": self.conversation_mode,
+            "message_count": len(messages),
+            "conversation_prompt_chars": _messages_char_count(messages),
             "fallback": True,
             "error": last_error,
             "fallback_action_id": fallback.action_id,
             "prompt_chars": len(prompt),
         }
 
+    def _choose_turn_chat(
+        self,
+        state: dict[str, Any],
+        legal_actions: list[LegalAction],
+    ) -> tuple[LegalAction, dict[str, Any]]:
+        messages = self.turn_chat_buffer.messages_for_decision(
+            state,
+            legal_actions,
+            prompt_style=self.prompt_style,
+            run_summary_text=build_run_summary(state) if self.run_summary_enabled else "",
+            update_mode=self.turn_chat_update_mode,
+            record_user=True,
+        )
+        turn_key = turn_chat_key(state)
+        history_turns = self.turn_chat_buffer.history_turns()
+
+        last_error: str | None = None
+        for attempt in range(self.max_retries + 1):
+            started = time.time()
+            try:
+                response = self._chat(messages)
+                elapsed = time.time() - started
+                text = response["choices"][0]["message"]["content"]
+                parsed = parse_json_object(text)
+                action_id = int(parsed.get("action_id"))
+                if action_id < 0 or action_id >= len(legal_actions):
+                    raise ValueError(f"action_id out of range: {action_id}")
+                action = legal_actions[action_id]
+                self.turn_chat_buffer.remember_assistant(action, parsed)
+                return action, {
+                    "agent": "openai_compat",
+                    "model": self.model,
+                    "conversation_mode": self.conversation_mode,
+                    "message_count": len(messages),
+                    "turn_chat_history_turns": history_turns,
+                    "turn_key": turn_key,
+                    "conversation_prompt_chars": _messages_char_count(messages),
+                    "prompt_chars": _messages_char_count(messages),
+                    "attempt": attempt,
+                    "elapsed_sec": elapsed,
+                    "raw_response": text,
+                    "parsed": parsed,
+                    "usage": response.get("usage"),
+                }
+            except Exception as exc:  # noqa: BLE001 - log and retry with stricter correction
+                last_error = str(exc)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your previous response was invalid: {last_error}. "
+                            f"Return only JSON with action_id between 0 and {len(legal_actions) - 1}."
+                        ),
+                    }
+                )
+
+        fallback = first_non_view_action(legal_actions)
+        self.turn_chat_buffer.remember_assistant(
+            fallback,
+            {"reason": f"Fallback after invalid model response: {last_error}"},
+        )
+        return fallback, {
+            "agent": "openai_compat",
+            "model": self.model,
+            "conversation_mode": self.conversation_mode,
+            "message_count": len(messages),
+            "turn_chat_history_turns": history_turns,
+            "turn_key": turn_key,
+            "conversation_prompt_chars": _messages_char_count(messages),
+            "prompt_chars": _messages_char_count(messages),
+            "fallback": True,
+            "error": last_error,
+            "fallback_action_id": fallback.action_id,
+        }
+
     def reset_episode(self) -> None:
         if self.memory:
             self.memory.reset()
+        self.turn_chat_buffer.reset()
 
     def record_transition(
         self,
@@ -461,6 +919,8 @@ class OpenAICompatAgent:
     ) -> None:
         if self.memory:
             self.memory.remember(state, action, meta, next_state)
+        if self.conversation_mode == "turn_chat":
+            self.turn_chat_buffer.after_transition(action, next_state)
 
     def _chat(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         base = self.base_url.rstrip("/")
