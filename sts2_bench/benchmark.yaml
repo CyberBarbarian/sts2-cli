@@ -44,11 +44,14 @@ context_management:
   mode: single_turn
   turn_chat:
     # 同一玩家出牌回合内保留最近多少组 user/assistant 消息。
-    window: 100
+    window: 10
     # 第一版只支持 delta：新回合第一条是完整状态，后续同回合只给更新和合法动作。
     update_mode: delta
     # 第一版只支持 compact：历史里的 assistant 只保留 action 和简短 reason，不保留完整分析。
     assistant_history: compact
+    # 是否在每个玩家出牌回合的第一条 turn_chat prompt 中要求模型先给一个可修正的 turn_plan。
+    plan:
+      enabled: true
 
 # 选择角色。可选 Ironclad、Silent、Defect、Regent、Necrobinder。
 character: Ironclad

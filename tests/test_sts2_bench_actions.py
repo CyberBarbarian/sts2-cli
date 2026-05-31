@@ -561,6 +561,59 @@ def test_openai_compat_agent_turn_chat_keeps_history_within_combat_turn():
     assert second_meta["turn_chat_history_turns"] == 1
 
 
+def test_openai_compat_agent_turn_chat_plan_is_added_to_initial_combat_prompt_and_kept_compact():
+    state = _combat_turn_state()
+    next_state = _combat_turn_state(
+        energy=2,
+        hand=[],
+        discard_pile_count=1,
+        last_action_result={
+            "action_label": "play card 0: Strike on enemy 0: Jaw Worm",
+            "action_kind": "combat_play_card",
+            "decision_before": "combat_play",
+            "decision_after": "combat_play",
+            "changes": ["energy: 3/3 -> 2/3"],
+        },
+    )
+    agent, sent_messages = _turn_chat_agent(
+        [
+            {
+                "turn_plan": {
+                    "objective": "Deal damage before blocking.",
+                    "replan_if": ["draw changes hand"],
+                },
+                "action_id": 5,
+                "reason": "Start with Strike.",
+                "calculations": ["do not keep this verbose field"],
+            },
+            {"action_id": 5, "reason": "End after the plan."},
+        ],
+        turn_chat_plan_enabled=True,
+    )
+
+    agent.choose(state, build_legal_actions(state))
+    agent.choose(next_state, build_legal_actions(next_state))
+
+    assert "turn_plan" in sent_messages[0][0]["content"]
+    assert "visible hand in detail" in sent_messages[0][0]["content"]
+    assert "Turn planning instruction:" not in sent_messages[0][1]["content"]
+    assistant_history = sent_messages[1][2]["content"]
+    assert "turn_plan" in assistant_history
+    assert "Deal damage before blocking." in assistant_history
+    assert "calculations" not in assistant_history
+
+
+def test_openai_compat_agent_turn_chat_omits_plan_prompt_by_default():
+    state = _combat_turn_state()
+    agent, sent_messages = _turn_chat_agent([{"action_id": 5, "reason": "Strike."}])
+
+    agent.choose(state, build_legal_actions(state))
+
+    assert "turn_plan" not in sent_messages[0][0]["content"]
+    assert "Turn planning instruction:" not in sent_messages[0][1]["content"]
+    assert "turn_plan" not in sent_messages[0][1]["content"]
+
+
 def test_openai_compat_agent_turn_chat_clears_after_end_turn_transition():
     state = _combat_turn_state(energy=0, hand=[])
     next_state = _combat_turn_state(round=2, energy=3, hand=[])
@@ -726,6 +779,7 @@ def test_load_benchmark_config_reads_nested_context_management(tmp_path, monkeyp
         "STS2_BENCH_TURN_CHAT_WINDOW",
         "STS2_BENCH_TURN_CHAT_UPDATE_MODE",
         "STS2_BENCH_TURN_CHAT_ASSISTANT_HISTORY",
+        "STS2_BENCH_TURN_CHAT_PLAN_ENABLED",
     ):
         monkeypatch.delenv(key, raising=False)
     config = tmp_path / "benchmark.yaml"
@@ -738,6 +792,8 @@ context_management:
     window: 3
     update_mode: delta
     assistant_history: compact
+    plan:
+      enabled: true
 """,
         encoding="utf-8",
     )
@@ -749,3 +805,4 @@ context_management:
     assert os.environ["STS2_BENCH_TURN_CHAT_WINDOW"] == "3"
     assert os.environ["STS2_BENCH_TURN_CHAT_UPDATE_MODE"] == "delta"
     assert os.environ["STS2_BENCH_TURN_CHAT_ASSISTANT_HISTORY"] == "compact"
+    assert os.environ["STS2_BENCH_TURN_CHAT_PLAN_ENABLED"] == "true"

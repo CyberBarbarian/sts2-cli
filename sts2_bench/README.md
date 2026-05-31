@@ -135,6 +135,10 @@ Agent context management:
 - `context_management.mode: turn_chat` keeps a short chat transcript only within
   the current player combat turn, using the nested `turn_chat.window`,
   `turn_chat.update_mode`, and `turn_chat.assistant_history` settings.
+- `context_management.turn_chat.plan.enabled: true` asks the first prompt of
+  each player turn to include a hand-level `turn_plan`.  Compact assistant
+  history keeps that plan for later actions in the same turn; the runner still
+  executes exactly one `action_id` per request.
 
 `turn_chat` is parallel to the existing episode memory method.  Disable
 `memory_enabled` when using `turn_chat` so benchmark runs measure one context

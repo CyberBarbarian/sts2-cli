@@ -45,6 +45,7 @@ NESTED_CONFIG_ENV_KEYS = {
     ("context_management", "turn_chat", "window"): "STS2_BENCH_TURN_CHAT_WINDOW",
     ("context_management", "turn_chat", "update_mode"): "STS2_BENCH_TURN_CHAT_UPDATE_MODE",
     ("context_management", "turn_chat", "assistant_history"): "STS2_BENCH_TURN_CHAT_ASSISTANT_HISTORY",
+    ("context_management", "turn_chat", "plan", "enabled"): "STS2_BENCH_TURN_CHAT_PLAN_ENABLED",
 }
 
 
@@ -253,6 +254,9 @@ def build_run_config(args: argparse.Namespace, seeds: list[str], argv: list[str]
                     "window": args.turn_chat_window,
                     "update_mode": args.turn_chat_update_mode,
                     "assistant_history": args.turn_chat_assistant_history,
+                    "plan": {
+                        "enabled": args.turn_chat_plan,
+                    },
                 },
             },
         },
@@ -372,6 +376,12 @@ def main(argv: list[str] | None = None) -> int:
         help="How turn_chat stores assistant messages in history",
     )
     parser.add_argument(
+        "--turn-chat-plan",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("STS2_BENCH_TURN_CHAT_PLAN_ENABLED", False),
+        help="Ask the first turn_chat response in each player turn to include an advisory turn_plan",
+    )
+    parser.add_argument(
         "--character",
         default=env_str("STS2_BENCH_CHARACTER", "Ironclad"),
         choices=["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"],
@@ -446,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
             turn_chat_window=args.turn_chat_window,
             turn_chat_update_mode=args.turn_chat_update_mode,
             turn_chat_assistant_history=args.turn_chat_assistant_history,
+            turn_chat_plan_enabled=args.turn_chat_plan,
         )
         for seed in seeds:
             result = run_one(

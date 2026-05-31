@@ -142,6 +142,7 @@ class TurnChatBuffer:
     """
 
     max_turns: int
+    plan_enabled: bool = False
     messages: list[dict[str, str]] = field(default_factory=list)
     active_turn_key: tuple[Any, ...] | None = None
 
@@ -162,7 +163,10 @@ class TurnChatBuffer:
         update_mode: TurnChatUpdateMode,
         record_user: bool,
     ) -> list[dict[str, str]]:
-        system = {"role": "system", "content": build_turn_chat_system_message(prompt_style)}
+        system = {
+            "role": "system",
+            "content": build_turn_chat_system_message(prompt_style, turn_plan_enabled=self.plan_enabled),
+        }
         turn_key = turn_chat_key(state)
         if turn_key is None:
             if record_user:
@@ -251,7 +255,11 @@ class TurnChatBuffer:
         is_initial: bool,
     ) -> str:
         if is_initial:
-            return build_turn_initial_user_message(state, legal_actions, run_summary_text)
+            return build_turn_initial_user_message(
+                state,
+                legal_actions,
+                run_summary_text,
+            )
         if update_mode != "delta":
             raise ValueError(f"Unsupported turn_chat update mode: {update_mode}")
         if _viewed_labels(state):
@@ -305,8 +313,8 @@ def build_llm_prompt(
     return "\n".join(parts)
 
 
-def build_turn_chat_system_message(prompt_style: PromptStyle) -> str:
-    return "\n".join(_prompt_header(prompt_style))
+def build_turn_chat_system_message(prompt_style: PromptStyle, *, turn_plan_enabled: bool = False) -> str:
+    return "\n".join(_prompt_header(prompt_style, turn_plan_enabled=turn_plan_enabled))
 
 
 def build_turn_initial_user_message(
@@ -384,6 +392,10 @@ def build_compact_assistant_message(action: LegalAction, parsed: dict[str, Any])
         "action_id": action.action_id,
         "action": action.label,
     }
+    if isinstance(parsed, dict):
+        for key in ("turn_plan", "plan_update"):
+            if key in parsed:
+                payload[key] = parsed[key]
     if reason:
         payload["reason"] = reason
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -604,7 +616,7 @@ def _has_enemy_attack_intent(state: dict[str, Any]) -> bool:
     return False
 
 
-def _prompt_header(prompt_style: PromptStyle) -> list[str]:
+def _prompt_header(prompt_style: PromptStyle, *, turn_plan_enabled: bool = False) -> list[str]:
     shared = [
         "Each legal action is one atomic command, not a full-turn plan. After playing a card, using a potion, choosing a reward, or viewing information, you will receive a fresh state and may act again if the game still allows actions.",
         "In combat, end turn is the action that intentionally finishes the current turn; do not choose it while useful playable cards or potions remain unless passing is strategically better.",
@@ -613,30 +625,73 @@ def _prompt_header(prompt_style: PromptStyle) -> list[str]:
         "If all visible enemy intents are non-attack intents, enemies are not making attack damage this turn; block usually expires at end of turn, so avoid spending energy only for block unless another effect justifies it.",
         "View deck/map/pile actions do not advance the game state. They are information requests logged separately; use them when deck composition, pile contents, path context, or current position could affect the decision.",
     ]
+    turn_plan_rules = _turn_plan_header_rules() if turn_plan_enabled else []
 
     if prompt_style == "analysis":
-        return [
-            "You are playing Slay the Spire 2 through a headless benchmark environment.",
-            "Choose exactly one legal action. Use only an action_id from the legal action list.",
-            *shared,
-            "Before choosing, write a compact public analysis in JSON. Analyze the current situation, do any needed arithmetic, compare a few plausible legal actions, then choose.",
-            "Return only valid JSON with this schema:",
-            (
-                '{"situation":"<current objective and main risk>",'
+        schema = (
+            '{"situation":"<current objective and main risk>",'
+            '"calculations":["<damage/block/energy/path/reward calculation if relevant>"],'
+            '"candidates":[{"action_id":<integer>,"label":"<legal action label>",'
+            '"pros":"<why it helps>","cons":"<main risk or cost>"}],'
+            '"action_id":<integer>,"reason":"<final concise reason>"}'
+        )
+        if turn_plan_enabled:
+            schema = (
+                '{"turn_plan":{"objective":"<goal for this visible hand>",'
+                '"survival_check":"<incoming damage and block/kill requirement>",'
+                '"tentative_sequence":["<advisory card/order idea, not commands>"],'
+                '"replan_if":["<state change that invalidates the plan>"]},'
+                '"situation":"<current objective and main risk>",'
                 '"calculations":["<damage/block/energy/path/reward calculation if relevant>"],'
                 '"candidates":[{"action_id":<integer>,"label":"<legal action label>",'
                 '"pros":"<why it helps>","cons":"<main risk or cost>"}],'
                 '"action_id":<integer>,"reason":"<final concise reason>"}'
-            ),
+            )
+        return [
+            "You are playing Slay the Spire 2 through a headless benchmark environment.",
+            "Choose exactly one legal action. Use only an action_id from the legal action list.",
+            *shared,
+            *turn_plan_rules,
+            "Before choosing, write a compact public analysis in JSON. Analyze the current situation, do any needed arithmetic, compare a few plausible legal actions, then choose.",
+            "Return only valid JSON with this schema:",
+            schema,
             "For combat, compute enemy attacks from intents yourself and compare playable damage, block, energy, and lethal lines.",
             "For map choices, compare path rewards and risks. For rewards, compare deck impact.",
         ]
 
+    schema = '{"action_id": <integer>, "reason": "<short reason>"}'
+    if turn_plan_enabled:
+        schema = (
+            '{"turn_plan": {"objective": "<goal for this visible hand>", '
+            '"survival_check": "<incoming damage and block/kill requirement>", '
+            '"tentative_sequence": ["<advisory card/order idea, not commands>"], '
+            '"replan_if": ["<state change that invalidates the plan>"]}, '
+            '"action_id": <integer>, "reason": "<short reason>"}'
+        )
     return [
         "You are playing Slay the Spire 2 through a headless benchmark environment.",
         "Choose exactly one legal action. Return only JSON with this schema:",
         *shared,
-        '{"action_id": <integer>, "reason": "<short reason>"}',
+        *turn_plan_rules,
+        schema,
+    ]
+
+
+def _turn_plan_header_rules() -> list[str]:
+    return [
+        (
+            'When the current user message starts with "New player turn." and the game state '
+            'decision is combat_play, include a top-level "turn_plan" object.'
+        ),
+        (
+            "The turn_plan should plan the visible hand in detail: incoming damage, lethal possibilities, "
+            "block needs, energy, card order, draw/random effects, modal risks, and conditions that require replanning."
+        ),
+        (
+            'For later messages in the same player turn, follow the prior turn_plan when it is still valid; '
+            'if the latest state invalidates it, you may include a top-level "plan_update" string or object.'
+        ),
+        "The turn_plan is advisory history only. Still choose exactly one current legal action_id.",
     ]
 
 
@@ -719,6 +774,7 @@ class OpenAICompatAgent:
     turn_chat_window: int = 4
     turn_chat_update_mode: TurnChatUpdateMode = "delta"
     turn_chat_assistant_history: TurnChatAssistantHistory = "compact"
+    turn_chat_plan_enabled: bool = False
     turn_chat_buffer: TurnChatBuffer = field(init=False)
 
     def __post_init__(self) -> None:
@@ -733,7 +789,10 @@ class OpenAICompatAgent:
         if self.conversation_mode == "turn_chat" and self.memory_enabled:
             raise ValueError("turn_chat is a context-management method parallel to memory_enabled; disable memory_enabled when using turn_chat")
         self.memory = ShortTermMemory(self.memory_window, mode=self.memory_mode) if self.memory_enabled else None
-        self.turn_chat_buffer = TurnChatBuffer(max_turns=self.turn_chat_window)
+        self.turn_chat_buffer = TurnChatBuffer(
+            max_turns=self.turn_chat_window,
+            plan_enabled=self.turn_chat_plan_enabled,
+        )
 
     def build_prompt(self, state: dict[str, Any], legal_actions: list[LegalAction]) -> str:
         if self.conversation_mode == "turn_chat":

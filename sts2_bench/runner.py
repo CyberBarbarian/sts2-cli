@@ -518,6 +518,7 @@ def agent_from_args(
     turn_chat_window: int = 4,
     turn_chat_update_mode: TurnChatUpdateMode = "delta",
     turn_chat_assistant_history: TurnChatAssistantHistory = "compact",
+    turn_chat_plan_enabled: bool = False,
 ) -> Agent:
     if kind == "random":
         if conversation_mode != "single_turn":
@@ -555,6 +556,7 @@ def agent_from_args(
             turn_chat_window=turn_chat_window,
             turn_chat_update_mode=turn_chat_update_mode,
             turn_chat_assistant_history=turn_chat_assistant_history,
+            turn_chat_plan_enabled=turn_chat_plan_enabled,
         )
     raise ValueError(f"Unknown agent kind: {kind}")
 
