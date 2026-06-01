@@ -73,13 +73,16 @@ Supported `.env` keys:
 - `DEEPSEEK_API_KEY`
 - `OPENAI_API_KEY`
 
-Supported `benchmark.yaml` keys are `agent`, `base_url`, `model`,
-`prompt_style`, `include_json_state`, `memory_enabled`, `memory_window`,
-`character`, `ascension`, `lang`, `seeds`, `count`, `max_steps`, `out`,
-`log_level`, `print_prompts`, `print_model_output`, `include_full_map`, and
-`allow_repeat_views`.  The file is loaded with OmegaConf when available, with a
-small top-level scalar fallback for basic commands before dependencies are
-installed.
+Supported `benchmark.yaml` keys include `agent`, `base_url`, `model`,
+`llm_timeout`, `llm_max_retries`, `llm_temperature`, `prompt_style`,
+`include_json_state`, `memory_enabled`, `memory_window`, `memory_mode`,
+`run_summary_enabled`, `context_management`, `character`, `ascension`, `lang`,
+`seeds`, `count`, `max_steps`, `out`, `log_level`, `print_prompts`,
+`print_model_output`, `include_full_map`, and `allow_repeat_views`.  The file
+is loaded with OmegaConf when available; a small top-level scalar fallback keeps
+basic commands usable before dependencies are installed. Agent
+context-management settings live under `context_management`, so those nested
+settings require OmegaConf.
 
 Precedence is: CLI arguments, shell environment variables, `.env`,
 `sts2_bench/benchmark.yaml`, then code defaults.  Shell overrides can still use
@@ -105,6 +108,10 @@ python3 -m sts2_bench.run_benchmark \
   --out results/qwen25_14b_ironclad_a0.jsonl
 ```
 
+At startup the runner prints a redacted `run_config` JSON event with the
+resolved parameters, including `llm_temperature`.  When `out` is set, the same
+event is also written as the first JSONL trace record.  API keys are not logged.
+
 DeepSeek smoke test via `.env` and `benchmark.yaml`:
 
 ```bash
@@ -124,6 +131,22 @@ Set `include_json_state: true` in `sts2_bench/benchmark.yaml` to include the
 compact state JSON in the model prompt.  The benchmark-oriented default is
 `false` because the human-readable state already carries the current decision
 context and the JSON can substantially increase prompt length.
+
+Agent context management:
+
+- `context_management.mode: single_turn` keeps the current behavior: each LLM
+  decision is an independent prompt.
+- `context_management.mode: turn_chat` keeps a short chat transcript only within
+  the current player combat turn, using the nested `turn_chat.window`,
+  `turn_chat.update_mode`, and `turn_chat.assistant_history` settings.
+- `context_management.turn_chat.plan.enabled: true` asks the first prompt of
+  each player turn to include a hand-level `turn_plan`.  Compact assistant
+  history keeps that plan for later actions in the same turn; the runner still
+  executes exactly one `action_id` per request.
+
+`turn_chat` is parallel to the existing episode memory method.  Disable
+`memory_enabled` when using `turn_chat` so benchmark runs measure one context
+method at a time.
 
 JSONL logging uses `log_level`:
 

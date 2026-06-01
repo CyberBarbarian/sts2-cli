@@ -724,6 +724,46 @@ public class RunSimulator
         }
     }
 
+    public Dictionary<string, object?> DebugSetEnemyHp(Dictionary<string, System.Text.Json.JsonElement> args)
+    {
+        try
+        {
+            if (_runState == null) return Error("No run in progress");
+            if (!CombatManager.Instance.IsInProgress) return Error("Not in combat");
+            if (!args.TryGetValue("hp", out var hpEl)) return Error("debug_set_enemy_hp requires 'hp'");
+
+            var enemyIndex = 0;
+            if (args.TryGetValue("enemy_index", out var enemyIndexEl))
+                enemyIndex = enemyIndexEl.GetInt32();
+            else if (args.TryGetValue("index", out var indexEl))
+                enemyIndex = indexEl.GetInt32();
+
+            var enemies = CombatManager.Instance.DebugOnlyGetState()?.Enemies?
+                .Where(enemy => enemy != null)
+                .ToList();
+            if (enemies == null || enemyIndex < 0 || enemyIndex >= enemies.Count)
+                return Error($"Invalid enemy index {enemyIndex}");
+
+            var enemy = enemies[enemyIndex];
+            SetField(enemy, "_currentHp", hpEl.GetInt32());
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "ok",
+                ["enemy_index"] = enemyIndex,
+                ["enemy"] = new Dictionary<string, object?>
+                {
+                    ["name"] = MonsterDisplayName(enemy.Monster, enemy),
+                    ["hp"] = enemy.CurrentHp,
+                    ["max_hp"] = enemy.MaxHp,
+                },
+            };
+        }
+        catch (Exception ex)
+        {
+            return ErrorWithTrace("DebugSetEnemyHp failed", ex);
+        }
+    }
+
     public Dictionary<string, object?> EnterRoom(string roomType, string? encounter, string? eventId)
     {
         try
@@ -1923,21 +1963,53 @@ public class RunSimulator
         try
         {
             Log($"Claiming combat reward {rewardIndex}: {reward.GetType().Name}");
-            reward.OnSelectWrapper().GetAwaiter().GetResult();
-            _syncCtx.Pump();
-            _pendingRewards.RemoveAt(rewardIndex);
-            if (_pendingRewards.Count == 0)
+            var task = Task.Run(() => reward.OnSelectWrapper());
+            _pendingEventOptionTask = task;
+            for (int i = 0; i < 100; i++)
             {
-                _pendingRewards = null;
-                _rewardsProcessed = true;
+                _syncCtx.Pump();
+                if (HasPendingHeadlessChoice()) break;
+                if (task.IsCompleted) break;
+                Thread.Sleep(10);
             }
+
+            if (HasPendingHeadlessChoice())
+            {
+                RemovePendingCombatReward(reward);
+                WaitForActionExecutor();
+                return DetectDecisionPoint();
+            }
+
+            if (!task.IsCompleted) task.Wait(2000);
+            _syncCtx.Pump();
+            if (!task.IsCompleted)
+                return Error($"Claim reward did not complete: {reward.GetType().Name}");
+            if (task.IsFaulted)
+                return Error($"Claim reward failed: {task.Exception?.GetBaseException().Message}");
+
+            _pendingEventOptionTask = null;
+            RemovePendingCombatReward(reward);
         }
         catch (Exception ex)
         {
+            _pendingEventOptionTask = null;
             return Error($"Claim reward failed: {ex.Message}");
         }
 
         return DetectDecisionPoint();
+    }
+
+    private void RemovePendingCombatReward(Reward reward)
+    {
+        if (_pendingRewards == null)
+            return;
+
+        _pendingRewards.Remove(reward);
+        if (_pendingRewards.Count == 0)
+        {
+            _pendingRewards = null;
+            _rewardsProcessed = true;
+        }
     }
 
     private Dictionary<string, object?> DoSkipCombatReward(Player player, Dictionary<string, object?>? args)
@@ -6665,7 +6737,7 @@ public class RunSimulator
 
             // Executor may stay "running" while the game awaits headless card selection / reward (e.g. Attack Potion).
             // Spinning here would time out and downstream code could mis-handle an in-flight potion use (BUG-026).
-            if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
+            if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
                 return;
 
             var executor = RunManager.Instance.ActionExecutor;
@@ -9263,6 +9335,10 @@ public class RunSimulator
             var hookAfterDamagePrefix = typeof(YieldPatches).GetMethod(
                 nameof(YieldPatches.LagavulinMatriarchAfterDamageReceivedHookPrefix),
                 BindingFlags.Static | BindingFlags.Public);
+            var skipVoidPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var skipTaskPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationTaskPrefix),
+                BindingFlags.Static | BindingFlags.Public);
             var afterAdded = AccessTools.Method("MegaCrit.Sts2.Core.Models.Monsters.LagavulinMatriarch:AfterAddedToRoom");
             if (prefix == null || afterAdded == null)
                 return;
@@ -9283,6 +9359,15 @@ public class RunSimulator
                     hookAfterDamage,
                     prefix: new HarmonyMethod(hookAfterDamagePrefix),
                     finalizer: new HarmonyMethod(afterDamageFinalizer));
+                patched++;
+            }
+            var afterDeath = AccessTools.Method(
+                "MegaCrit.Sts2.Core.Models.Monsters.LagavulinMatriarch:AfterDeath",
+                new[] { typeof(PlayerChoiceContext), typeof(Creature), typeof(bool), typeof(float) });
+            var afterDeathPrefix = afterDeath?.ReturnType == typeof(Task) ? skipTaskPrefix : skipVoidPrefix;
+            if (afterDeath != null && afterDeathPrefix != null)
+            {
+                harmony.Patch(afterDeath, new HarmonyMethod(afterDeathPrefix));
                 patched++;
             }
 

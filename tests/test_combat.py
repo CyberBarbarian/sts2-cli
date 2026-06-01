@@ -1735,6 +1735,59 @@ class TestCombatEdgeCases:
         assert "NullReferenceException" not in stderr
         assert "LagavulinMatriarch.AfterDamageReceived" not in stderr
 
+    def test_lagavulin_matriarch_flame_barrier_lethal_does_not_deadlock(self):
+        session = HeadlessSession()
+        stderr = ""
+        try:
+            state = session.send({
+                "cmd": "start_run",
+                "character": "Ironclad",
+                "seed": "lagavulin-flame-barrier-lethal",
+                "lang": "en",
+            })
+            state = session.skip_neow(state)
+            state = session.send({
+                "cmd": "set_player",
+                "hp": 999,
+                "max_hp": 999,
+                "deck": ["FLAME_BARRIER"] * 5,
+            })
+            state = session.send({
+                "cmd": "enter_room",
+                "type": "combat",
+                "encounter": "LAGAVULIN_MATRIARCH_BOSS",
+            })
+
+            for _ in range(3):
+                state = session.send({"cmd": "action", "action": "end_turn"})
+                assert state["decision"] == "combat_play"
+            assert state["enemies"][0]["move_name"] == "Slash"
+
+            result = session.send({
+                "cmd": "debug_set_enemy_hp",
+                "enemy_index": 0,
+                "hp": 2,
+            })
+            assert result["type"] == "ok"
+
+            flame_barrier = next(card for card in state["hand"] if card["name"] == "Flame Barrier")
+            state = session.send({
+                "cmd": "action",
+                "action": "play_card",
+                "args": {"card_index": flame_barrier["index"]},
+            })
+            state = session.send({"cmd": "action", "action": "end_turn"})
+
+            assert state.get("type") != "error", state
+            assert not state.get("engine_error"), state.get("engine_error_reason")
+            assert state["decision"] == "combat_reward"
+        finally:
+            stderr = session.close()
+
+        assert "NullReferenceException" not in stderr
+        assert "LagavulinMatriarch.AfterDeath" not in stderr
+        assert "EndTurn stuck" not in stderr
+
     def test_rolling_boulder_turn_start_does_not_log_headless_connect_exception(self):
         session = HeadlessSession()
         stderr = ""

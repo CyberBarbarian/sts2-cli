@@ -11,6 +11,15 @@ base_url: ""
 # 调用的模型名称。需要和对应 API provider 支持的模型名一致。
 model: ""
 
+# 单次 LLM HTTP 请求超时时间，单位秒。调试 DeepSeek 卡住时可以先设为 15-30。
+llm_timeout: 30
+
+# LLM 请求或 JSON 解析失败后的重试次数。调试连通性时建议设为 0，避免每一步等待太久。
+llm_max_retries: 0
+
+# LLM 采样温度。严肃 benchmark 默认 0.0，避免模型采样随机性影响复现实验。
+llm_temperature: 0.0
+
 # Prompt 模板风格。default 输出简短 JSON；analysis 要求模型给出局势分析、计算、候选动作比较后再选择 action。
 prompt_style: default
 
@@ -18,10 +27,31 @@ prompt_style: default
 include_json_state: false
 
 # 是否在 agent prompt 中加入局内短期记忆。这个记忆属于 agent 方法，不属于环境原始 state。
+# 如果 context_management.mode 设为 turn_chat，请把这里设为 false，避免两套上下文方法同时生效。
 memory_enabled: false
 
 # 短期记忆保留最近多少个已选择 action。数值越大越能记住近期操作，但 prompt 会更长。
 memory_window: 8
+
+# 记忆内容类型。action_reason 记录模型旧理由；factual_diff 记录 action 后真实 state 变化，更适合严肃 benchmark。
+memory_mode: factual_diff
+
+# 是否在 prompt 中加入规则生成的短 run summary。属于 agent 方法，可用 --no-run-summary 做消融。
+run_summary_enabled: false
+
+# Agent 侧上下文管理方法。single_turn 是当前每步独立 prompt；turn_chat 只在同一个玩家出牌回合内保留短 chat history。
+context_management:
+  mode: single_turn
+  turn_chat:
+    # 同一玩家出牌回合内保留最近多少组 user/assistant 消息。
+    window: 10
+    # 第一版只支持 delta：新回合第一条是完整状态，后续同回合只给更新和合法动作。
+    update_mode: delta
+    # 第一版只支持 compact：历史里的 assistant 只保留 action 和简短 reason，不保留完整分析。
+    assistant_history: compact
+    # 是否在每个玩家出牌回合的第一条 turn_chat prompt 中要求模型先给一个可修正的 turn_plan。
+    plan:
+      enabled: true
 
 # 选择角色。可选 Ironclad、Silent、Defect、Regent、Necrobinder。
 character: Ironclad

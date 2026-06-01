@@ -78,6 +78,21 @@ def _card_select_label(cards: list[dict[str, Any]]) -> str:
     return f"select cards {indices}: {names}"
 
 
+def _bundle_label(bundle: dict[str, Any]) -> str:
+    index = bundle.get("index")
+    title = _name(bundle.get("name") or bundle.get("title"))
+    if title != "?":
+        return f"select bundle {index}: {title}"
+
+    cards = bundle.get("cards") or []
+    card_names = [_name(card.get("name")) for card in cards if isinstance(card, dict)]
+    card_names = [card_name for card_name in card_names if card_name != "?"]
+    if card_names:
+        return f"select bundle {index}: {', '.join(card_names)}"
+
+    return f"select bundle {index}"
+
+
 def _card_select_actions(cards: list[dict[str, Any]], min_select: int, max_select: int) -> list[dict[str, Any]]:
     if not cards or max_select <= 0:
         return []
@@ -85,7 +100,6 @@ def _card_select_actions(cards: list[dict[str, Any]], min_select: int, max_selec
     # Keep the action surface valid for fixed-size selections.  The engine
     # expects all required cards in one command, so exposing single-card picks
     # for min_select > 1 creates illegal benchmark actions.
-    max_actions = 64
     actions: list[dict[str, Any]] = []
     upper = min(max_select, len(cards))
     lower = max(1, min_select)
@@ -99,8 +113,6 @@ def _card_select_actions(cards: list[dict[str, Any]], min_select: int, max_selec
                 else _card_select_label(selected)
             )
             actions.append(_action(label, "select_cards", "card_select", indices=indices))
-            if len(actions) >= max_actions:
-                return actions
     return actions
 
 
@@ -147,6 +159,12 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
             raw.append(_view_action("view deck", "deck", "view_deck"))
         if allow_repeat_views or not state.get("view_map"):
             raw.append(_view_action("view map and current position", "map", "view_map"))
+        if allow_repeat_views or not state.get("view_draw_pile"):
+            raw.append(_view_action("view draw pile", "draw", "view_draw_pile"))
+        if allow_repeat_views or not state.get("view_discard_pile"):
+            raw.append(_view_action("view discard pile", "discard", "view_discard_pile"))
+        if allow_repeat_views or not state.get("view_exhaust_pile"):
+            raw.append(_view_action("view exhaust pile", "exhaust", "view_exhaust_pile"))
 
     if decision == "map_select":
         for choice in state.get("choices", []):
@@ -205,12 +223,39 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
     elif decision == "combat_reward":
         rewards = state.get("rewards") or []
         for reward in rewards:
+            reward_index = reward.get("index")
+            reward_kind = reward.get("kind", reward.get("type_name", "?"))
+            if reward.get("can_claim") is not False:
+                raw.append(
+                    _action(
+                        f"claim reward {reward_index}: {reward_kind}",
+                        "claim_reward",
+                        "combat_reward",
+                        reward_index=reward_index,
+                    )
+                )
+            if reward.get("can_skip"):
+                raw.append(
+                    _action(
+                        f"skip reward {reward_index}: {reward_kind}",
+                        "skip_reward",
+                        "combat_reward_skip",
+                        reward_index=reward_index,
+                    )
+                )
+        player = state.get("player") or {}
+        for potion in player.get("potions", []) or []:
+            if not potion:
+                continue
+            potion_index = potion.get("index", potion.get("slot", potion.get("slot_index")))
+            if potion_index is None:
+                continue
             raw.append(
                 _action(
-                    f"claim reward {reward.get('index')}: {reward.get('kind', reward.get('type_name', '?'))}",
-                    "claim_reward",
-                    "combat_reward",
-                    reward_index=reward.get("index"),
+                    f"discard potion {potion_index}: {_name(potion.get('name'))}",
+                    "discard_potion",
+                    "combat_reward_discard_potion",
+                    potion_index=potion_index,
                 )
             )
         if not rewards:
@@ -260,6 +305,8 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
                     option_index=option.get("index"),
                 )
             )
+        if decision == "event_choice" and state.get("can_leave"):
+            raw.append(_action("leave event", "leave_room", "event_leave"))
 
     elif decision == "shop":
         player_gold = int((state.get("player") or {}).get("gold", 0) or 0)
@@ -302,7 +349,7 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
         cards = state.get("cards") or []
         min_select = int(state.get("min_select", 1) or 0)
         max_select = int(state.get("max_select", min_select) or min_select)
-        if min_select == 0:
+        if state.get("can_skip", min_select == 0):
             raw.append(_action("skip selection", "skip_select", "card_select_skip"))
         raw.extend(_card_select_actions(cards, min_select, max_select))
 
@@ -310,7 +357,7 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
         for bundle in state.get("bundles", []) or state.get("options", []) or []:
             raw.append(
                 _action(
-                    f"select bundle {bundle.get('index')}: {_name(bundle.get('name') or bundle.get('title'))}",
+                    _bundle_label(bundle),
                     "select_bundle",
                     "bundle_select",
                     bundle_index=bundle.get("index"),
@@ -318,7 +365,20 @@ def build_legal_actions(state: dict[str, Any], *, allow_repeat_views: bool = Fal
             )
 
     elif decision == "crystal_sphere":
-        raw.append(_action("proceed from crystal sphere", "crystal_sphere_proceed", "crystal_sphere"))
+        if state.get("can_proceed"):
+            raw.append(_action("proceed from crystal sphere", "crystal_sphere_proceed", "crystal_sphere"))
+        for tool in ("big", "small"):
+            raw.append(_action(f"set crystal sphere tool: {tool}", "crystal_sphere_set_tool", "crystal_sphere_tool", tool=tool))
+        for cell in state.get("clickable_cells", []) or []:
+            raw.append(
+                _action(
+                    f"click crystal sphere cell {cell.get('x')},{cell.get('y')}",
+                    "crystal_sphere_click_cell",
+                    "crystal_sphere_cell",
+                    x=cell.get("x"),
+                    y=cell.get("y"),
+                )
+            )
 
     elif decision == "game_over":
         raw = []

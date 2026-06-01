@@ -18,10 +18,15 @@ CONFIG_ENV_KEYS = {
     "agent": "STS2_BENCH_AGENT",
     "base_url": "STS2_BENCH_BASE_URL",
     "model": "STS2_BENCH_MODEL",
+    "llm_timeout": "STS2_BENCH_LLM_TIMEOUT",
+    "llm_max_retries": "STS2_BENCH_LLM_MAX_RETRIES",
+    "llm_temperature": "STS2_BENCH_LLM_TEMPERATURE",
     "prompt_style": "STS2_BENCH_PROMPT_STYLE",
     "include_json_state": "STS2_BENCH_INCLUDE_JSON_STATE",
     "memory_enabled": "STS2_BENCH_MEMORY_ENABLED",
     "memory_window": "STS2_BENCH_MEMORY_WINDOW",
+    "memory_mode": "STS2_BENCH_MEMORY_MODE",
+    "run_summary_enabled": "STS2_BENCH_RUN_SUMMARY_ENABLED",
     "character": "STS2_BENCH_CHARACTER",
     "ascension": "STS2_BENCH_ASCENSION",
     "lang": "STS2_BENCH_LANG",
@@ -34,6 +39,13 @@ CONFIG_ENV_KEYS = {
     "print_model_output": "STS2_BENCH_PRINT_MODEL_OUTPUT",
     "include_full_map": "STS2_BENCH_INCLUDE_FULL_MAP",
     "allow_repeat_views": "STS2_BENCH_ALLOW_REPEAT_VIEWS",
+}
+NESTED_CONFIG_ENV_KEYS = {
+    ("context_management", "mode"): "STS2_BENCH_CONTEXT_MODE",
+    ("context_management", "turn_chat", "window"): "STS2_BENCH_TURN_CHAT_WINDOW",
+    ("context_management", "turn_chat", "update_mode"): "STS2_BENCH_TURN_CHAT_UPDATE_MODE",
+    ("context_management", "turn_chat", "assistant_history"): "STS2_BENCH_TURN_CHAT_ASSISTANT_HISTORY",
+    ("context_management", "turn_chat", "plan", "enabled"): "STS2_BENCH_TURN_CHAT_PLAN_ENABLED",
 }
 
 
@@ -174,13 +186,32 @@ def load_benchmark_config(path: Path = TRACKED_CONFIG) -> None:
             continue
 
         value = data[key]
-        if isinstance(value, bool):
-            text = "true" if value else "false"
-        elif isinstance(value, (str, int, float)):
-            text = str(value)
-        else:
-            raise ValueError(f"{path}:{key} must be a scalar value, got {type(value).__name__}")
-        os.environ.setdefault(env_key, text)
+        _set_config_env(env_key, value, f"{path}:{key}")
+
+    for key_path, env_key in NESTED_CONFIG_ENV_KEYS.items():
+        found, value = _nested_config_value(data, key_path)
+        if not found or value is None:
+            continue
+        _set_config_env(env_key, value, f"{path}:{'.'.join(key_path)}")
+
+
+def _nested_config_value(data: dict[str, object], key_path: tuple[str, ...]) -> tuple[bool, object]:
+    current: object = data
+    for key in key_path:
+        if not isinstance(current, dict) or key not in current:
+            return False, None
+        current = current[key]
+    return True, current
+
+
+def _set_config_env(env_key: str, value: object, source: str) -> None:
+    if isinstance(value, bool):
+        text = "true" if value else "false"
+    elif isinstance(value, (str, int, float)):
+        text = str(value)
+    else:
+        raise ValueError(f"{source} must be a scalar value, got {type(value).__name__}")
+    os.environ.setdefault(env_key, text)
 
 
 def load_benchmark_env() -> None:
@@ -207,6 +238,11 @@ def env_int(name: str, default: int) -> int:
     return int(value) if value is not None else default
 
 
+def env_float(name: str, default: float) -> float:
+    value = env_str(name)
+    return float(value) if value is not None else default
+
+
 def env_bool(name: str, default: bool = False) -> bool:
     value = env_str(name)
     if value is None:
@@ -217,6 +253,81 @@ def env_bool(name: str, default: bool = False) -> bool:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     raise ValueError(f"{name} must be a boolean value, got {value!r}")
+
+
+def _redact_argv(argv: list[str]) -> list[str]:
+    redacted: list[str] = []
+    redact_next = False
+    secret_flags = {"--api-key"}
+    for token in argv:
+        if redact_next:
+            redacted.append("<redacted>")
+            redact_next = False
+            continue
+        if token in secret_flags:
+            redacted.append(token)
+            redact_next = True
+            continue
+        if any(token.startswith(f"{flag}=") for flag in secret_flags):
+            flag, _value = token.split("=", 1)
+            redacted.append(f"{flag}=<redacted>")
+            continue
+        redacted.append(token)
+    return redacted
+
+
+def build_run_config(args: argparse.Namespace, seeds: list[str], argv: list[str]) -> dict[str, object]:
+    """Build a redacted, resolved benchmark config for logs and trace files."""
+
+    return {
+        "argv": _redact_argv(argv),
+        "agent": {
+            "type": args.agent,
+            "base_url": args.base_url,
+            "model": args.model,
+            "llm_timeout": args.llm_timeout,
+            "llm_max_retries": args.llm_max_retries,
+            "llm_temperature": args.llm_temperature,
+            "prompt_style": args.prompt_style,
+            "include_json_state": args.include_json_state,
+            "memory": {
+                "enabled": args.memory_enabled,
+                "window": args.memory_window,
+                "mode": args.memory_mode,
+            },
+            "run_summary_enabled": args.run_summary,
+            "context_management": {
+                "mode": args.context_mode,
+                "turn_chat": {
+                    "window": args.turn_chat_window,
+                    "update_mode": args.turn_chat_update_mode,
+                    "assistant_history": args.turn_chat_assistant_history,
+                    "plan": {
+                        "enabled": args.turn_chat_plan,
+                    },
+                },
+            },
+        },
+        "game": {
+            "character": args.character,
+            "ascension": args.ascension,
+            "lang": args.lang,
+        },
+        "benchmark": {
+            "seeds_file": args.seeds,
+            "seeds": list(seeds),
+            "count": args.count,
+            "max_steps": args.max_steps,
+            "include_full_map": args.include_full_map,
+            "allow_repeat_views": args.allow_repeat_views,
+        },
+        "logging": {
+            "out": args.out,
+            "log_level": args.log_level,
+            "print_prompts": args.print_prompts,
+            "print_model_output": args.print_model_output,
+        },
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -230,6 +341,24 @@ def main(argv: list[str] | None = None) -> int:
         help="OpenAI-compatible base URL, e.g. http://127.0.0.1:11434/v1",
     )
     parser.add_argument("--model", default=env_str("STS2_BENCH_MODEL"), help="Model name for --agent llm")
+    parser.add_argument(
+        "--llm-timeout",
+        type=float,
+        default=env_float("STS2_BENCH_LLM_TIMEOUT", 120.0),
+        help="Timeout in seconds for one LLM HTTP request",
+    )
+    parser.add_argument(
+        "--llm-max-retries",
+        type=int,
+        default=env_int("STS2_BENCH_LLM_MAX_RETRIES", 2),
+        help="Number of retries after an LLM request or parsing failure",
+    )
+    parser.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=env_float("STS2_BENCH_LLM_TEMPERATURE", 0.0),
+        help="Sampling temperature for LLM chat completions",
+    )
     parser.add_argument(
         "--api-key",
         default=env_str("DEEPSEEK_API_KEY", "local", fallbacks=("OPENAI_API_KEY",)),
@@ -257,6 +386,48 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=env_int("STS2_BENCH_MEMORY_WINDOW", 8),
         help="Number of recent selected actions to keep in agent memory",
+    )
+    parser.add_argument(
+        "--memory-mode",
+        choices=["action_reason", "factual_diff"],
+        default=env_str("STS2_BENCH_MEMORY_MODE", "action_reason"),
+        help="Agent memory content: previous action reasons or factual state-transition diffs",
+    )
+    parser.add_argument(
+        "--run-summary",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("STS2_BENCH_RUN_SUMMARY_ENABLED", True),
+        help="Include a small rule-based run summary in the LLM prompt",
+    )
+    parser.add_argument(
+        "--context-mode",
+        choices=["single_turn", "turn_chat"],
+        default=env_str("STS2_BENCH_CONTEXT_MODE", "single_turn", fallbacks=("STS2_BENCH_CONVERSATION_MODE",)),
+        help="Agent context-management mode. turn_chat keeps short chat history only within a player combat turn.",
+    )
+    parser.add_argument(
+        "--turn-chat-window",
+        type=int,
+        default=env_int("STS2_BENCH_TURN_CHAT_WINDOW", 4),
+        help="Number of recent user/assistant turn-chat pairs to keep inside the current player turn",
+    )
+    parser.add_argument(
+        "--turn-chat-update-mode",
+        choices=["delta"],
+        default=env_str("STS2_BENCH_TURN_CHAT_UPDATE_MODE", "delta"),
+        help="How turn_chat renders follow-up messages after the first full state",
+    )
+    parser.add_argument(
+        "--turn-chat-assistant-history",
+        choices=["compact"],
+        default=env_str("STS2_BENCH_TURN_CHAT_ASSISTANT_HISTORY", "compact"),
+        help="How turn_chat stores assistant messages in history",
+    )
+    parser.add_argument(
+        "--turn-chat-plan",
+        action=argparse.BooleanOptionalAction,
+        default=env_bool("STS2_BENCH_TURN_CHAT_PLAN_ENABLED", False),
+        help="Ask the first turn_chat response in each player turn to include an advisory turn_plan",
     )
     parser.add_argument(
         "--character",
@@ -306,20 +477,35 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    agent = agent_from_args(
-        args.agent,
-        base_url=args.base_url,
-        model=args.model,
-        api_key=args.api_key,
-        include_json_state=args.include_json_state,
-        prompt_style=args.prompt_style,
-        memory_enabled=args.memory_enabled,
-        memory_window=args.memory_window,
-    )
     seeds = load_seeds(args.seeds, args.count)
+    run_config = build_run_config(args, seeds, list(argv if argv is not None else sys.argv[1:]))
     logger = JsonlLogger(args.out)
     results = []
     try:
+        run_config_event = {"type": "run_config", "config": run_config}
+        print(json.dumps(run_config_event, ensure_ascii=False), flush=True)
+        logger.write(run_config_event)
+
+        agent = agent_from_args(
+            args.agent,
+            base_url=args.base_url,
+            model=args.model,
+            api_key=args.api_key,
+            llm_timeout=args.llm_timeout,
+            llm_max_retries=args.llm_max_retries,
+            llm_temperature=args.llm_temperature,
+            include_json_state=args.include_json_state,
+            prompt_style=args.prompt_style,
+            memory_enabled=args.memory_enabled,
+            memory_window=args.memory_window,
+            memory_mode=args.memory_mode,
+            run_summary_enabled=args.run_summary,
+            conversation_mode=args.context_mode,
+            turn_chat_window=args.turn_chat_window,
+            turn_chat_update_mode=args.turn_chat_update_mode,
+            turn_chat_assistant_history=args.turn_chat_assistant_history,
+            turn_chat_plan_enabled=args.turn_chat_plan,
+        )
         for seed in seeds:
             result = run_one(
                 agent=agent,
