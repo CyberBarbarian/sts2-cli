@@ -3,11 +3,15 @@
 > Fork notice: this repository is a fork of
 > [wuhao21/sts2-cli](https://github.com/wuhao21/sts2-cli). This fork is
 > maintained under [CyberBarbarian/sts2-cli](https://github.com/CyberBarbarian/sts2-cli)
-> for BG-Agent headless Slay the Spire 2 CLI play and benchmark work.
+> for BG-Agent headless Slay the Spire 2 CLI play and runtime work.
 >
 > The fork focuses on CLI, JSON protocol, headless adapter, state export, and
 > terminal presentation fixes. It does not intentionally change Slay the Spire 2
 > card, relic, enemy, event, combat, or reward semantics.
+>
+> LLM agent and benchmark research has moved to
+> [CyberBarbarian/sts2-agent-bench](https://github.com/CyberBarbarian/sts2-agent-bench).
+> This repository should stay focused on the CLI/headless runtime boundary.
 
 ## English
 
@@ -23,8 +27,8 @@
 ## What This Is
 
 `sts2-cli` runs the real Slay the Spire 2 engine headlessly and exposes it as an
-interactive terminal game, a stdin/stdout JSON protocol for agents, and a
-reproducible logging surface for CLI/export/headless debugging.
+interactive terminal game, a stdin/stdout JSON protocol for programmatic
+clients, and a reproducible logging surface for CLI/export/headless debugging.
 
 You must own and install Slay the Spire 2 through Steam. This repository does
 not contain or redistribute game DLLs.
@@ -225,7 +229,7 @@ build the adapter.
 
 ## 这是什么
 
-`sts2-cli` 使用真实的杀戮尖塔 2 游戏引擎，并把它以无头命令行形式暴露出来：可以直接在终端里玩，也可以通过 stdin/stdout JSON 协议给 agent 或 benchmark 使用。
+`sts2-cli` 使用真实的杀戮尖塔 2 游戏引擎，并把它以无头命令行形式暴露出来：可以直接在终端里玩，也可以通过 stdin/stdout JSON 协议给程序化客户端使用。
 
 你需要自己在 Steam 中拥有并安装 Slay the Spire 2。本仓库不包含、也不会重新分发游戏 DLL。
 

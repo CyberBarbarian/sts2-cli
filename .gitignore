@@ -13,7 +13,6 @@ obj/
 .obsidian/
 .env
 .env.*
-!.env.example
 logs/
 saves/*
 artifacts/
