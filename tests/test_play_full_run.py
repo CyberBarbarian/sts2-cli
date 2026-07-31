@@ -157,7 +157,7 @@ def test_play_run_launches_the_bound_prebuilt_dll_directly(monkeypatch):
         captured["kwargs"] = kwargs
         return Proc()
 
-    monkeypatch.setattr(play_full_run.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(play_full_run.headless_session.subprocess, "Popen", fake_popen)
 
     result = play_full_run.play_run("fixed", verbose=False, log=False)
 

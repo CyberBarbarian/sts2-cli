@@ -16,10 +16,10 @@ Examples:
 
 import argparse
 import json
-import subprocess
 import sys
 import random
 import os
+import headless_session
 from game_log import GameLogger
 
 VALID_CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
@@ -129,42 +129,30 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
     command, env = _runtime_binding()
     logger = GameLogger(character, seed, enabled=log)
     try:
-        proc = subprocess.Popen(
+        session = headless_session.HeadlessSession(
             command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if not verbose else None,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
             env=env,
+            capture_stderr=not verbose,
+            eof_error="No response from simulator (EOF)",
+            on_action=logger.log_action,
+            on_state=logger.log_state,
+            on_skip=(
+                (lambda line: print(f"  [skip] {line[:120]}"))
+                if verbose
+                else None
+            ),
         )
     except BaseException:
         logger.close()
         raise
 
-    def read_json_line() -> dict:
-        """Read a line from stdout, skipping non-JSON lines (build warnings etc.)"""
-        while True:
-            resp_line = proc.stdout.readline().strip()
-            if not resp_line:
-                raise RuntimeError("No response from simulator (EOF)")
-            if resp_line.startswith("{"):
-                return json.loads(resp_line)
-            # Skip non-JSON lines (build warnings, etc.)
-            if verbose:
-                print(f"  [skip] {resp_line[:120]}")
-
     def send(cmd: dict) -> dict:
         line = json.dumps(cmd)
         if verbose:
             print(f"  > {line[:200]}")
-        logger.log_action(cmd)
-        proc.stdin.write(line + "\n")
-        proc.stdin.flush()
-        resp = read_json_line()
-        logger.log_state(resp)
+        response = session.send(cmd)
+        assert response is not None
+        resp = response
         if verbose:
             rtype = resp.get("type", "?")
             decision = resp.get("decision", "")
@@ -183,7 +171,8 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
     step = 0
     try:
         # Read ready message (may need to skip build warnings)
-        ready = read_json_line()
+        ready = session.read()
+        assert ready is not None
         if ready.get("type") != "ready":
             print(f"  Unexpected initial response: {ready}")
             return {"victory": False, "seed": seed, "error": "bad_init"}
@@ -405,23 +394,10 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
         if logger.path:
             print(f"  [log] Saved to {logger.path}")
         try:
-            proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
-            proc.stdin.flush()
+            session.write({"cmd": "quit"})
         except Exception:
             pass
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-            proc.wait(timeout=5)
-        finally:
-            for stream in (proc.stdin, proc.stdout, proc.stderr):
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except OSError:
-                        pass
+        session.close()
 
 
 def main():

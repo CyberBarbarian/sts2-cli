@@ -18,6 +18,7 @@ import random
 import re
 import uuid
 from game_log import GameLogger
+from headless_session import HeadlessSession
 
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
@@ -3806,34 +3807,23 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
     command = [DOTNET, HEADLESS_DLL] if os.path.isfile(HEADLESS_DLL) else [
         DOTNET, "run", "--no-build", "--project", PROJECT
     ]
-    proc = subprocess.Popen(
+    session = HeadlessSession(
         command,
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=None, text=True, encoding="utf-8", errors="replace",
-        bufsize=1, env=env,
+        env=env,
+        capture_stderr=False,
+        eof_error=None,
+        on_action=logger.log_action,
+        on_state=logger.log_state,
     )
 
-    def read():
-        while True:
-            l = proc.stdout.readline().strip()
-            if not l:
-                return None
-            if l.startswith("{"):
-                resp = json.loads(l)
-                logger.log_state(resp)
-                return resp
-
     def send(cmd, record=True):
-        logger.log_action(cmd)
-        proc.stdin.write(json.dumps(cmd) + "\n")
-        proc.stdin.flush()
-        return read()
+        return session.send(cmd)
 
     # Wire send into get_input for map command
     get_input._send = send
 
     try:
-        ready = read()
+        ready = session.read()
         if not ready:
             print("Failed to start simulator")
             return
@@ -4404,19 +4394,7 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
         logger.close()
         if logger.path:
             print(f"\n  [log] {t('Game log saved to','游戏日志已保存至')} {logger.path}")
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
-            proc.wait(timeout=5)
-        finally:
-            for stream in (proc.stdin, proc.stdout, proc.stderr):
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except OSError:
-                        pass
+        session.close()
 
     return restart_requested
 
