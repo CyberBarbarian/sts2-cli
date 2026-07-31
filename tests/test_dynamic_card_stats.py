@@ -2,6 +2,57 @@
 
 
 class TestDynamicCardStats:
+    def test_soul_upgrade_description_preserves_exhaust_keyword_line(self, game):
+        state = game.start(character="Necrobinder", seed="soul-static-keyword-projection")
+        game.skip_neow(state)
+        state = game.set_player(deck=["SOUL"] * 5)
+
+        soul = next(card for card in state["player"]["deck"] if card["name"] == "Soul")
+        assert soul["description"] == "Draw 2 cards.\nExhaust."
+        assert soul["after_upgrade"]["description"] == "Draw 3 cards.\nExhaust."
+
+    def test_impervious_upgrade_description_keeps_exhaust_in_frail_combat_context(self, game):
+        state = game.start(seed="codex-frail-block")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["IMPERVIOUS"] * 10)
+        state = game.enter_room("combat", encounter="RUBY_RAIDERS_NORMAL")
+        for _ in range(8):
+            if any(power["name"] == "Frail" for power in state.get("player_powers") or []):
+                break
+            state = game.act("end_turn")
+
+        frail = next(power for power in state.get("player_powers") or [] if power["name"] == "Frail")
+        assert frail["amount"] > 0
+        impervious = next(card for card in state["hand"] if card["name"] == "Impervious")
+        assert "Exhaust" in impervious["description"]
+        assert "Exhaust" in impervious["after_upgrade"]["description"]
+        assert "Exhaust" in (impervious["after_upgrade"].get("added_keywords") or []) or "Exhaust" in impervious["keywords"]
+
+    def test_after_upgrade_static_projection_is_stable_across_state_exports(self, game):
+        state = game.start(character="Regent", seed="upgrade-static-projection-stability")
+        game.skip_neow(state)
+        state = game.set_player(deck=[
+            "KINGLY_PUNCH",
+            "BIG_BANG",
+            "SOVEREIGN_BLADE",
+            "DEFEND_REGENT",
+            "DEFEND_REGENT",
+        ])
+
+        expected = {
+            card["id"]: card["after_upgrade"]
+            for card in state["player"]["deck"]
+            if card.get("after_upgrade") is not None
+        }
+        for _ in range(6):
+            state = game.set_player()
+            actual = {
+                card["id"]: card["after_upgrade"]
+                for card in state["player"]["deck"]
+                if card.get("after_upgrade") is not None
+            }
+            assert actual == expected
+
     def test_regent_sprite_font_icons_do_not_leak_resource_paths(self, game):
         state = game.start(character="Regent", seed="regent-sprite-font-icons")
         deck = {card["name"]: card for card in state["player"]["deck"]}
@@ -95,6 +146,7 @@ class TestDynamicCardStats:
 
         assert barrage["stats"]["calculatedhits"] == 1
         assert upgraded["stats"]["calculatedhits"] == 1
+        assert upgraded["vars"]["CalculatedHits"] == 1
         assert "(Hits 1 time)" in upgraded["description"]
         assert upgraded["stats"]["damage_by_target"][0]["unblocked_damage"] == 7
 

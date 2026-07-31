@@ -87,3 +87,61 @@ def test_forced_headless_combat_terminal_states_expose_engine_errors():
         "private Dictionary<string, object?> CombatRewardInfo",
     )
     assert "AddEngineErrorFields(state);" in reward_source
+
+
+def test_unrecognized_exported_decisions_block_every_raw_action():
+    source = Path("src/Sts2Headless/RunSimulator.cs").read_text(encoding="utf-8")
+    execute_source = _slice_between(
+        source,
+        "public Dictionary<string, object?> ExecuteAction",
+        "private static HashSet<string> AllowedActionNamesForDecision",
+    )
+    detection_source = _slice_between(
+        source,
+        "private Dictionary<string, object?> DetectDecisionPoint()",
+        "private Dictionary<string, object?> MapSelectState()",
+    )
+    policy_source = _slice_between(
+        source,
+        "private static HashSet<string> AllowedActionNamesForDecision",
+        "private static bool StateFlag",
+    )
+
+    assert "ExportedDecisionActionError(action)" in execute_source
+    assert "PendingDecisionActionError" not in source
+    assert "BlockedExportedDecisionActionError" not in source
+    assert 'case "event_blocked":' in policy_source
+    assert 'case "unrecognized_state":' in policy_source
+    assert 'case "unknown":' in policy_source
+    assert "return TrackExportedDecision(DetectDecisionPointCore());" in detection_source
+    assert "_lastExportedDecisionPolicy = new ExportedDecisionPolicy(" in detection_source
+    assert "AllowedActionNamesForDecision(state)" in detection_source
+    assert "_lastExportedDecision =" not in source
+    assert "_lastExportedActionNames =" not in source
+
+
+def test_full_run_driver_never_proceeds_through_an_unhandled_decision():
+    source = Path("python/play_full_run.py").read_text(encoding="utf-8")
+
+    assert 'decision in {"unrecognized_state", "unknown", "event_blocked"}' in source
+    assert 'elif decision == "event_result":' in source
+    assert '"treasure_empty"' not in source
+    assert "Unhandled decision {decision!r}; refusing implicit proceed" in source
+    assert 'elif decision == "unknown":' not in source
+    assert "Try proceeding instead" not in source
+    event_and_rest_source = _slice_between(
+        source,
+        'elif decision == "event_choice":',
+        'elif decision == "combat_reward":',
+    )
+    assert 'action": "leave_room"' not in event_and_rest_source
+
+
+def test_human_cli_does_not_expose_non_stateful_command_replay():
+    play_source = Path("python/play.py").read_text(encoding="utf-8")
+    launch_source = Path("launch.py").read_text(encoding="utf-8")
+
+    assert 'parser.add_argument("--load"' not in play_source
+    assert "replay_action_with_validation" not in play_source
+    assert 'raw == "save"' not in play_source
+    assert '["--load", rel_path]' not in launch_source

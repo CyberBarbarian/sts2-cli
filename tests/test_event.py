@@ -9,6 +9,17 @@ from conftest import run_headless_jsonl
 
 
 class TestNeowEvent:
+    def test_event_decision_rejects_cross_state_map_action_without_advancing(self, game):
+        state = game.start(seed="event-cross-state-action")
+        option = next(option for option in state["options"] if option["is_locked"] is False)
+
+        rejected = game.act("select_map_node", col=0, row=0)
+
+        assert rejected["type"] == "error"
+        assert "after event_choice" in rejected["message"]
+        resumed = game.act("choose_option", option_index=option["index"])
+        assert resumed.get("decision") is not None
+
     def test_neow_is_first_event(self, game):
         state = game.start(seed="ne1")
         assert state["decision"] == "event_choice"
@@ -22,7 +33,7 @@ class TestNeowEvent:
         result = game.act("leave_room")
 
         assert result["type"] == "error"
-        assert "Cannot leave this event" in result["message"]
+        assert "allowed action names: choose_option" in result["message"]
 
     def test_neow_options(self, game):
         state = game.start(seed="ne2")
@@ -56,7 +67,7 @@ class TestNeowEvent:
         assert state["can_skip"] is False
         skipped = game.act("skip_select")
         assert skipped["type"] == "error"
-        assert "cannot be skipped" in skipped["message"]
+        assert "allowed action names: select_cards" in skipped["message"]
         bash = next(c for c in state["cards"] if c["name"] == "Bash")
 
         state = game.act("select_cards", indices=str(bash["index"]))
@@ -105,6 +116,21 @@ class TestNeowEvent:
         state = game.act("select_bundle", bundle_index=0)
 
         assert state["decision"] in {"combat_reward", "map_select"}
+
+    def test_bundle_selection_rejects_out_of_range_index_without_consuming_prompt(self, game):
+        state = game.start(seed="bench_0000")
+        neows_bones = next(o for o in state["options"] if o["title"] == "Neow's Bones")
+        state = game.act("choose_option", option_index=neows_bones["index"])
+        scroll_boxes = next(r for r in state["rewards"] if r["name"] == "Scroll Boxes")
+        state = game.act("claim_reward", reward_index=scroll_boxes["index"])
+        assert state["decision"] == "bundle_select"
+
+        error = game.act("select_bundle", bundle_index=len(state["bundles"]))
+
+        assert error["type"] == "error"
+        assert "out of range" in error["message"]
+        resumed = game.act("select_bundle", bundle_index=0)
+        assert resumed["decision"] in {"combat_reward", "map_select"}
 
     def test_neow_hefty_tablet_card_select_exports_engine_skip_affordance(self, game):
         state = game.start(character="Defect", seed="manual-functional-defect-20260519-2")
@@ -308,6 +334,22 @@ class TestDenseVegetation:
 
 
 class TestAmalgamator:
+    def test_combine_defends_rejects_duplicate_indices_without_consuming_prompt(self, game):
+        state = game.start(seed="amalgamator-combine-defends-duplicates")
+        game.skip_neow(state)
+        state = game.enter_room("event", event="AMALGAMATOR")
+        combine = next(o for o in state["options"] if o["title"] == "Combine Defends")
+        state = game.act("choose_option", option_index=combine["index"])
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 2
+
+        error = game.act("select_cards", indices="0,0")
+
+        assert error["type"] == "error"
+        assert "unique card indices" in error["message"]
+        resumed = game.act("select_cards", indices="0,1")
+        assert resumed["decision"] == "map_select"
+
     def test_combine_defends_finishes_after_card_selection(self, game):
         state = game.start(seed="amalgamator-combine-defends")
         game.skip_neow(state)
@@ -520,6 +562,40 @@ class TestByrdonisNest:
 
 
 class TestBattlewornDummy:
+    def test_chained_start_of_combat_card_selects_stay_pending(self, game):
+        state = game.start(
+            character="Silent",
+            seed="battleworn-gambling-toolbox",
+        )
+        game.skip_neow(state)
+        game.set_player(
+            relics=["GAMBLING_CHIP", "TOOLBOX"],
+            relic_setup_mode="direct",
+        )
+
+        state = game.enter_room("event", event="BATTLEWORN_DUMMY")
+        setting = next(o for o in state["options"] if o["title"] == "Setting 3")
+        state = game.act("choose_option", option_index=setting["index"])
+        assert state["type"] == "decision"
+        assert "stack_trace" not in state
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 0
+        assert state["max_select"] == 1
+
+        state = game.act("select_cards", indices="")
+
+        assert state["type"] == "decision"
+        assert "stack_trace" not in state
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 0
+        assert state["max_select"] > 1
+
+        state = game.act("select_cards", indices="")
+
+        assert state["type"] == "decision"
+        assert "stack_trace" not in state
+        assert state["decision"] == "combat_play"
+
     def test_timeout_returns_event_defeat_page_not_combat_rewards(self, game):
         state = game.start(seed="battleworn-dummy-timeout")
         game.skip_neow(state)
@@ -1030,7 +1106,7 @@ class TestPaelAncient:
         result = game.act("leave_room")
 
         assert result["type"] == "error"
-        assert "Cannot leave this event" in result["message"]
+        assert "allowed action names: choose_option" in result["message"]
 
 
 class TestPotionCourier:

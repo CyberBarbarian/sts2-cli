@@ -15,9 +15,18 @@ def test_gpu_particles_2d_exposes_known_vfx_properties():
     assert "public float Explosiveness { get; set; }" in text
 
 
-def test_godot_stubs_build_without_known_stub_warnings():
+def test_godot_stubs_build_without_known_stub_warnings(tmp_path):
+    isolated_output = tmp_path / "build"
     result = subprocess.run(
-        [DOTNET, "build", PROJECT, "--no-restore", "--no-incremental"],
+        [
+            DOTNET,
+            "build",
+            PROJECT,
+            "--no-restore",
+            "--no-incremental",
+            "--output",
+            str(isolated_output),
+        ],
         cwd=STS2_CLI_ROOT,
         text=True,
         encoding="utf-8",

@@ -18,3 +18,4 @@ saves/*
 artifacts/
 .tools/
 results/
+/.codex_test_logs/

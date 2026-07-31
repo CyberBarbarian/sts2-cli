@@ -11,6 +11,24 @@ class TestCharacterMechanics:
         state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
         assert "orbs" in state or "orb_slots" in state
 
+    def test_defect_without_orbs_still_exports_empty_queue_and_slot_capacity(self, game):
+        state = game.start(character="Defect", seed="defect-empty-orb-queue")
+        game.skip_neow(state)
+        game.set_player(relics=[])
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        assert state["orbs"] == []
+        assert state["orb_slots"] > 0
+
+    def test_combat_hand_explicitly_exports_upgrade_state_and_preview(self, game):
+        state = game.start(character="Ironclad", seed="combat-hand-upgrade-fields")
+        game.skip_neow(state)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        assert state["hand"]
+        assert all("upgraded" in card for card in state["hand"])
+        assert all("after_upgrade" in card for card in state["hand"])
+
     def test_defect_orbs_export_engine_evoke_order(self, game):
         state = game.start(character="Defect", seed="defect-orb-order")
         game.skip_neow(state)
@@ -126,6 +144,7 @@ class TestCharacterMechanics:
         assert "osty" in state
         assert "hp" in state["osty"]
         assert "alive" in state["osty"]
+        assert "powers" in state["osty"]
 
 
 class TestFullRun:
@@ -140,7 +159,7 @@ class TestFullRun:
                 assert "victory" in state
                 return
             if state.get("type") == "error":
-                state = game.act("proceed")
+                pytest.fail(f"{character} action failed at step {steps}: {state}")
             elif dec == "combat_play":
                 state = game.auto_combat(state)
             elif dec == "map_select":
@@ -148,19 +167,24 @@ class TestFullRun:
                                  col=state["choices"][0]["col"],
                                  row=state["choices"][0]["row"])
             elif dec == "event_choice":
-                opts = [o for o in state["options"] if not o.get("is_locked")]
-                state = game.act("choose_option", option_index=opts[0]["index"]) if opts else game.act("leave_room")
+                opts = [o for o in state["options"] if o.get("is_locked") is False]
+                if opts:
+                    state = game.act("choose_option", option_index=opts[0]["index"])
+                elif state.get("can_leave") is True:
+                    state = game.act("leave_room")
+                else:
+                    pytest.fail(f"{character} event has no legal action at step {steps}: {state}")
             elif dec == "combat_reward":
                 rewards = state.get("rewards", [])
                 non_card = next(
-                    (r for r in rewards if r.get("kind") != "card_reward" and r.get("can_claim", True)),
+                    (r for r in rewards if r.get("kind") != "card_reward" and r.get("can_claim") is True),
                     None,
                 )
                 if non_card:
                     state = game.act("claim_reward", reward_index=non_card["index"])
                 else:
                     blocked = next(
-                        (r for r in rewards if not r.get("can_claim", True) and r.get("can_skip")),
+                        (r for r in rewards if r.get("can_claim") is False and r.get("can_skip") is True),
                         None,
                     )
                     if blocked:
@@ -168,24 +192,68 @@ class TestFullRun:
                     else:
                         card_reward = next((r for r in rewards if r.get("kind") == "card_reward"), None)
                         if card_reward:
-                            state = game.act("skip_reward", reward_index=card_reward["index"])
+                            if card_reward.get("can_claim") is True:
+                                state = game.act("claim_reward", reward_index=card_reward["index"])
+                            elif card_reward.get("can_skip") is True:
+                                state = game.act("skip_reward", reward_index=card_reward["index"])
+                            else:
+                                pytest.fail(
+                                    f"{character} card reward has no legal action at step {steps}: {state}"
+                                )
                         else:
-                            state = game.act("proceed")
+                            pytest.fail(f"{character} combat reward has no legal action at step {steps}: {state}")
             elif dec == "card_reward":
-                state = game.act("skip_card_reward")
+                if state.get("cards"):
+                    state = game.act("select_card_reward", card_index=state["cards"][0]["index"])
+                elif state.get("can_skip") is True:
+                    state = game.act("skip_card_reward")
+                else:
+                    pytest.fail(f"{character} card reward has no legal action at step {steps}: {state}")
             elif dec == "bundle_select":
-                state = game.act("select_bundle", bundle_index=0)
+                state = game.act("select_bundle", bundle_index=state["bundles"][0]["index"])
             elif dec == "card_select":
-                if state.get("can_skip", state.get("min_select", 0) == 0):
+                if state.get("can_skip") is True:
                     state = game.act("skip_select")
                 else:
-                    state = game.act("select_cards", indices="0")
+                    count = state["min_select"]
+                    indices = ",".join(str(card["index"]) for card in state["cards"][:count])
+                    state = game.act("select_cards", indices=indices)
+            elif dec == "event_result":
+                if state.get("can_proceed") is not True:
+                    pytest.fail(f"{character} event result cannot proceed at step {steps}: {state}")
+                state = game.act("proceed")
             elif dec == "rest_site":
-                opts = [o for o in state["options"] if o.get("is_enabled")]
+                opts = [o for o in state["options"] if o.get("is_enabled") is True]
+                if not opts:
+                    pytest.fail(f"{character} rest site has no legal action at step {steps}: {state}")
                 state = game.act("choose_option", option_index=opts[0]["index"])
             elif dec == "shop":
                 state = game.act("leave_room")
+            elif dec == "fake_merchant_shop":
+                if state.get("can_leave") is not True:
+                    pytest.fail(f"{character} fake merchant cannot be left at step {steps}: {state}")
+                state = game.act("leave_room")
+            elif dec == "treasure":
+                relics = state.get("relics", [])
+                if relics:
+                    state = game.act("claim_relic", relic_index=relics[0]["index"])
+                elif state.get("can_proceed") is True:
+                    state = game.act("proceed")
+                else:
+                    pytest.fail(f"{character} treasure has no legal action at step {steps}: {state}")
+            elif dec == "crystal_sphere":
+                if state.get("can_proceed") is True:
+                    state = game.act("crystal_sphere_proceed")
+                elif state.get("clickable_cells"):
+                    cell = state["clickable_cells"][0]
+                    state = game.act("crystal_sphere_click_cell", x=cell["x"], y=cell["y"])
+                elif state.get("can_use_small_tool") is True:
+                    state = game.act("crystal_sphere_set_tool", tool="small")
+                elif state.get("can_use_big_tool") is True:
+                    state = game.act("crystal_sphere_set_tool", tool="big")
+                else:
+                    pytest.fail(f"{character} crystal sphere has no legal action at step {steps}: {state}")
             else:
-                state = game.act("proceed")
+                pytest.fail(f"{character} exported unsupported decision at step {steps}: {state}")
             steps += 1
-        pytest.fail(f"{character} did not finish in {steps} steps")
+        pytest.fail(f"{character} did not finish in {steps} steps; final state: {state}")

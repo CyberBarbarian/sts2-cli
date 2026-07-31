@@ -136,31 +136,13 @@ def _collect_save_entries() -> list[dict]:
             continue
 
         stat = os.stat(path)
-        if name.endswith(".json"):
-            try:
-                with open(path, encoding="utf-8") as handle:
-                    data = json.load(handle)
-                entries.append(
-                    {
-                        "kind": "replay",
-                        "path": path,
-                        "name": name,
-                        "mtime": stat.st_mtime,
-                        "character": data.get("character", "?"),
-                        "seed": data.get("seed", "?"),
-                        "actions": len(data.get("actions", [])),
-                    }
-                )
-            except (json.JSONDecodeError, OSError):
-                pass
-        elif name.endswith(".save"):
+        if name.endswith(".save"):
             try:
                 with open(path, encoding="utf-8") as handle:
                     data = json.load(handle)
                 players = data.get("players", [])
                 entries.append(
                     {
-                        "kind": "native",
                         "path": path,
                         "name": name,
                         "mtime": stat.st_mtime,
@@ -172,7 +154,6 @@ def _collect_save_entries() -> list[dict]:
             except (json.JSONDecodeError, OSError):
                 entries.append(
                     {
-                        "kind": "native",
                         "path": path,
                         "name": name,
                         "mtime": stat.st_mtime,
@@ -186,11 +167,6 @@ def _collect_save_entries() -> list[dict]:
 
 def _format_entry(titles: dict[str, str], entry: dict, lang: str) -> str:
     timestamp = datetime.fromtimestamp(entry["mtime"]).strftime("%Y-%m-%d %H:%M")
-    if entry["kind"] == "replay":
-        character = str(entry.get("character", "?"))
-        display_name = _character_display(titles, character, lang)
-        return f"{entry['name']}  |  {display_name}  |  seed {entry['seed']}  |  {entry['actions']} actions  |  {timestamp}"
-
     if entry.get("broken"):
         return f"{entry['name']}  |  unreadable save file  |  {timestamp}"
 
@@ -230,15 +206,13 @@ def _menu_new_game(titles: dict[str, str], lang: str) -> None:
 def _menu_load_save(titles: dict[str, str], lang: str) -> None:
     entries = _collect_save_entries()
     if not entries:
-        print(f"\n  {_tr(lang, 'No .save or .json files found under saves/.', 'saves/ 下没有找到 .save 或 .json 文件。')}\n")
+        print(f"\n  {_tr(lang, 'No native .save files found under saves/.', 'saves/ 下没有找到原生 .save 文件。')}\n")
         return
 
     print(f"\n-- {_tr(lang, 'Load Save', '读取存档')} --")
-    print(f"  [continue] = {_tr(lang, 'native game .save', '原生游戏 .save')}")
-    print(f"  [replay]   = {_tr(lang, '.json command replay', '.json 命令回放')}\n")
+    print(f"  [continue] = {_tr(lang, 'native game .save', '原生游戏 .save')}\n")
     for index, entry in enumerate(entries, 1):
-        tag = "continue" if entry["kind"] == "native" else "replay"
-        print(f"  {index:2}  [{tag}]  {_format_entry(titles, entry, lang)}")
+        print(f"  {index:2}  [continue]  {_format_entry(titles, entry, lang)}")
 
     print(f"\n  0  {_tr(lang, 'Back', '返回')}")
     choice = _pick_int(_tr(lang, "\nEnter number: ", "\n输入编号: "), 0, len(entries), lang=lang)
@@ -247,12 +221,8 @@ def _menu_load_save(titles: dict[str, str], lang: str) -> None:
 
     selected = entries[choice - 1]
     rel_path = os.path.relpath(selected["path"], ROOT)
-    if selected["kind"] == "native":
-        print(f"\n{_tr(lang, 'Loading native save', '正在读取原生存档')}: {rel_path}\n")
-        _run_play(["--continue", rel_path], lang)
-    else:
-        print(f"\n{_tr(lang, 'Loading replay file', '正在读取回放文件')}: {rel_path}\n")
-        _run_play(["--load", rel_path], lang)
+    print(f"\n{_tr(lang, 'Loading native save', '正在读取原生存档')}: {rel_path}\n")
+    _run_play(["--continue", rel_path], lang)
 
 
 def _main_interactive(lang: str) -> None:

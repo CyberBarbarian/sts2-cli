@@ -248,7 +248,7 @@ class Program
     {
         return value.ValueKind switch
         {
-            JsonValueKind.Number => value.TryGetInt32(out var intValue) ? intValue : value.GetDouble(),
+            JsonValueKind.Number => value.TryGetInt32(out var intValue) ? (object)intValue : value.GetDouble(),
             JsonValueKind.String => value.GetString(),
             JsonValueKind.True => true,
             JsonValueKind.False => false,

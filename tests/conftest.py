@@ -70,8 +70,12 @@ class Game:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, bufsize=1, env=env,
         )
-        ready = self._read()
-        assert ready.get("type") == "ready", f"Expected ready, got: {ready}"
+        try:
+            ready = self._read()
+            assert ready.get("type") == "ready", f"Expected ready, got: {ready}"
+        except BaseException:
+            self._dispose_process(request_quit=False)
+            raise
 
     def _read(self):
         while True:
@@ -119,17 +123,31 @@ class Game:
     def set_draw_order(self, cards):
         return self.send({"cmd": "set_draw_order", "cards": cards})
 
+    def _dispose_process(self, *, request_quit):
+        proc = self.proc
+        if request_quit and proc.poll() is None:
+            try:
+                proc.stdin.write('{"cmd":"quit"}\n')
+                proc.stdin.flush()
+            except Exception:
+                pass
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+            proc.wait(timeout=5)
+        finally:
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+
     def close(self):
-        try:
-            self.proc.stdin.write('{"cmd":"quit"}\n')
-            self.proc.stdin.flush()
-        except Exception:
-            pass
-        try:
-            self.proc.terminate()
-            self.proc.wait(timeout=5)
-        except Exception:
-            self.proc.kill()
+        self._dispose_process(request_quit=True)
 
     # --- Auto-play helpers ---
 
@@ -215,7 +233,7 @@ class Game:
 
 @pytest.fixture(scope="session")
 def shared_game():
-    """Reuse one headless process across tests; reset engine state per test."""
+    """Reuse one headless process for tests that only need isolated run state."""
     g = Game()
     yield g
     g.close()

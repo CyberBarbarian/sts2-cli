@@ -36,6 +36,7 @@ class TestShopStructure:
         assert "relics" in state
         assert "potions" in state
         assert "card_removal_cost" in state
+        assert isinstance(state["can_remove_card"], bool)
 
     def test_shop_cards_have_description(self, game):
         state = game.start(seed="ss2")
@@ -74,6 +75,26 @@ class TestShopStructure:
             assert item["gold_cost"] == item["price"]
             assert isinstance(item["can_buy"], bool)
 
+    def test_shop_potions_are_unavailable_when_slots_are_full(self, game):
+        state = game.start(seed="shop-potion-slot-affordance")
+        game.skip_neow(state)
+        game.set_player(
+            gold=9999,
+            potions=["STRENGTH_POTION", "STRENGTH_POTION", "STRENGTH_POTION"],
+        )
+        state = game.enter_room("shop")
+
+        assert state["player"]["potion_empty_slots"] == 0
+        assert all(
+            potion["can_buy"] is False
+            for potion in state["potions"]
+            if potion["is_stocked"]
+        )
+        stocked = next(potion for potion in state["potions"] if potion["is_stocked"])
+        result = game.act("buy_potion", potion_index=stocked["index"])
+        assert result["type"] == "error"
+        assert "potion slot" in result["message"].lower()
+
     def test_shop_cards_have_upgrade_preview(self, game):
         state = game.start(seed="ss3")
         game.skip_neow(state)
@@ -88,6 +109,20 @@ class TestShopStructure:
 
         twin_strike = next(c for c in state["cards"] if c["name"] == "Twin Strike")
         assert twin_strike["stats"]["damage"] == 5
+
+    def test_shop_exports_spite_in_deck_without_combat_state(self, game):
+        """Regression for the v6 shop crash when Spite had no CombatState."""
+
+        state = game.start(seed="v6-shop-spite-no-combat-state")
+        game.skip_neow(state)
+        game.set_player(deck=["SPITE"])
+
+        state = game.enter_room("shop")
+
+        assert state["decision"] == "shop"
+        assert state.get("engine_error") is not True
+        spite = next(card for card in state["player"]["deck"] if card["name"] == "Spite")
+        assert spite["stats"]["repeat"] == 1
 
     def test_shop_relics_have_description(self, game):
         state = game.start(seed="ss4")
@@ -229,6 +264,38 @@ class TestShopBuy:
 
 
 class TestShopRemove:
+    def test_cancel_remove_card_returns_to_shop_without_consuming_purchase(self, game):
+        state = game.start(seed="sr-cancel-removal")
+        game.skip_neow(state)
+        game.set_player(gold=999)
+        state = game.enter_room("shop")
+        gold_before = state["player"]["gold"]
+        deck_before = state["player"]["deck_size"]
+        removal_cost = state["card_removal_cost"]
+
+        state = game.act("remove_card")
+        assert state["decision"] == "card_select"
+        assert state["min_select"] == 1
+        assert state["can_skip"] is True
+
+        state = game.act("skip_select")
+
+        assert state["decision"] == "shop"
+        assert state.get("engine_error") is not True
+        assert state["player"]["gold"] == gold_before
+        assert state["player"]["deck_size"] == deck_before
+        assert state["card_removal_cost"] == removal_cost
+        assert state["can_remove_card"] is True
+
+        state = game.act("remove_card")
+        assert state["decision"] == "card_select"
+        state = game.act("select_cards", indices="0")
+        assert state["decision"] == "shop"
+        assert state["player"]["gold"] == gold_before - removal_cost
+        assert state["player"]["deck_size"] == deck_before - 1
+        assert state["card_removal_cost"] is None
+        assert state["can_remove_card"] is False
+
     def test_remove_card_flow(self, game):
         state = game.start(seed="sr1")
         game.skip_neow(state)
@@ -271,6 +338,7 @@ class TestShopRemove:
         assert state["decision"] == "shop"
         assert state["player"]["deck_size"] == deck_before - 1
         assert state["card_removal_cost"] is None
+        assert state["can_remove_card"] is False
 
         state = game.act("remove_card")
         assert state["type"] == "error"

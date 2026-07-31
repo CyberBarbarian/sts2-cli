@@ -39,6 +39,41 @@ class TestRestSiteStructure:
 
 
 class TestRestSiteActions:
+    def test_out_of_range_option_is_rejected_without_leaving_rest_site(self, game):
+        state = game.start(seed="rest-option-range")
+        game.skip_neow(state)
+        state = game.enter_room("rest_site")
+        valid = next(option for option in state["options"] if option["is_enabled"] is True)
+
+        rejected = game.act("choose_option", option_index=999)
+
+        assert rejected["type"] == "error"
+        assert rejected["decision"] == "rest_site"
+        assert rejected["options"] == state["options"]
+        assert "Invalid rest site option 999" in rejected["message"]
+        resumed = game.act("choose_option", option_index=valid["index"])
+        assert resumed.get("decision") in {"map_select", "card_select"}
+
+    def test_disabled_option_is_rejected_by_engine_contract(self, game):
+        state = game.start(seed="rest-disabled-option")
+        game.skip_neow(state)
+        maximum_hp = state["player"]["max_hp"]
+        game.set_player(hp=maximum_hp, max_hp=maximum_hp)
+        state = game.enter_room("rest_site")
+        disabled = next(
+            (option for option in state["options"] if option["is_enabled"] is False),
+            None,
+        )
+        if disabled is None:
+            pytest.skip("This deterministic state exported no disabled rest option")
+
+        rejected = game.act("choose_option", option_index=disabled["index"])
+
+        assert rejected["type"] == "error"
+        assert rejected["decision"] == "rest_site"
+        assert rejected["options"] == state["options"]
+        assert "is disabled" in rejected["message"]
+
     def test_heal_restores_hp(self, game):
         state = game.start(seed="rsa1")
         game.skip_neow(state)

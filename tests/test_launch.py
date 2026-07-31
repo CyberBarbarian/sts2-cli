@@ -59,3 +59,15 @@ def test_language_prompt_can_override_default(monkeypatch):
     selected = launch._select_language("zh")
 
     assert selected == "en"
+
+
+def test_save_menu_ignores_deprecated_command_replays(tmp_path, monkeypatch):
+    (tmp_path / "old-replay.json").write_text(
+        '{"character":"Ironclad","seed":"old","actions":[]}', encoding="utf-8"
+    )
+    (tmp_path / "run.save").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(launch, "SAVE_DIR", str(tmp_path))
+
+    entries = launch._collect_save_entries()
+
+    assert [entry["name"] for entry in entries] == ["run.save"]

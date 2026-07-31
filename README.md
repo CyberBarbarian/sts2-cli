@@ -96,7 +96,6 @@ python3 python/play.py --lang both             # bilingual display where support
 python3 python/play.py --character Silent      # choose character
 python3 python/play.py --ascension 10          # choose ascension
 python3 python/play.py --continue saves/run.save
-python3 python/play.py --load saves/replay.json
 python3 python/play.py --no-log
 ```
 
@@ -288,7 +287,6 @@ python3 python/play.py --lang both             # 支持位置显示中英双语
 python3 python/play.py --character Silent      # 指定角色
 python3 python/play.py --ascension 10          # 指定进阶
 python3 python/play.py --continue saves/run.save
-python3 python/play.py --load saves/replay.json
 python3 python/play.py --no-log
 ```
 

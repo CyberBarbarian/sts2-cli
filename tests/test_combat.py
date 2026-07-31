@@ -7,7 +7,7 @@ import tempfile
 import threading
 
 import pytest
-from conftest import DOTNET, HEADLESS_DLL, LOCAL_DOTNET_DIR, STS2_CLI_ROOT, Game, run_headless_jsonl
+from conftest import DOTNET, HEADLESS_DLL, LOCAL_DOTNET_DIR, STS2_CLI_ROOT, run_headless_jsonl
 
 
 def card_energy_cost(card, default=99):
@@ -111,8 +111,12 @@ class HeadlessSession:
         self.stdout_queue = queue.Queue()
         self.reader = threading.Thread(target=self._read_stdout, daemon=True)
         self.reader.start()
-        ready = self.read_json()
-        assert ready.get("type") == "ready"
+        try:
+            ready = self.read_json()
+            assert ready.get("type") == "ready"
+        except BaseException:
+            self.close()
+            raise
 
     def _read_stdout(self):
         try:
@@ -186,6 +190,12 @@ class HeadlessSession:
             self.proc.kill()
             self.proc.wait(timeout=5)
         self.reader.join(timeout=1)
+        for stream in (self.proc.stdin, self.proc.stdout, self.proc.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
         self.stderr_file.flush()
         self.stderr_file.seek(0)
         stderr = self.stderr_file.read()
@@ -275,12 +285,8 @@ class TestCombatStructure:
         assert all("{" not in name and "}" not in name for name in names)
         assert all("#C" not in name for name in names)
 
-    def test_enemy_name_interpolates_after_test_subject_adaptation(self):
-        game = Game()
-        try:
-            self._assert_test_subject_adaptation_names_are_resolved(game)
-        finally:
-            game.close()
+    def test_enemy_name_interpolates_after_test_subject_adaptation(self, game):
+        self._assert_test_subject_adaptation_names_are_resolved(game)
 
     def test_test_subject_phase_transition_keeps_player_play_phase(self, game):
         state = game.start(seed="test-subject-player-turn-transition")
@@ -846,7 +852,9 @@ class TestCombatEdgeCases:
 
         assert state["decision"] == "card_select"
         state = game.act("end_turn")
+        assert state["type"] == "error"
         assert state["decision"] == "card_select"
+        assert "after card_select" in state["message"]
         assert state["player"]["hp"] > 0
 
     def test_exhaust_all_and_end_turn(self, game):
@@ -1106,6 +1114,28 @@ class TestCombatEdgeCases:
         assert "combat rewards are pending" in result["message"]
         assert not save_path.exists()
 
+    def test_opened_combat_card_reward_blocks_peer_reward_actions(self, game):
+        state = game.start(seed="pending-card-reward-peer-action-guard")
+        game.skip_neow(state)
+        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12)
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+        state = game.auto_play_combat(state)
+
+        assert state["decision"] == "combat_reward"
+        card_reward = next(reward for reward in state["rewards"] if reward["kind"] == "card_reward")
+        peer_reward = next(reward for reward in state["rewards"] if reward["index"] != card_reward["index"])
+        state = game.act("claim_reward", reward_index=card_reward["index"])
+        assert state["decision"] == "card_reward"
+
+        claim_result = game.act("claim_reward", reward_index=peer_reward["index"])
+        assert claim_result["type"] == "error"
+        assert claim_result["decision"] == "card_reward"
+        assert "after card_reward" in claim_result["message"]
+        skip_result = game.act("skip_reward", reward_index=peer_reward["index"])
+        assert skip_result["type"] == "error"
+        assert skip_result["decision"] == "card_reward"
+        assert "after card_reward" in skip_result["message"]
+
     def test_play_card_is_rejected_without_mutation_during_card_selection(self, game):
         state = game.start(seed="pending-selection-play-card-guard")
         game.skip_neow(state)
@@ -1131,7 +1161,8 @@ class TestCombatEdgeCases:
         assert state["decision"] == "card_select"
         invalid = game.act("play_card", card_index=0, target_index=0)
         assert invalid["type"] == "error"
-        assert "card selection" in invalid["message"].lower()
+        assert invalid["decision"] == "card_select"
+        assert "after card_select" in invalid["message"]
 
         state = game.act("select_cards", indices="0")
         hand_names = [card["name"] for card in state["hand"]]
@@ -1500,65 +1531,58 @@ class TestCombatEdgeCases:
             assert card["affliction"] != "WEIGHTED.title"
             assert card["affliction_description"] != "WEIGHTED.description"
 
-    def test_act_three_queen_win_enters_architect_victory_room_first(self, tmp_path):
-        game = Game()
-        try:
-            state = game.start(seed="queen-final-victory")
-            state = game.skip_neow(state)
+    def test_act_three_queen_win_enters_architect_victory_room_first(self, tmp_path, game):
+        state = game.start(seed="queen-final-victory")
+        state = game.skip_neow(state)
 
-            save_path = tmp_path / "act_three.save"
-            save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
-            assert save_result["success"] is True
-        finally:
-            game.close()
+        save_path = tmp_path / "act_three.save"
+        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+        assert save_result["success"] is True
 
         save_data = json.loads(save_path.read_text())
         save_data["current_act_index"] = 2
         save_data["visited_map_coords"] = [{"col": 3, "row": row} for row in range(15)]
         save_path.write_text(json.dumps(save_data))
 
-        game = Game()
+        game.reset()
         state = game.send({"cmd": "load_save", "path": str(save_path)})
         assert state["context"]["act"] == 3
 
-        try:
-            game.set_player(hp=9999, max_hp=9999, deck=["BLUDGEON"] * 50)
-            state = game.enter_room("combat", encounter="QUEEN_BOSS")
+        game.set_player(hp=9999, max_hp=9999, deck=["BLUDGEON"] * 50)
+        state = game.enter_room("combat", encounter="QUEEN_BOSS")
 
-            for _ in range(200):
-                if state.get("decision") != "combat_play":
-                    break
+        for _ in range(200):
+            if state.get("decision") != "combat_play":
+                break
 
-                playable = [card for card in state["hand"] if card.get("can_play")]
-                if not playable:
-                    state = game.act("end_turn")
-                    continue
+            playable = [card for card in state["hand"] if card.get("can_play")]
+            if not playable:
+                state = game.act("end_turn")
+                continue
 
-                card = playable[0]
-                enemies = [enemy for enemy in state["enemies"] if enemy.get("hp", 0) > 0]
-                assert enemies
-                target = min(enemies, key=lambda enemy: enemy.get("hp", 0))
-                state = game.act("play_card", card_index=card["index"], target_index=target["index"])
+            card = playable[0]
+            enemies = [enemy for enemy in state["enemies"] if enemy.get("hp", 0) > 0]
+            assert enemies
+            target = min(enemies, key=lambda enemy: enemy.get("hp", 0))
+            state = game.act("play_card", card_index=card["index"], target_index=target["index"])
 
-            assert state["decision"] == "event_choice"
-            assert state["event_name"] == "The Architect"
+        assert state["decision"] == "event_choice"
+        assert state["event_name"] == "The Architect"
 
-            first_option = next(o for o in state["options"] if not o.get("is_locked"))
-            assert first_option["text_key"] == "THE_ARCHITECT.dialogue.0"
-            assert first_option["title"] == "Threaten"
-            assert "arch demon" in first_option["description"]
-            state = game.act("choose_option", option_index=first_option["index"])
+        first_option = next(o for o in state["options"] if not o.get("is_locked"))
+        assert first_option["text_key"] == "THE_ARCHITECT.dialogue.0"
+        assert first_option["title"] == "Threaten"
+        assert "arch demon" in first_option["description"]
+        state = game.act("choose_option", option_index=first_option["index"])
 
-            assert state["decision"] == "event_choice"
-            assert state["event_name"] == "The Architect"
-            proceed = next(o for o in state["options"] if o["text_key"] == "PROCEED")
-            state = game.act("choose_option", option_index=proceed["index"])
+        assert state["decision"] == "event_choice"
+        assert state["event_name"] == "The Architect"
+        proceed = next(o for o in state["options"] if o["text_key"] == "PROCEED")
+        state = game.act("choose_option", option_index=proceed["index"])
 
-            assert state["decision"] == "game_over"
-            assert state["victory"] is True
-            assert state["player"]["hp"] > 0
-        finally:
-            game.close()
+        assert state["decision"] == "game_over"
+        assert state["victory"] is True
+        assert state["player"]["hp"] > 0
 
     def test_decimillipede_reattach_headless_texture_does_not_force_game_over(self, game):
         state = game.start(seed="decimillipede-reattach-headless")

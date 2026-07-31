@@ -1,8 +1,5 @@
 """Regression tests for native save/load behavior."""
 
-from conftest import Game
-
-
 def _resolve_to_map(game, state):
     for _ in range(80):
         decision = state.get("decision")
@@ -73,122 +70,93 @@ def _combat_reward_signature(state):
     ]
 
 
-def test_load_map_save_does_not_retrigger_neow(tmp_path):
+def test_load_map_save_does_not_retrigger_neow(tmp_path, game):
     save_path = tmp_path / "map_select.save"
 
-    game = Game()
-    try:
-        state = game.start(seed="sl1")
-        state = game.skip_neow(state)
-        assert state["decision"] == "map_select"
+    state = game.start(seed="sl1")
+    state = game.skip_neow(state)
+    assert state["decision"] == "map_select"
 
-        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
-        assert save_result["type"] == "save_result"
-        assert save_result["success"] is True
-    finally:
-        game.close()
+    save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+    assert save_result["type"] == "save_result"
+    assert save_result["success"] is True
 
-    game = Game()
-    try:
-        state = game.send({"cmd": "load_save", "path": str(save_path)})
-        assert state["decision"] == "map_select"
-    finally:
-        game.close()
+    game.reset()
+    state = game.send({"cmd": "load_save", "path": str(save_path)})
+    assert state["decision"] == "map_select"
 
 
-def test_combat_reward_checkpoint_refuses_reward_screen_rollback(tmp_path):
+def test_combat_reward_checkpoint_refuses_reward_screen_rollback(tmp_path, game):
     save_path = tmp_path / "combat_reward.save"
 
-    game = Game()
-    try:
-        state = game.start(seed="combat-reward-save")
-        state = game.skip_neow(state)
-        game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12)
-        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
-        state = game.auto_play_combat(state)
+    state = game.start(seed="combat-reward-save")
+    state = game.skip_neow(state)
+    game.set_player(hp=999, max_hp=999, deck=["BLUDGEON"] * 12)
+    state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+    state = game.auto_play_combat(state)
 
-        assert state["decision"] == "combat_reward"
-        assert _combat_reward_signature(state)
-        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+    assert state["decision"] == "combat_reward"
+    assert _combat_reward_signature(state)
+    save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
 
-        assert save_result["type"] == "error"
-        assert "combat rewards are pending" in save_result["message"]
-        assert not save_path.exists()
-    finally:
-        game.close()
+    assert save_result["type"] == "error"
+    assert "combat rewards are pending" in save_result["message"]
+    assert not save_path.exists()
 
 
-def test_shop_checkpoint_preserves_pre_room_rng(tmp_path):
+def test_shop_checkpoint_preserves_pre_room_rng(tmp_path, game):
     save_path = tmp_path / "in_shop.save"
 
-    game = Game()
-    try:
-        state = _reach_seeded_shop(game)
-        assert state["decision"] == "shop"
-        before = _shop_signature(state)
+    state = _reach_seeded_shop(game)
+    assert state["decision"] == "shop"
+    before = _shop_signature(state)
 
-        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
-        assert save_result["type"] == "save_result"
-        assert save_result["success"] is True
-    finally:
-        game.close()
+    save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+    assert save_result["type"] == "save_result"
+    assert save_result["success"] is True
 
-    game = Game()
-    try:
-        state = game.send({"cmd": "load_save", "path": str(save_path)})
-        assert state["decision"] == "map_select"
-        shop = next(choice for choice in state["choices"] if choice["type"] == "Shop")
-        state = game.act("select_map_node", col=shop["col"], row=shop["row"])
+    game.reset()
+    state = game.send({"cmd": "load_save", "path": str(save_path)})
+    assert state["decision"] == "map_select"
+    shop = next(choice for choice in state["choices"] if choice["type"] == "Shop")
+    state = game.act("select_map_node", col=shop["col"], row=shop["row"])
 
-        assert state["decision"] == "shop"
-        assert _shop_signature(state) == before
-    finally:
-        game.close()
+    assert state["decision"] == "shop"
+    assert _shop_signature(state) == before
 
 
-def test_load_pre_neow_save_preserves_neow_choice(tmp_path):
+def test_load_pre_neow_save_preserves_neow_choice(tmp_path, game):
     save_path = tmp_path / "pre_neow.save"
 
-    game = Game()
-    try:
-        state = game.start(seed="sl2")
-        assert state["decision"] == "event_choice"
+    state = game.start(seed="sl2")
+    assert state["decision"] == "event_choice"
 
-        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
-        assert save_result["type"] == "save_result"
-        assert save_result["success"] is True
-    finally:
-        game.close()
+    save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+    assert save_result["type"] == "save_result"
+    assert save_result["success"] is True
 
-    game = Game()
-    try:
-        state = game.send({"cmd": "load_save", "path": str(save_path)})
-        assert state["decision"] == "event_choice"
-    finally:
-        game.close()
+    game.reset()
+    state = game.send({"cmd": "load_save", "path": str(save_path)})
+    assert state["decision"] == "event_choice"
 
 
-def test_load_save_replaces_active_card_selector(tmp_path):
+def test_load_save_replaces_active_card_selector(tmp_path, game):
     save_path = tmp_path / "selector_reset.save"
 
-    game = Game()
-    try:
-        state = game.start(seed="selector-reset-load")
-        state = game.skip_neow(state)
-        assert state["decision"] == "map_select"
+    state = game.start(seed="selector-reset-load")
+    state = game.skip_neow(state)
+    assert state["decision"] == "map_select"
 
-        save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
-        assert save_result["type"] == "save_result"
-        assert save_result["success"] is True
+    save_result = game.send({"cmd": "write_continue_save", "path": str(save_path)})
+    assert save_result["type"] == "save_result"
+    assert save_result["success"] is True
 
-        state = game.enter_room("event", event="AMALGAMATOR")
-        combine = next(o for o in state["options"] if o["title"] == "Combine Defends")
-        state = game.act("choose_option", option_index=combine["index"])
-        assert state["decision"] == "card_select"
+    state = game.enter_room("event", event="AMALGAMATOR")
+    combine = next(o for o in state["options"] if o["title"] == "Combine Defends")
+    state = game.act("choose_option", option_index=combine["index"])
+    assert state["decision"] == "card_select"
 
-        state = game.send({"cmd": "load_save", "path": str(save_path)})
+    state = game.send({"cmd": "load_save", "path": str(save_path)})
 
-        assert state.get("type") != "error"
-        assert state["decision"] == "map_select"
-    finally:
-        game.close()
+    assert state.get("type") != "error"
+    assert state["decision"] == "map_select"

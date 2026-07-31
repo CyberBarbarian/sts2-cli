@@ -155,6 +155,25 @@ class TestPotionActions:
         assert any(card["name"] == "Strike" and card["cost"] == 0 for card in state["hand"])
         assert len(state["hand"]) == 4
 
+    def test_liquid_memories_temporary_cost_does_not_change_static_upgrade_cost(self, game):
+        state = game.start(seed="liquid-memories-static-upgrade-cost")
+        game.skip_neow(state)
+        game.set_player(
+            potions=["LIQUID_MEMORIES"],
+            deck=["FISTICUFFS"] * 5,
+        )
+        state = game.enter_room("combat", encounter="SHRINKER_BEETLE_WEAK")
+
+        for _ in range(2):
+            card = next(card for card in state["hand"] if card["name"] == "Fisticuffs")
+            state = game.act("play_card", card_index=card["index"], target_index=0)
+
+        state = game.act("use_potion", potion_index=0)
+        state = game.act("select_cards", indices="0")
+
+        recalled = next(card for card in state["hand"] if card["name"] == "Fisticuffs" and card["cost"] == 0)
+        assert recalled["after_upgrade"]["cost"] == 1
+
     def test_liquid_memories_discard_selection_does_not_export_hand_target_rows(self, game):
         state = game.start(seed="liquid-memories-selection-pile-stats")
         game.skip_neow(state)

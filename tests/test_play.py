@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -9,6 +10,8 @@ import pathlib
 import re
 import sys
 import types
+
+import pytest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -26,6 +29,34 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def plain(text: str) -> str:
     return ANSI_RE.sub("", text)
+
+
+def test_find_dotnet_accepts_a_runtime_only_local_host(monkeypatch):
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return types.SimpleNamespace(returncode=0 if command[1] == "--list-runtimes" else 1)
+
+    monkeypatch.setattr(play.subprocess, "run", fake_run)
+
+    assert play._find_dotnet() == play.LOCAL_DOTNET
+    assert calls == [[play.LOCAL_DOTNET, "--version"], [play.LOCAL_DOTNET, "--list-runtimes"]]
+
+
+def test_map_legend_labels_question_mark_as_unknown(capsys):
+    play.LANG = "en"
+
+    play._render_map(
+        {
+            "rows": [[{"col": 0, "row": 0, "type": "Unknown", "children": []}]],
+            "boss": {"col": 0, "row": 1, "type": "Boss"},
+        }
+    )
+    rendered = plain(capsys.readouterr().out)
+
+    assert "?=Unknown" in rendered
+    assert "?=Event" not in rendered
 
 
 def test_card_type_rarity_suffix_does_not_repeat_matching_labels():
@@ -103,10 +134,12 @@ def test_shop_cards_use_shared_type_and_rarity_display(capsys):
 
 def test_shop_shortcuts_omit_remove_after_card_removal_is_spent():
     state = {
-        "cards": [{"index": 0, "is_stocked": True}],
-        "relics": [{"index": 1, "is_stocked": True}],
-        "potions": [{"index": 2, "is_stocked": True}],
+        "player": {"gold": 100},
+        "cards": [{"index": 0, "is_stocked": True, "can_buy": True}],
+        "relics": [{"index": 1, "is_stocked": True, "can_buy": True}],
+        "potions": [{"index": 2, "is_stocked": True, "can_buy": True}],
         "card_removal_cost": None,
+        "can_remove_card": False,
     }
 
     shortcuts = play.shop_action_shortcuts(state)
@@ -119,6 +152,63 @@ def test_shop_shortcuts_omit_remove_after_card_removal_is_spent():
     assert "rm" not in shortcuts
 
 
+def test_shop_shortcuts_exclude_unaffordable_items_and_removal():
+    state = {
+        "player": {"gold": 48},
+        "cards": [
+            {"index": 0, "is_stocked": True, "can_buy": False},
+            {"index": 2, "is_stocked": True, "can_buy": True},
+        ],
+        "relics": [{"index": 0, "is_stocked": True, "can_buy": False}],
+        "potions": [{"index": 1, "is_stocked": True, "can_buy": False}],
+        "card_removal_cost": 75,
+        "can_remove_card": False,
+    }
+
+    shortcuts = play.shop_action_shortcuts(state)
+
+    assert shortcuts == {"2", "c2", "leave"}
+    assert play.shop_prompt(state) == (
+        "Choose a shown item shortcut (e.g. c0/r0/p0), rm to remove a card, or leave"
+    )
+    assert "c2" not in play.shop_prompt(state)
+
+
+def test_shop_unaffordable_action_is_reprompted_locally(capsys):
+    play.LANG = "en"
+    state = {
+        "player": {"gold": 48},
+        "cards": [{"index": 0, "is_stocked": True, "can_buy": False}],
+        "relics": [],
+        "potions": [],
+        "card_removal_cost": 75,
+        "can_remove_card": False,
+    }
+    sent = []
+
+    result = play.choose_shop_action(lambda command: sent.append(command), state, "c0")
+    text = plain(capsys.readouterr().out)
+
+    assert result is state
+    assert sent == []
+    assert "not available" in text
+
+
+def test_shop_remove_uses_engine_affordance():
+    state = {
+        "player": {"gold": 75},
+        "cards": [],
+        "relics": [],
+        "potions": [],
+        "card_removal_cost": 75,
+        "can_remove_card": True,
+    }
+
+    assert "rm" in play.shop_action_shortcuts(state)
+    state["can_remove_card"] = False
+    assert "rm" not in play.shop_action_shortcuts(state)
+
+
 def test_shop_remove_action_is_rejected_when_not_available(capsys):
     play.LANG = "en"
     state = {"card_removal_cost": None, "cards": [], "relics": [], "potions": []}
@@ -128,6 +218,203 @@ def test_shop_remove_action_is_rejected_when_not_available(capsys):
 
     assert result is state
     assert "not available" in text
+
+
+def test_get_input_exports_exact_prompt_contract_to_instrumented_input(monkeypatch):
+    class ContractInput:
+        def __init__(self):
+            self.contracts = []
+
+        def set_prompt_contract(self, **contract):
+            self.contracts.append(contract)
+
+        def __call__(self, _prompt):
+            return "leave"
+
+    reader = ContractInput()
+    monkeypatch.setattr("builtins.input", reader)
+
+    choice = play.get_input(
+        "Buy [c2/leave]",
+        {"c2", "leave"},
+        state={"decision": "shop"},
+    )
+
+    assert choice == "leave"
+    assert reader.contracts == [
+        {
+            "decision": "shop",
+            "canonical_option_tokens": ["c2", "leave"],
+            "accepted_syntax": ["canonical_token"],
+            "meta_commands": play.INPUT_META_COMMANDS,
+            "multi_select": False,
+            "multi_min": 1,
+            "multi_max": 1,
+        }
+    ]
+
+
+def test_target_enemy_input_exports_combat_state_and_exact_target_tokens(monkeypatch):
+    class ContractInput:
+        def __init__(self):
+            self.contracts = []
+
+        def set_prompt_contract(self, **contract):
+            self.contracts.append(contract)
+
+        def __call__(self, _prompt):
+            return "1"
+
+    reader = ContractInput()
+    monkeypatch.setattr("builtins.input", reader)
+
+    choice = play.get_input(
+        "Target enemy [index]",
+        {"0", "1"},
+        state={"decision": "combat_play"},
+    )
+
+    assert choice == "1"
+    assert reader.contracts == [
+        {
+            "decision": "combat_play",
+            "canonical_option_tokens": ["0", "1"],
+            "accepted_syntax": ["canonical_token"],
+            "meta_commands": play.INPUT_META_COMMANDS,
+            "multi_select": False,
+            "multi_min": 1,
+            "multi_max": 1,
+        }
+    ]
+
+
+def test_target_enemy_input_rejects_combat_card_target_syntax(monkeypatch, capsys):
+    class ContractInput:
+        def __init__(self):
+            self.answers = iter(["2@2", "2"])
+            self.contracts = []
+
+        def set_prompt_contract(self, **contract):
+            self.contracts.append(contract)
+
+        def __call__(self, _prompt):
+            return next(self.answers)
+
+    reader = ContractInput()
+    monkeypatch.setattr("builtins.input", reader)
+
+    choice = play.get_input(
+        "Target enemy [index]",
+        {"0", "1", "2", "3"},
+        state={"decision": "combat_play"},
+    )
+
+    assert choice == "2"
+    feedback = plain(capsys.readouterr().out)
+    assert "Invalid input." in feedback
+    assert "0, 1, 2, 3" not in feedback
+    assert len(reader.contracts) == 2
+    assert all(contract["accepted_syntax"] == ["canonical_token"] for contract in reader.contracts)
+
+
+def test_play_passes_authoritative_state_to_every_model_visible_input():
+    tree = ast.parse(PLAY_PATH.read_text(encoding="utf-8"))
+    play_function = next(
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "play"
+    )
+    calls = [
+        node
+        for node in ast.walk(play_function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "get_input"
+    ]
+
+    assert calls
+    assert [
+        call.lineno
+        for call in calls
+        if not any(keyword.arg == "state" for keyword in call.keywords)
+    ] == []
+
+
+def test_fake_merchant_exposes_only_engine_legal_actions_and_dispatches_them():
+    state = {
+        "player": {"gold": 100},
+        "relics": [
+            {"index": 0, "is_stocked": True, "can_buy": True},
+            {"index": 1, "is_stocked": True, "can_buy": False},
+        ],
+        "can_leave": True,
+        "can_throw_foul_potion": True,
+        "foul_potion_action": {"action": "use_potion", "potion_index": 2},
+    }
+    sent = []
+
+    def send(command):
+        sent.append(command)
+        return {"type": "decision", "decision": "event_result", "player": {}}
+
+    assert play.fake_merchant_shop_shortcuts(state) == {"r0", "throw", "leave"}
+    play.choose_fake_merchant_action(send, state, "r0")
+    play.choose_fake_merchant_action(send, state, "throw")
+    play.choose_fake_merchant_action(send, state, "leave")
+
+    assert sent == [
+        {"cmd": "action", "action": "buy_relic", "args": {"relic_index": 0}},
+        {"cmd": "action", "action": "use_potion", "args": {"potion_index": 2}},
+        {"cmd": "action", "action": "leave_room"},
+    ]
+
+
+def test_fake_merchant_prompt_explains_grammar_without_listing_legal_indices(capsys):
+    play.LANG = "en"
+    state = {
+        "player": {"gold": 100},
+        "relics": [
+            {"index": 0, "name": "Blocked", "cost": 120, "is_stocked": True, "can_buy": False},
+            {"index": 2, "name": "Available", "cost": 90, "is_stocked": True, "can_buy": True},
+        ],
+        "can_leave": True,
+        "can_throw_foul_potion": False,
+    }
+
+    play.show_fake_merchant_shop(state)
+    rendered = plain(capsys.readouterr().out)
+
+    assert play.fake_merchant_shop_shortcuts(state) == {"r2", "leave"}
+    assert play.fake_merchant_shop_prompt(state) == (
+        "Choose a shown relic shortcut (e.g. r0), throw, or leave"
+    )
+    assert "r2" not in play.fake_merchant_shop_prompt(state)
+    assert "Blocked" in rendered and "UNAVAILABLE" in rendered
+
+
+@pytest.mark.parametrize("decision", ["unrecognized_state", "unknown", "event_blocked"])
+def test_human_cli_refuses_unsupported_decisions_without_implicit_proceed(decision):
+    with pytest.raises(RuntimeError, match="refusing implicit proceed"):
+        play.ensure_supported_human_cli_state(
+            {"type": "decision", "decision": decision, "context": {"room_type": "Event"}}
+        )
+
+
+def test_human_cli_refuses_engine_error_without_implicit_proceed():
+    with pytest.raises(RuntimeError, match="headless state error"):
+        play.ensure_supported_human_cli_state({"type": "error", "message": "invalid action"})
+
+
+@pytest.mark.parametrize("state", [None, {}, {"type": "unsupported"}, {"type": "ok"}])
+def test_human_cli_refuses_non_decision_states_without_implicit_proceed(state):
+    with pytest.raises(RuntimeError, match="refusing implicit proceed"):
+        play.ensure_supported_human_cli_state(state)
+
+
+def test_shop_engine_error_is_not_silently_recovered():
+    state = {"cards": [], "relics": [], "potions": [], "card_removal_cost": None}
+    with pytest.raises(RuntimeError, match="refusing implicit recovery"):
+        play.choose_shop_action(lambda _command: {"type": "error", "message": "boom"}, state, "leave")
 
 
 def test_node_color_uses_distinct_map_type_colors():
@@ -154,6 +441,66 @@ def test_headless_build_is_stale_when_source_is_newer(tmp_path):
     os.utime(src, (new, new))
 
     assert play._headless_build_is_stale(str(exe), str(sts2), [str(src)])
+
+
+def test_frozen_runtime_refuses_stale_build_without_invoking_builder(tmp_path, monkeypatch):
+    lib_dir = tmp_path / "lib"
+    lib_dir.mkdir()
+    (lib_dir / "sts2.dll").write_text("runtime", encoding="utf-8")
+    build_calls = []
+    monkeypatch.setattr(play, "DOTNET", "dotnet")
+    monkeypatch.setattr(play, "ROOT", str(tmp_path))
+    monkeypatch.setattr(play, "LIB_DIR", str(lib_dir))
+    monkeypatch.setattr(play, "LOCAL_DOTNET", str(tmp_path / "missing-dotnet"))
+    monkeypatch.setattr(play, "_headless_build_is_stale", lambda *_args: True)
+    monkeypatch.setattr(play, "_build", lambda: build_calls.append(True) or True)
+    monkeypatch.setenv(play.FROZEN_RUNTIME_ENV, "1")
+    monkeypatch.setenv("STS2_LIB", str(lib_dir))
+    monkeypatch.setenv("STS2_GAME_DIR", str(lib_dir))
+
+    with pytest.raises(RuntimeError, match="Frozen STS2 CLI runtime is missing or stale"):
+        play.ensure_setup()
+
+    assert build_calls == []
+
+
+def test_frozen_runtime_overrides_external_game_library_paths(tmp_path, monkeypatch):
+    lib_dir = tmp_path / "lib"
+    lib_dir.mkdir()
+    (lib_dir / "sts2.dll").write_text("runtime", encoding="utf-8")
+    monkeypatch.setattr(play, "DOTNET", "dotnet")
+    monkeypatch.setattr(play, "ROOT", str(tmp_path))
+    monkeypatch.setattr(play, "LIB_DIR", str(lib_dir))
+    monkeypatch.setattr(play, "LOCAL_DOTNET", str(tmp_path / "missing-dotnet"))
+    monkeypatch.setattr(play, "_headless_build_is_stale", lambda *_args: False)
+    monkeypatch.setenv(play.FROZEN_RUNTIME_ENV, "1")
+    monkeypatch.setenv("STS2_LIB", "C:/external/lib")
+    monkeypatch.setenv("STS2_GAME_DIR", "C:/external/game")
+
+    play.ensure_setup()
+
+    assert os.environ["STS2_LIB"] == str(lib_dir)
+    assert os.environ["STS2_GAME_DIR"] == str(lib_dir)
+
+
+def test_non_frozen_runtime_preserves_automatic_build_behavior(tmp_path, monkeypatch):
+    lib_dir = tmp_path / "lib"
+    lib_dir.mkdir()
+    (lib_dir / "sts2.dll").write_text("runtime", encoding="utf-8")
+    build_calls = []
+    monkeypatch.setattr(play, "DOTNET", "dotnet")
+    monkeypatch.setattr(play, "ROOT", str(tmp_path))
+    monkeypatch.setattr(play, "LIB_DIR", str(lib_dir))
+    monkeypatch.setattr(play, "LOCAL_DOTNET", str(tmp_path / "missing-dotnet"))
+    monkeypatch.setattr(play, "_headless_build_is_stale", lambda *_args: True)
+    monkeypatch.setattr(play, "_build", lambda: build_calls.append(True) or True)
+    monkeypatch.delenv(play.FROZEN_RUNTIME_ENV, raising=False)
+    monkeypatch.setenv("STS2_LIB", str(lib_dir))
+    monkeypatch.setenv("STS2_GAME_DIR", str(lib_dir))
+
+    play.ensure_setup()
+
+    assert build_calls == [True]
 
 
 def test_native_save_summary_hides_future_act_bosses(tmp_path, capsys):
@@ -271,6 +618,8 @@ def test_choose_card_reward_prints_added_card_details(capsys):
     play.LANG = "en"
     old_state = {
         "decision": "card_reward",
+        "cards": [{"index": 2, "name": "Furnace"}],
+        "can_skip": True,
         "player": {
             "hp": 52,
             "max_hp": 63,
@@ -318,6 +667,25 @@ def test_choose_card_reward_prints_added_card_details(capsys):
     assert "At the start of your turn, Forge 4." in rendered
     assert "Changes:" in rendered
     assert "Deck: +Furnace" in rendered
+
+
+def test_card_reward_input_options_respect_engine_can_skip(capsys):
+    play.LANG = "en"
+    state = {
+        "decision": "card_reward",
+        "cards": [{"index": 2, "name": "Choice", "cost": 1}],
+        "can_skip": False,
+        "player": {},
+    }
+    sent = []
+
+    assert play.card_reward_input_options(state) == {"2": state["cards"][0]}
+    assert play.choose_card_reward(lambda command: sent.append(command), state, "s") is state
+    assert sent == []
+    assert "not available" in plain(capsys.readouterr().out)
+
+    state["can_skip"] = True
+    assert set(play.card_reward_input_options(state)) == {"2", "s"}
 
 
 def test_context_display_floor_prefers_player_facing_floor():
@@ -498,6 +866,14 @@ def test_quit_save_defaults_to_save_dir(monkeypatch):
     assert path is not None
     assert path.startswith(play.SAVE_DIR)
     assert path.endswith(".save")
+
+
+def test_quit_save_default_names_are_collision_safe(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+    paths = [play._quit_with_save(None, "Ironclad", "seed123") for _ in range(48)]
+
+    assert len(paths) == len(set(paths)) == 48
 
 
 def test_enemy_intent_labels_are_text_not_symbols():
@@ -996,6 +1372,47 @@ def test_card_detail_extension_can_hide_upgrade_summary(capsys):
     assert "Deal 10 damage." in text
     assert "upgrade:" not in text
     assert "10\u21929" not in text
+
+
+def test_combat_upgrade_preview_does_not_compare_dynamic_current_to_static_upgrade(capsys):
+    play.LANG = "en"
+
+    play.show_combat({
+        "round": 2,
+        "energy": 1,
+        "max_energy": 3,
+        "draw_pile_count": 3,
+        "discard_pile_count": 4,
+        "player": {"name": "The Regent", "hp": 30, "max_hp": 75, "gold": 99, "deck_size": 12},
+        "player_powers": [{
+            "name": "Frail",
+            "description": "Gain 25% less Block from cards.",
+            "amount": 2,
+            "type": "Debuff",
+        }],
+        "enemies": [],
+        "hand": [{
+            "index": 0,
+            "name": "Defend",
+            "cost": 1,
+            "type": "Skill",
+            "can_play": True,
+            "target_type": "Self",
+            "description": "Gain 3 Block.",
+            "stats": {"block": 3},
+            "after_upgrade": {
+                "cost": 1,
+                "description": "Gain 8 Block.",
+                "stats": {"block": 8},
+            },
+        }],
+    })
+
+    text = plain(capsys.readouterr().out)
+    assert "Defend (1) 3blk" in text
+    assert "Upgraded card (cost 1): Gain 8 Block." in text
+    assert "temporary combat modifiers" not in text
+    assert "blk 3\u21928" not in text
 
 
 def test_card_select_context_lines_include_source_event_hover_tip():
@@ -1744,7 +2161,8 @@ def test_combat_reward_shows_optional_skip_affordance(capsys):
 
     text = plain(capsys.readouterr().out)
     assert "Cannot claim: potion_slots_full." in text
-    assert "Type s1 to skip this reward." in text
+    assert "Optional reward; skip syntax is s<reward index>." in text
+    assert "s1" not in text
 
 
 def test_combat_reward_potion_discard_shortcuts_include_slots():
@@ -1760,6 +2178,77 @@ def test_combat_reward_potion_discard_shortcuts_include_slots():
     assert shortcuts == {"d0": 0, "d2": 2}
 
 
+def test_combat_reward_input_options_exclude_blocked_claim():
+    state = {
+        "player": {
+            "potions": [
+                {"index": 0, "name": "Strength Potion"},
+                {"index": 2, "name": "Fire Potion"},
+            ]
+        },
+        "rewards": [
+            {
+                "index": 1,
+                "kind": "potion",
+                "can_claim": False,
+                "can_skip": True,
+                "blocked_reason": "potion_slots_full",
+            },
+            {
+                "index": 3,
+                "kind": "gold",
+                "can_claim": True,
+                "can_skip": False,
+            },
+        ],
+    }
+
+    options = play.combat_reward_input_options(state)
+
+    assert "1" not in options
+    assert options["s1"] is state["rewards"][0]
+    assert options["3"] is state["rewards"][1]
+    assert options["d0"] is None
+    assert options["d2"] is None
+
+
+def test_combat_reward_input_options_fail_closed_without_engine_affordances():
+    state = {
+        "player": {"potions": []},
+        "rewards": [{"index": 0, "kind": "gold"}],
+    }
+
+    assert play.combat_reward_input_options(state) == {}
+
+
+def test_combat_reward_blocked_claim_is_reprompted_locally(monkeypatch, capsys):
+    state = {
+        "player": {"potions": [{"index": 0, "name": "Strength Potion"}]},
+        "rewards": [
+            {
+                "index": 0,
+                "kind": "potion",
+                "can_claim": False,
+                "can_skip": True,
+                "blocked_reason": "potion_slots_full",
+            }
+        ],
+    }
+    responses = iter(["0", "s0"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+
+    choice = play.get_input(
+        "Claim reward index, s<index> to skip, or d<slot> to discard potion",
+        set(play.combat_reward_input_options(state)),
+        state=state,
+    )
+
+    assert choice == "s0"
+    feedback = plain(capsys.readouterr().out)
+    assert "Invalid input." in feedback
+    assert "s0" not in feedback
+
+
 def test_combat_reward_choice_to_command_discards_potion():
     assert play.combat_reward_choice_to_command("d1") == {
         "cmd": "action",
@@ -1768,7 +2257,7 @@ def test_combat_reward_choice_to_command_discards_potion():
     }
 
 
-def test_combat_reward_full_potion_error_keeps_reward_state_and_mentions_cli_discard(capsys):
+def test_combat_reward_full_potion_error_fails_closed_with_cli_discard_hint():
     play.LANG = "en"
     state = {
         "decision": "combat_reward",
@@ -1787,13 +2276,8 @@ def test_combat_reward_full_potion_error_keeps_reward_state_and_mentions_cli_dis
             "error": "Potion slots are full; use discard_potion before claiming this potion reward",
         }
 
-    result = play.choose_combat_reward(send, state, "0")
-    text = plain(capsys.readouterr().out)
-
-    assert result is state
-    assert "discard_potion" not in text
-    assert "d0" in text
-    assert "d1" in text
+    with pytest.raises(RuntimeError, match="d0/d1.*refusing implicit recovery"):
+        play.choose_combat_reward(send, state, "0")
 
 
 def test_card_reward_marks_upgraded_cards(capsys):
@@ -1943,9 +2427,9 @@ def test_zh_combat_prompt_is_localized():
         "player": {"potions": [{"index": 0}]},
     }))
 
-    assert "出牌 [编号/编号@目标/seq]" in text
+    assert "出牌 [卡牌 0 / 指定目标 0@1 / 队列 seq 1 2@0]" in text
     assert "(e)结束回合" in text
-    assert "(p0) 药水" in text
+    assert "使用药水槽（如 p0）" in text
     assert "Play card" not in text
 
 
@@ -2024,7 +2508,7 @@ def test_show_player_marks_targeted_potions(capsys):
     assert "[0] Beetle Juice -> target enemy:" in text
 
 
-def test_combat_prompt_lists_all_potion_shortcuts():
+def test_combat_prompt_explains_potion_grammar_without_listing_current_slots():
     state = {
         "player": {
             "potions": [
@@ -2036,21 +2520,20 @@ def test_combat_prompt_lists_all_potion_shortcuts():
 
     prompt = play.combat_input_prompt(state)
 
-    assert "potions p0/p1" in prompt
-    assert "(p0) potion" not in prompt
+    assert "use potion slot (e.g. p0)" in prompt
+    assert "p0/p1" not in prompt
 
 
-def test_combat_prompt_omits_potion_hint_without_potions():
+def test_combat_prompt_is_state_independent_without_potions():
     state = {"player": {"potions": []}}
 
     prompt = play.combat_input_prompt(state)
 
-    assert "Play card [index/index@target/seq]" in prompt
-    assert "p0" not in prompt
-    assert "potion" not in prompt
+    assert "Play [card 0 / target 0@1 / queue seq 1 2@0]" in prompt
+    assert "use potion slot (e.g. p0)" in prompt
 
 
-def test_combat_help_lists_potion_shortcuts_by_slot():
+def test_combat_help_uses_only_canonical_state_independent_syntax():
     state = {
         "player": {
             "potions": [
@@ -2062,13 +2545,17 @@ def test_combat_help_lists_potion_shortcuts_by_slot():
 
     help_text = play.combat_help_text(state)
 
-    assert "p0/p2=use potion by slot" in help_text
-    assert "0@1/0>1=target enemy [1]" in help_text
-    assert "seq 1 2 4 / play 1 2 4 / 1,2,4=queued play from current hand snapshot" in help_text
+    assert "p0=use potion slot 0" in help_text
+    assert "p0/p2" not in help_text
+    assert "0@1=target enemy [1]" in help_text
+    assert "0>1" not in help_text
+    assert "seq 1 2 4=queued play from the current hand snapshot" in help_text
+    assert "play 1 2 4" not in help_text
+    assert "1,2,4" not in help_text
     assert "seq 1@0 4@2=queued targeted play" in help_text
 
 
-def test_global_help_explains_queue_forms(monkeypatch, capsys):
+def test_global_help_explains_only_canonical_queue_form(monkeypatch, capsys):
     answers = iter(["help", "quit"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     play.LANG = "en"
@@ -2079,10 +2566,14 @@ def test_global_help_explains_queue_forms(monkeypatch, capsys):
         pass
 
     text = plain(capsys.readouterr().out)
-    assert "0@1 or 0>1" in text
-    assert "seq 1 2 4 / play 1 2 4 / 1,2,4" in text
+    assert "0@1 plays card [0] on enemy [1]" in text
+    assert "0>1" not in text
+    assert "seq 1 2 4 plays from the current hand snapshot" in text
+    assert "play 1 2 4" not in text
+    assert "1,2,4" not in text
     assert "seq 1@0 4@2" in text
     assert "queued play stops on manual choices" in text
+    assert "saves" not in text
 
 
 def test_get_input_rejects_sequence_outside_combat(monkeypatch, capsys):
@@ -2096,7 +2587,9 @@ def test_get_input_rejects_sequence_outside_combat(monkeypatch, capsys):
     )
 
     assert choice == "s"
-    assert "Invalid. Options:" in plain(capsys.readouterr().out)
+    feedback = plain(capsys.readouterr().out)
+    assert "Invalid input." in feedback
+    assert "0, s" not in feedback
 
 
 def test_get_input_accepts_enter_when_empty_string_is_valid(monkeypatch):
@@ -2105,6 +2598,44 @@ def test_get_input_accepts_enter_when_empty_string_is_valid(monkeypatch):
     choice = play.get_input("Press Enter to proceed", {""}, state={"decision": "treasure"})
 
     assert choice == ""
+
+
+def test_get_input_fails_closed_when_engine_exports_no_legal_inputs():
+    with pytest.raises(RuntimeError, match="no legal terminal inputs exported"):
+        play.get_input("Choose", set(), state={"decision": "card_reward"})
+
+
+def test_get_input_rejects_bare_space_separated_combat_batch(monkeypatch, capsys):
+    answers = iter(["0 1@0", "seq 0 1@0"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+
+    choice = play.get_input(
+        "Play",
+        {"0", "1", "e"},
+        state={"decision": "combat_play"},
+        additional_accepted_syntax=("combat_card_or_sequence",),
+    )
+
+    assert choice == "seq 0 1@0"
+    assert "Invalid input." in plain(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("malformed", ["0,,1", ",0,1", "0,1,"])
+def test_get_input_rejects_empty_multi_select_segments(monkeypatch, capsys, malformed):
+    answers = iter([malformed, "0,1"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+
+    choice = play.get_input(
+        "Choose two cards",
+        {"0", "1", "2"},
+        state={"decision": "card_select"},
+        multi_select=True,
+        multi_min=2,
+        multi_max=2,
+    )
+
+    assert choice == "0,1"
+    assert "Invalid input." in plain(capsys.readouterr().out)
 
 
 def test_zh_crystal_sphere_labels_are_localized(capsys):
@@ -2456,26 +2987,24 @@ def test_special_hand_card_alerts_keep_curses_separate_from_status_cards():
 
 
 def test_parse_card_sequence_accepts_ordered_indices():
-    assert play.parse_card_sequence("seq 3,1,0") == [3, 1, 0]
-    assert play.parse_card_sequence("play 2 0") == [2, 0]
-    assert play.parse_card_sequence("3,2") == [3, 2]
+    assert play.parse_card_sequence("seq 3 1 0") == [3, 1, 0]
+    assert play.parse_card_sequence("play 2 0") is None
+    assert play.parse_card_sequence("3,2") is None
+    assert play.parse_card_sequence("seq 3,1,0") is None
     assert play.parse_card_sequence("3") is None
 
 
 def test_parse_card_sequence_accepts_per_card_targets():
-    assert play.parse_card_sequence("seq 3@1,2@0") == [
+    assert play.parse_card_sequence("seq 3@1 2@0") == [
         {"card_index": 3, "target_index": 1},
         {"card_index": 2, "target_index": 0},
     ]
-    assert play.parse_card_sequence("play 4>2 1") == [
-        {"card_index": 4, "target_index": 2},
-        {"card_index": 1},
-    ]
+    assert play.parse_card_sequence("seq 4>2 1") is None
 
 
 def test_parse_card_target_accepts_single_card_target():
     assert play.parse_card_target("3@1") == {"card_index": 3, "target_index": 1}
-    assert play.parse_card_target("4>2") == {"card_index": 4, "target_index": 2}
+    assert play.parse_card_target("4>2") is None
     assert play.parse_card_target("seq 3@1") is None
     assert play.parse_card_target("3") is None
 
@@ -2484,7 +3013,12 @@ def test_get_input_accepts_single_card_target(monkeypatch):
     answers = iter(["0@1", "0"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
 
-    assert play.get_input("Play", {"0"}, state={"decision": "combat_play"}) == "0@1"
+    assert play.get_input(
+        "Play",
+        {"0"},
+        state={"decision": "combat_play"},
+        additional_accepted_syntax=("combat_card_or_sequence",),
+    ) == "0@1"
 
 
 def test_execute_card_sequence_uses_explicit_targets_with_multiple_enemies():
