@@ -3,10 +3,10 @@
 sts2-cli interactive player — play Slay the Spire 2 in your terminal.
 
 Usage:
-    python3 play.py                    # Interactive mode (you play)
-    python3 play.py --auto             # Auto-play with simple AI
-    python3 play.py --seed myseed      # Fixed seed for reproducibility
-    python3 play.py --character Silent  # Choose character
+    python3 python/play.py                    # Interactive mode (you play)
+    python3 python/play.py --auto             # Auto-play with simple AI
+    python3 python/play.py --seed myseed      # Fixed seed for reproducibility
+    python3 python/play.py --character Silent # Choose character
 """
 
 import json
@@ -18,7 +18,7 @@ import random
 import re
 import uuid
 from game_log import GameLogger
-from headless_session import HeadlessSession
+from headless_session import HeadlessSession, build_runtime_env
 
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
@@ -215,16 +215,14 @@ def ensure_setup():
             print("❌ Failed to copy sts2.dll")
             sys.exit(1)
 
-    # Frozen experiments must never inherit an external game/runtime directory.
-    if _frozen_runtime_enabled():
-        os.environ["STS2_GAME_DIR"] = LIB_DIR
-        os.environ["STS2_LIB"] = LIB_DIR
-    else:
-        os.environ.setdefault("STS2_GAME_DIR", LIB_DIR)
-        os.environ.setdefault("STS2_LIB", LIB_DIR)
-    if os.path.isfile(LOCAL_DOTNET):
-        os.environ["DOTNET_ROOT"] = LOCAL_DOTNET_DIR
-        os.environ["PATH"] = LOCAL_DOTNET_DIR + os.pathsep + os.environ.get("PATH", "")
+    os.environ.update(
+        build_runtime_env(
+            local_dotnet=LOCAL_DOTNET,
+            local_dotnet_dir=LOCAL_DOTNET_DIR,
+            lib_dir=LIB_DIR,
+            force_local_lib=_frozen_runtime_enabled(),
+        )
+    )
 
     # Check if built
     exe_dir = os.path.join(ROOT, "src", "Sts2Headless", "bin", "Debug", "net9.0")
@@ -249,6 +247,10 @@ DEFAULT_LANG = "en"
 CHARACTER_CHOICES = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
 DEFAULT_CHARACTER = "Ironclad"
 DEFAULT_ASCENSION = 0
+
+
+def continuation_command(save_path):
+    return f"python3 python/play.py --continue {save_path}"
 
 
 def prompt_start_options(lang=None, character=None, ascension=None, input_fn=input, output_fn=print):
@@ -3539,7 +3541,11 @@ def get_input(
                 print(f"\n  {c(t('Saved games:','存档列表:'), 'bold')}")
                 for s in saves:
                     print(f"    {c(s['file'], 'cyan')}  [{t('native save','原生存档')}]")
-                print(f"\n  {t('Continue with:','继续命令:')} python3 play.py --continue saves/{saves[0]['file']}")
+                resume_path = f"saves/{saves[0]['file']}"
+                print(
+                    f"\n  {t('Continue with:','继续命令:')} "
+                    f"{continuation_command(resume_path)}"
+                )
             else:
                 print(f"  {t('No saves found.','没有找到存档。')}")
             continue
@@ -3755,7 +3761,10 @@ def _show_quit_save_result(result):
         print(f"  {c(t('Saved!','已存档!'), 'green')} ({sz // 1024}KB)")
         if save_path:
             print(f"  {t('Save path:','存档位置:')} {c(save_path, 'cyan')}")
-            print(f"  {t('Continue later:','下次继续:')} python3 play.py --continue {save_path}")
+            print(
+                f"  {t('Continue later:','下次继续:')} "
+                f"{continuation_command(save_path)}"
+            )
     elif save_result:
         print(f"  {c(t('Save failed:','存档失败:'), 'red')} {save_result.get('message', '?')}")
 
@@ -3794,30 +3803,24 @@ def play(character="Ironclad", seed=None, auto=False, ascension=0, log=True,
     quit_sent = False
 
     logger = GameLogger(character, actual_seed, enabled=log, path=log_path)
-    env = os.environ.copy()
-    if os.path.isfile(LOCAL_DOTNET):
-        env["DOTNET_ROOT"] = LOCAL_DOTNET_DIR
-        env["PATH"] = LOCAL_DOTNET_DIR + os.pathsep + env.get("PATH", "")
-    if _frozen_runtime_enabled():
-        env["STS2_LIB"] = LIB_DIR
-        env["STS2_GAME_DIR"] = LIB_DIR
-    else:
-        env.setdefault("STS2_LIB", LIB_DIR)
-        env.setdefault("STS2_GAME_DIR", LIB_DIR)
+    env = build_runtime_env(
+        local_dotnet=LOCAL_DOTNET,
+        local_dotnet_dir=LOCAL_DOTNET_DIR,
+        lib_dir=LIB_DIR,
+        force_local_lib=_frozen_runtime_enabled(),
+    )
     command = [DOTNET, HEADLESS_DLL] if os.path.isfile(HEADLESS_DLL) else [
         DOTNET, "run", "--no-build", "--project", PROJECT
     ]
     session = HeadlessSession(
         command,
         env=env,
-        capture_stderr=False,
+        stderr=None,
         eof_error=None,
         on_action=logger.log_action,
         on_state=logger.log_state,
     )
-
-    def send(cmd, record=True):
-        return session.send(cmd)
+    send = session.send
 
     # Wire send into get_input for map command
     get_input._send = send
@@ -4451,7 +4454,10 @@ if __name__ == "__main__":
             for s in saves:
                 print(f"  {s['file']}  [{t('native save','原生存档')}]")
             print(f"{'─' * 50}")
-            print(f"  {t('Continue with:','继续命令:')} python3 play.py --continue saves/<file>")
+            print(
+                f"  {t('Continue with:','继续命令:')} "
+                f"{continuation_command('saves/<file>')}"
+            )
         else:
             print(t("No saves found.", "没有找到存档。"))
         sys.exit(0)

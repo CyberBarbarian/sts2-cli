@@ -10,7 +10,8 @@
 > card, relic, enemy, event, combat, or reward semantics.
 >
 > LLM agent and benchmark research has moved to
-> [CyberBarbarian/sts2-agent-bench](https://github.com/CyberBarbarian/sts2-agent-bench).
+> [CyberBarbarian/sts2-agent-bench](https://github.com/CyberBarbarian/sts2-agent-bench)
+> (private; access required).
 > This repository should stay focused on the CLI/headless runtime boundary.
 
 ## English
@@ -109,6 +110,16 @@ Supported characters:
 
 Supported ascension range is currently `0-10`.
 
+For a non-interactive random-agent smoke run:
+
+```bash
+python3 python/play_full_run.py 1 Ironclad
+```
+
+The first argument is the number of runs. The optional second argument is one
+character, so `play_full_run.py 5` means five Ironclad runs rather than one run
+for each character.
+
 Common in-game commands:
 
 ```text
@@ -204,7 +215,20 @@ For broad local coverage without the slowest runs:
 python -m pytest -m "not slow" -q
 ```
 
-Use full `python -m pytest -q` for pre-release or overnight validation.
+The release gate is a clean C# build, the complete pytest suite, and natural
+autoplay coverage for all five characters:
+
+```bash
+dotnet build src/Sts2Headless/Sts2Headless.csproj --no-restore
+python -m pytest -q
+python python/play_full_run.py 5
+python python/play_full_run.py 1 Silent
+python python/play_full_run.py 1 Defect
+python python/play_full_run.py 1 Regent
+python python/play_full_run.py 1 Necrobinder
+```
+
+The five-run command covers Ironclad only.
 
 ## Release Notes
 
@@ -292,6 +316,15 @@ python3 python/play.py --no-log
 
 当前支持角色：`Ironclad`、`Silent`、`Defect`、`Regent`、`Necrobinder`。当前支持进阶范围是 `0-10`。
 
+非交互式 random-agent 冒烟运行：
+
+```bash
+python3 python/play_full_run.py 1 Ironclad
+```
+
+第一个参数是运行次数，第二个可选参数是一个角色。因此
+`play_full_run.py 5` 表示运行五次 Ironclad，并不代表五个角色各运行一次。
+
 游戏内常用命令：
 
 ```text
@@ -378,7 +411,19 @@ python -m pytest tests/test_process_reuse.py -q
 python -m pytest -m "not slow" -q
 ```
 
-发布前或夜间验证再使用完整 `python -m pytest -q`。
+发布门禁包括干净的 C# 构建、完整 pytest，以及五个角色都自然运行到终局：
+
+```bash
+dotnet build src/Sts2Headless/Sts2Headless.csproj --no-restore
+python -m pytest -q
+python python/play_full_run.py 5
+python python/play_full_run.py 1 Silent
+python python/play_full_run.py 1 Defect
+python python/play_full_run.py 1 Regent
+python python/play_full_run.py 1 Necrobinder
+```
+
+其中五次运行命令只覆盖 Ironclad。
 
 ## 发布说明
 

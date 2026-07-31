@@ -8,6 +8,7 @@ class TestDynamicCardStats:
         state = game.set_player(deck=["SOUL"] * 5)
 
         soul = next(card for card in state["player"]["deck"] if card["name"] == "Soul")
+        assert soul["rarity"] == "Token"
         assert soul["description"] == "Draw 2 cards.\nExhaust."
         assert soul["after_upgrade"]["description"] == "Draw 3 cards.\nExhaust."
 

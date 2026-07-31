@@ -3,9 +3,32 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from typing import Any
+
+
+def build_runtime_env(
+    *,
+    local_dotnet: str,
+    local_dotnet_dir: str,
+    lib_dir: str,
+    force_local_lib: bool,
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Bind a child process to repository-local runtime dependencies."""
+    env = dict(os.environ if base is None else base)
+    if os.path.isfile(local_dotnet):
+        env["DOTNET_ROOT"] = local_dotnet_dir
+        env["PATH"] = local_dotnet_dir + os.pathsep + env.get("PATH", "")
+    if force_local_lib:
+        env["STS2_LIB"] = lib_dir
+        env["STS2_GAME_DIR"] = lib_dir
+    else:
+        env.setdefault("STS2_LIB", lib_dir)
+        env.setdefault("STS2_GAME_DIR", lib_dir)
+    return env
 
 
 class HeadlessSession:
@@ -16,7 +39,7 @@ class HeadlessSession:
         command: list[str],
         *,
         env: dict[str, str],
-        capture_stderr: bool,
+        stderr: int | None,
         eof_error: str | None,
         on_action: Callable[[dict[str, Any]], None] | None = None,
         on_state: Callable[[dict[str, Any]], None] | None = None,
@@ -30,7 +53,7 @@ class HeadlessSession:
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if capture_stderr else None,
+            stderr=stderr,
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -60,9 +83,9 @@ class HeadlessSession:
         self,
         command: dict[str, Any],
         *,
-        record_action: bool = True,
+        record: bool = True,
     ) -> dict[str, Any] | None:
-        if record_action and self._on_action is not None:
+        if record and self._on_action is not None:
             self._on_action(command)
         self.write(command)
         return self.read()

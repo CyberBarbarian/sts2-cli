@@ -31,6 +31,13 @@ def plain(text: str) -> str:
     return ANSI_RE.sub("", text)
 
 
+def test_continuation_command_uses_repo_root_entrypoint():
+    assert (
+        play.continuation_command("saves/run.save")
+        == "python3 python/play.py --continue saves/run.save"
+    )
+
+
 def test_find_dotnet_accepts_a_runtime_only_local_host(monkeypatch):
     calls = []
 

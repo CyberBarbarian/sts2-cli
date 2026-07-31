@@ -112,6 +112,23 @@ class TestNeowEvent:
 
         assert state["decision"] == "bundle_select"
         assert len(state["bundles"]) == 2
+        required_card_fields = {
+            "id",
+            "name",
+            "cost",
+            "type",
+            "rarity",
+            "upgraded",
+            "description",
+            "stats",
+            "keywords",
+            "after_upgrade",
+        }
+        assert all(
+            required_card_fields <= card.keys()
+            for bundle in state["bundles"]
+            for card in bundle["cards"]
+        )
 
         state = game.act("select_bundle", bundle_index=0)
 

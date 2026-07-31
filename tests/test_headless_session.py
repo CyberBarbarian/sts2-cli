@@ -48,8 +48,49 @@ class Process:
         self.killed = True
 
 
+def test_runtime_env_preserves_or_forces_existing_library_paths(monkeypatch, tmp_path):
+    dotnet_dir = tmp_path / "dotnet"
+    dotnet_dir.mkdir()
+    dotnet = dotnet_dir / "dotnet.exe"
+    dotnet.write_bytes(b"")
+    base = {
+        "PATH": "system-bin",
+        "STS2_LIB": "external-lib",
+        "STS2_GAME_DIR": "external-game",
+    }
+
+    preserved = headless_session.build_runtime_env(
+        local_dotnet=str(dotnet),
+        local_dotnet_dir=str(dotnet_dir),
+        lib_dir="repo-lib",
+        force_local_lib=False,
+        base=base,
+    )
+    forced = headless_session.build_runtime_env(
+        local_dotnet=str(dotnet),
+        local_dotnet_dir=str(dotnet_dir),
+        lib_dir="repo-lib",
+        force_local_lib=True,
+        base=base,
+    )
+
+    assert preserved["STS2_LIB"] == "external-lib"
+    assert preserved["STS2_GAME_DIR"] == "external-game"
+    assert forced["STS2_LIB"] == "repo-lib"
+    assert forced["STS2_GAME_DIR"] == "repo-lib"
+    assert forced["DOTNET_ROOT"] == str(dotnet_dir)
+    assert forced["PATH"].split(headless_session.os.pathsep, 1) == [
+        str(dotnet_dir),
+        "system-bin",
+    ]
+
+
 def test_session_owns_json_transport_and_callbacks(monkeypatch):
-    process = Process(["diagnostic\n", '{"type":"ready"}\n'])
+    process = Process([
+        "diagnostic\n",
+        '{"type":"ready"}\n',
+        '{"type":"decision"}\n',
+    ])
     captured = {}
     actions = []
     states = []
@@ -64,23 +105,28 @@ def test_session_owns_json_transport_and_callbacks(monkeypatch):
     session = headless_session.HeadlessSession(
         ["dotnet", "headless.dll"],
         env={"BOUND": "1"},
-        capture_stderr=True,
+        stderr=headless_session.subprocess.DEVNULL,
         eof_error="EOF",
         on_action=actions.append,
         on_state=states.append,
         on_skip=skipped.append,
     )
 
-    response = session.send({"cmd": "start"})
+    response = session.send({"cmd": "start"}, record=False)
+    recorded_response = session.send({"cmd": "action"})
 
     assert response == {"type": "ready"}
-    assert actions == [{"cmd": "start"}]
-    assert states == [{"type": "ready"}]
+    assert recorded_response == {"type": "decision"}
+    assert actions == [{"cmd": "action"}]
+    assert states == [{"type": "ready"}, {"type": "decision"}]
     assert skipped == ["diagnostic"]
-    assert process.stdin.writes == ['{"cmd": "start"}\n']
+    assert process.stdin.writes == [
+        '{"cmd": "start"}\n',
+        '{"cmd": "action"}\n',
+    ]
     assert captured["command"] == ["dotnet", "headless.dll"]
     assert captured["kwargs"]["env"] == {"BOUND": "1"}
-    assert captured["kwargs"]["stderr"] is headless_session.subprocess.PIPE
+    assert captured["kwargs"]["stderr"] is headless_session.subprocess.DEVNULL
 
 
 def test_session_eof_policy_is_explicit(monkeypatch):
@@ -94,13 +140,13 @@ def test_session_eof_policy_is_explicit(monkeypatch):
     optional = headless_session.HeadlessSession(
         ["headless"],
         env={},
-        capture_stderr=False,
+        stderr=None,
         eof_error=None,
     )
     required = headless_session.HeadlessSession(
         ["headless"],
         env={},
-        capture_stderr=False,
+        stderr=None,
         eof_error="simulator EOF",
     )
 
@@ -119,7 +165,7 @@ def test_session_close_terminates_and_closes_streams(monkeypatch):
     session = headless_session.HeadlessSession(
         ["headless"],
         env={},
-        capture_stderr=True,
+        stderr=headless_session.subprocess.DEVNULL,
         eof_error=None,
     )
 

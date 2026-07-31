@@ -3,15 +3,15 @@
 Play a full STS2 run using the headless simulator with a random agent.
 
 Usage:
-  python3 play_full_run.py <num_runs> [character]
+  python3 python/play_full_run.py <num_runs> [character]
 
 Arguments:
   num_runs    Positive integer: number of runs to play
   character   One of: Ironclad, Silent, Defect, Regent, Necrobinder (default: Ironclad)
 
 Examples:
-  python3 play_full_run.py 5
-  python3 play_full_run.py 3 Silent
+  python3 python/play_full_run.py 5
+  python3 python/play_full_run.py 3 Silent
 """
 
 import argparse
@@ -19,6 +19,7 @@ import json
 import sys
 import random
 import os
+import subprocess
 import headless_session
 from game_log import GameLogger
 
@@ -116,11 +117,12 @@ def _runtime_binding():
         raise RuntimeError(
             "play_full_run requires the repository-local prebuilt runtime; missing: " + ", ".join(missing)
         )
-    env = os.environ.copy()
-    env["DOTNET_ROOT"] = LOCAL_DOTNET_DIR
-    env["PATH"] = LOCAL_DOTNET_DIR + os.pathsep + env.get("PATH", "")
-    env["STS2_LIB"] = LIB_DIR
-    env["STS2_GAME_DIR"] = LIB_DIR
+    env = headless_session.build_runtime_env(
+        local_dotnet=LOCAL_DOTNET,
+        local_dotnet_dir=LOCAL_DOTNET_DIR,
+        lib_dir=LIB_DIR,
+        force_local_lib=True,
+    )
     return [LOCAL_DOTNET, HEADLESS_DLL], env
 
 
@@ -132,7 +134,7 @@ def play_run(seed: str, character: str = "Ironclad", verbose: bool = True, log: 
         session = headless_session.HeadlessSession(
             command,
             env=env,
-            capture_stderr=not verbose,
+            stderr=subprocess.DEVNULL if not verbose else None,
             eof_error="No response from simulator (EOF)",
             on_action=logger.log_action,
             on_state=logger.log_state,
