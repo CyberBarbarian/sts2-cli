@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 
 import pytest
-from conftest import run_headless_jsonl
+from conftest import Game, run_headless_jsonl
 
 
 class TestNeowEvent:
@@ -1229,6 +1229,28 @@ class TestTinkerTime:
 
 
 class TestTrial:
+    def test_entrant_number_is_deterministic_across_replay_processes(self):
+        trials = []
+        for process_index in range(3):
+            game = Game()
+            try:
+                state = game.start(
+                    character="Defect",
+                    seed="ironclad_a0_3407",
+                    lang="en",
+                )
+                game.skip_neow(state)
+                trial = game.enter_room("event", event="TRIAL")
+                assert trial["event_name"] == "The Trial"
+                trials.append(trial)
+            finally:
+                game.close()
+            if process_index < 2:
+                time.sleep(1.1)
+
+        assert len({trial["vars"]["EntrantNumber"] for trial in trials}) == 1
+        assert len({trial["description"] for trial in trials}) == 1
+
     def test_trial_event_description_formats_entrant_number(self, game):
         state = game.start(seed="trial-entrant-number")
         game.skip_neow(state)
@@ -1250,5 +1272,6 @@ class TestTrial:
 
         assert state["decision"] == "event_choice"
         assert state["event_name"] == "The Trial"
+        assert "powerful noble" in state["description"]
         assert "DECIDER" not in state["description"]
         assert any(opt["title"].startswith("DECIDE:") for opt in state["options"])

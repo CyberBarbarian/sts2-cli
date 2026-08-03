@@ -9567,6 +9567,8 @@ public class RunSimulator
             var harmony = new Harmony("sts2headless.trial.presentation");
             var trialType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Events.Trial");
             var acceptMethod = AccessTools.Method("MegaCrit.Sts2.Core.Models.Events.Trial:Accept");
+            var calculateVarsMethod = AccessTools.Method(
+                "MegaCrit.Sts2.Core.Models.Events.Trial:CalculateVars");
             var addVfxMethod = trialType?.GetMethod("AddVfxAnchoredToPortrait",
                 BindingFlags.Instance | BindingFlags.NonPublic,
                 binder: null,
@@ -9575,6 +9577,9 @@ public class RunSimulator
             var transpiler = typeof(YieldPatches).GetMethod(nameof(YieldPatches.TrialAcceptHeadlessTranspiler),
                 BindingFlags.Static | BindingFlags.Public);
             var skipPrefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.SkipPresentationVoidPrefix),
+                BindingFlags.Static | BindingFlags.Public);
+            var deterministicVarsTranspiler = typeof(YieldPatches).GetMethod(
+                nameof(YieldPatches.TrialCalculateVarsDeterministicTranspiler),
                 BindingFlags.Static | BindingFlags.Public);
 
             var patched = 0;
@@ -9588,7 +9593,13 @@ public class RunSimulator
                 harmony.Patch(addVfxMethod, new HarmonyMethod(skipPrefix));
                 patched++;
             }
-
+            if (calculateVarsMethod != null && deterministicVarsTranspiler != null)
+            {
+                harmony.Patch(
+                    calculateVarsMethod,
+                    transpiler: new HarmonyMethod(deterministicVarsTranspiler));
+                patched++;
+            }
             Console.Error.WriteLine($"[INFO] Patched Trial headless presentation ({patched} methods)");
         }
         catch (Exception ex)
@@ -10145,6 +10156,39 @@ public class RunSimulator
                     pop.blocks.AddRange(instruction.blocks);
                     yield return pop;
                     yield return loadFalse;
+                    continue;
+                }
+
+                yield return instruction;
+            }
+        }
+
+        public static MegaCrit.Sts2.Core.Random.Rng TrialEntrantNumberRng(EventModel trial)
+        {
+            return new MegaCrit.Sts2.Core.Random.Rng(
+                trial.Rng.Seed,
+                "sts2headless-trial-entrant-number");
+        }
+
+        public static IEnumerable<CodeInstruction> TrialCalculateVarsDeterministicTranspiler(
+            IEnumerable<CodeInstruction> instructions)
+        {
+            var chaoticGetter = AccessTools.PropertyGetter(
+                typeof(MegaCrit.Sts2.Core.Random.Rng),
+                nameof(MegaCrit.Sts2.Core.Random.Rng.Chaotic));
+            var deterministicRng = AccessTools.Method(
+                typeof(YieldPatches),
+                nameof(TrialEntrantNumberRng));
+
+            foreach (var instruction in instructions)
+            {
+                if (instruction.Calls(chaoticGetter))
+                {
+                    var loadTrial = new CodeInstruction(OpCodes.Ldarg_0);
+                    loadTrial.labels.AddRange(instruction.labels);
+                    loadTrial.blocks.AddRange(instruction.blocks);
+                    yield return loadTrial;
+                    yield return new CodeInstruction(OpCodes.Call, deterministicRng);
                     continue;
                 }
 
