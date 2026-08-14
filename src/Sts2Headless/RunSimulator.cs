@@ -72,6 +72,7 @@ public class RunSimulator
     private RunState? _runState;
     private static bool _modelDbInitialized;
     private static bool _locPatchesInstalled;
+    private static WeakReference<RunSimulator>? _activeCombatLifecycleSimulator;
     private static readonly InlineSynchronizationContext _syncCtx = new();
     private readonly ManualResetEventSlim _turnStarted = new(false);
     private readonly ManualResetEventSlim _combatEnded = new(false);
@@ -92,6 +93,7 @@ public class RunSimulator
     private bool _rewardsProcessed;
     private int _goldBeforeCombat;
     private int _lastKnownHp;
+    private bool _combatTerminalHpCaptured;
     private string? _engineErrorReason;
     private ExportedDecisionPolicy? _lastExportedDecisionPolicy;
     private bool _suppressDecisionExportForActionTape;
@@ -133,6 +135,7 @@ public class RunSimulator
             return;
         CombatManager.Instance.TurnStarted += OnCombatTurnStarted;
         CombatManager.Instance.CombatEnded += OnCombatEnded;
+        _activeCombatLifecycleSimulator = new WeakReference<RunSimulator>(this);
         _combatEventHandlersRegistered = true;
     }
 
@@ -142,6 +145,11 @@ public class RunSimulator
             return;
         CombatManager.Instance.TurnStarted -= OnCombatTurnStarted;
         CombatManager.Instance.CombatEnded -= OnCombatEnded;
+        if (_activeCombatLifecycleSimulator?.TryGetTarget(out var active) == true
+            && ReferenceEquals(active, this))
+        {
+            _activeCombatLifecycleSimulator = null;
+        }
         _combatEventHandlersRegistered = false;
     }
 
@@ -149,15 +157,21 @@ public class RunSimulator
 
     private void OnCombatEnded(CombatRoom _)
     {
-        // Combat teardown can clear or replace the player's Creature before
-        // GameOverState is exported.  Capture authoritative pre-reward HP at
-        // the engine event itself so action-tape execution does not depend on
-        // whether an intermediate combat_play observation happened to update
-        // the diagnostic cache.
-        var hp = _runState?.Players.FirstOrDefault()?.Creature?.CurrentHp;
-        if (hp is > 0)
-            _lastKnownHp = hp.Value;
         _combatEnded.Set();
+    }
+
+    private static void CapturePreRewardCombatHpPrefix(CombatManager __instance, bool value)
+    {
+        if (value || !__instance.IsInProgress)
+            return;
+        if (_activeCombatLifecycleSimulator?.TryGetTarget(out var simulator) != true
+            || simulator is null)
+            return;
+        var hp = simulator._runState?.Players.FirstOrDefault()?.Creature?.CurrentHp;
+        if (hp is null)
+            return;
+        simulator._lastKnownHp = hp.Value;
+        simulator._combatTerminalHpCaptured = true;
     }
 
     private void CleanUpForcedCombatCardSubscriptions()
@@ -839,6 +853,7 @@ public class RunSimulator
                 case "monster":
                 case "elite":
                 {
+                    _combatTerminalHpCaptured = false;
                     if (string.IsNullOrEmpty(encounter))
                         encounter = "SHRINKER_BEETLE_WEAK"; // default encounter
                     var encModel = ModelDb.GetById<EncounterModel>(
@@ -4378,6 +4393,8 @@ public class RunSimulator
             ["gold_earned"] = player.Gold - _goldBeforeCombat,
             ["player"] = PlayerSummary(player),
         };
+        if (_runState?.CurrentRoom is CombatRoom && _combatTerminalHpCaptured)
+            state["combat_terminal_hp"] = CapturedCombatTerminalHp();
         AddEngineErrorFields(state);
         return state;
     }
@@ -7251,9 +7268,7 @@ public class RunSimulator
         // to the last live combat HP while preserving death as zero.
         if (isVictory)
         {
-            var exportedHp = summary.TryGetValue("hp", out var hpObj) && hpObj is int hp ? hp : 0;
-            if (exportedHp <= 0 && _lastKnownHp > 0)
-                summary["hp"] = _lastKnownHp;
+            summary["hp"] = CapturedCombatTerminalHp();
         }
         else
         {
@@ -7265,12 +7280,20 @@ public class RunSimulator
             ["decision"] = "game_over",
             ["context"] = RunContext(),
             ["victory"] = isVictory,
+            ["combat_terminal_hp"] = isVictory ? _lastKnownHp : 0,
             ["player"] = summary,
             ["act"] = _runState.CurrentActIndex + 1,
             ["floor"] = _runState.ActFloor,
         };
         AddEngineErrorFields(state);
         return state;
+    }
+
+    private int CapturedCombatTerminalHp()
+    {
+        if (!_combatTerminalHpCaptured || _lastKnownHp <= 0)
+            FlagEngineError("Authoritative pre-reward combat HP was not captured");
+        return _lastKnownHp;
     }
 
     #endregion
@@ -9547,6 +9570,7 @@ public class RunSimulator
         PatchKaiserCrabPresentation();
         PatchCrystalSpherePresentation();
         PatchTrialPresentation();
+        PatchCombatTerminalHpCapture();
 
         // Initialize localization system (needed for events, cards, etc.)
         InitLocManager();
@@ -10231,6 +10255,27 @@ public class RunSimulator
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] Failed to patch Trial presentation: {ex.Message}");
+        }
+    }
+
+    private static void PatchCombatTerminalHpCapture()
+    {
+        try
+        {
+            var setter = AccessTools.PropertySetter(
+                typeof(CombatManager),
+                nameof(CombatManager.IsInProgress));
+            var prefix = AccessTools.Method(
+                typeof(RunSimulator),
+                nameof(CapturePreRewardCombatHpPrefix));
+            if (setter == null || prefix == null)
+                throw new MissingMethodException("CombatManager.IsInProgress setter capture hook");
+            var harmony = new Harmony("sts2headless.combatterminalhp.capture");
+            harmony.Patch(setter, prefix: new HarmonyMethod(prefix));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch combat terminal HP capture: {ex.Message}");
         }
     }
 
@@ -11559,6 +11604,7 @@ public class RunSimulator
         _rewardsProcessed = false;
         _goldBeforeCombat = 0;
         _lastKnownHp = 0;
+        _combatTerminalHpCaptured = false;
         _engineErrorReason = null;
         _lastExportedDecisionPolicy = null;
         _pendingCardSelectionSourceCard = null;

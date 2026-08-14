@@ -80,6 +80,27 @@ def test_start_combat_training_mode_stays_compact_across_actions(game):
         assert all(enemy["id"].startswith("MONSTER.") for enemy in row["enemies"])
 
 
+def test_terminal_combat_hp_is_captured_before_burning_blood(game):
+    command = _scenario_command("pre-reward-terminal-hp")
+    command["observation_mode"] = "training_compact"
+    command["player"]["hp"] = 70
+    command["player"]["potions"] = []
+    command["player"]["deck"] = ["CARD.BLUDGEON"] * 5
+
+    state = game.send(command)
+    game.send({"cmd": "debug_set_enemy_hp", "enemy_index": 0, "hp": 1})
+    bludgeon = next(card for card in state["hand"] if card["id"] == "CARD.BLUDGEON")
+    terminal = game.act("play_card", card_index=bludgeon["index"], target_index=0)
+
+    assert terminal["decision"] in {"combat_reward", "game_over"}
+    assert terminal["combat_terminal_hp"] == 70
+    if terminal["decision"] == "combat_reward":
+        assert terminal["player"]["hp"] == 76
+    else:
+        assert terminal["player"]["hp"] == 70
+    assert terminal.get("engine_error") is not True
+
+
 def test_action_tape_matches_sequential_actions(game):
     command = _scenario_command("action-tape-equivalence")
     command["observation_mode"] = "training_compact"

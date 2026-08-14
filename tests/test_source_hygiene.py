@@ -89,6 +89,15 @@ def test_forced_headless_combat_terminal_states_expose_engine_errors():
     assert "AddEngineErrorFields(state);" in reward_source
 
 
+def test_combat_terminal_hp_is_captured_before_victory_hooks():
+    source = Path("src/Sts2Headless/RunSimulator.cs").read_text(encoding="utf-8")
+
+    assert "PatchCombatTerminalHpCapture();" in source
+    assert "nameof(CombatManager.IsInProgress)" in source
+    assert "CapturePreRewardCombatHpPrefix" in source
+    assert 'state["combat_terminal_hp"] = CapturedCombatTerminalHp();' in source
+
+
 def test_unrecognized_exported_decisions_block_every_raw_action():
     source = Path("src/Sts2Headless/RunSimulator.cs").read_text(encoding="utf-8")
     execute_source = _slice_between(
