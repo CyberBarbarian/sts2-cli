@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Text.Json;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Combat.History.Entries;
 using MegaCrit.Sts2.Core.Commands;
@@ -74,6 +75,7 @@ public class RunSimulator
     private static readonly InlineSynchronizationContext _syncCtx = new();
     private readonly ManualResetEventSlim _turnStarted = new(false);
     private readonly ManualResetEventSlim _combatEnded = new(false);
+    private bool _combatEventHandlersRegistered;
     private static readonly LocLookup _loc = new();
     private bool _eventOptionChosen;
     private Task? _pendingEventOptionTask;
@@ -92,6 +94,7 @@ public class RunSimulator
     private int _lastKnownHp;
     private string? _engineErrorReason;
     private ExportedDecisionPolicy? _lastExportedDecisionPolicy;
+    private bool _suppressDecisionExportForActionTape;
     private readonly HeadlessCardSelector _cardSelector = new();
     private CardModel? _pendingCardSelectionSourceCard;
     private Dictionary<string, object?>? _pendingCardSelectionSourceEventOption;
@@ -105,6 +108,10 @@ public class RunSimulator
     private string? _preCurrentRoomSaveJson;
     private object? _starSpendTrackerCombatState;
     private int? _starSpendObservedRound;
+    private bool _trainingObservationMode;
+    private static readonly HashSet<string> CombatPlayActionNames = new(
+        new[] { "play_card", "use_potion", "end_turn" },
+        StringComparer.Ordinal);
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
@@ -120,7 +127,61 @@ public class RunSimulator
             InitLocManager();
     }
 
-    public Dictionary<string, object?> StartRun(string character, int ascension = 0, string? seed = null, string lang = "en")
+    private void RegisterCombatEventHandlers()
+    {
+        if (_combatEventHandlersRegistered)
+            return;
+        CombatManager.Instance.TurnStarted += OnCombatTurnStarted;
+        CombatManager.Instance.CombatEnded += OnCombatEnded;
+        _combatEventHandlersRegistered = true;
+    }
+
+    private void UnregisterCombatEventHandlers()
+    {
+        if (!_combatEventHandlersRegistered)
+            return;
+        CombatManager.Instance.TurnStarted -= OnCombatTurnStarted;
+        CombatManager.Instance.CombatEnded -= OnCombatEnded;
+        _combatEventHandlersRegistered = false;
+    }
+
+    private void OnCombatTurnStarted(CombatState _) => _turnStarted.Set();
+
+    private void OnCombatEnded(CombatRoom _)
+    {
+        // Combat teardown can clear or replace the player's Creature before
+        // GameOverState is exported.  Capture authoritative pre-reward HP at
+        // the engine event itself so action-tape execution does not depend on
+        // whether an intermediate combat_play observation happened to update
+        // the diagnostic cache.
+        var hp = _runState?.Players.FirstOrDefault()?.Creature?.CurrentHp;
+        if (hp is > 0)
+            _lastKnownHp = hp.Value;
+        _combatEnded.Set();
+    }
+
+    private void CleanUpForcedCombatCardSubscriptions()
+    {
+        if (!CombatManager.Instance.IsInProgress || _runState?.CurrentRoom is not CombatRoom room)
+            return;
+
+        var onCombatEnded = typeof(NetCombatCardDb).GetMethod(
+            "OnCombatEnded",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        if (onCombatEnded == null)
+        {
+            Log("NetCombatCardDb.OnCombatEnded was not found during forced cleanup");
+            return;
+        }
+        onCombatEnded.Invoke(NetCombatCardDb.Instance, new object?[] { room });
+    }
+
+    public Dictionary<string, object?> StartRun(
+        string character,
+        int ascension = 0,
+        string? seed = null,
+        string lang = "en",
+        bool detectDecision = true)
     {
         try
         {
@@ -164,9 +225,8 @@ public class RunSimulator
             RunManager.Instance.Launch();
             Log("Run launched");
 
-            // Register event handlers for combat turn transitions
-            CombatManager.Instance.TurnStarted += _ => _turnStarted.Set();
-            CombatManager.Instance.CombatEnded += _ => _combatEnded.Set();
+            // Register event handlers for combat turn transitions.
+            RegisterCombatEventHandlers();
 
             // Finalize starting relics
             RunManager.Instance.FinalizeStartingRelics().GetAwaiter().GetResult();
@@ -180,8 +240,11 @@ public class RunSimulator
             CardSelectCmd.UseSelector(_cardSelector);
             LocPatches._bundleSimRef = this;
 
-            // Now we should be at the map — detect decision point
-            return DetectDecisionPoint();
+            // Training combat setup immediately replaces this state, so avoid
+            // constructing and serializing an unused rich event decision.
+            return detectDecision
+                ? DetectDecisionPoint()
+                : new Dictionary<string, object?> { ["type"] = "ok" };
         }
         catch (Exception ex)
         {
@@ -341,12 +404,211 @@ public class RunSimulator
         field?.SetValue(obj, value);
     }
 
-    public Dictionary<string, object?> SetPlayer(Dictionary<string, System.Text.Json.JsonElement> args)
+    public void SetObservationMode(string? mode)
+    {
+        _trainingObservationMode = string.Equals(
+            mode,
+            "training_compact",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    public Dictionary<string, object?> ProofStateToken()
+    {
+        var pendingReasons = new List<string>();
+        if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
+            pendingReasons.Add("pending_card_choice");
+        if (_pendingBundles != null || _pendingBundleTcs != null)
+            pendingReasons.Add("pending_bundle_choice");
+        if (_pendingEventOptionTask is { IsCompleted: false })
+            pendingReasons.Add("pending_event_action");
+        if (_pendingShopPurchaseTask is { IsCompleted: false })
+            pendingReasons.Add("pending_shop_action");
+        return ProofStateExporter.Export(_runState, pendingReasons);
+    }
+
+    public Dictionary<string, object?> ProofStateCompactBossHistoryKey()
+    {
+        var pendingReasons = new List<string>();
+        if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
+            pendingReasons.Add("pending_card_choice");
+        if (_pendingBundles != null || _pendingBundleTcs != null)
+            pendingReasons.Add("pending_bundle_choice");
+        if (_pendingEventOptionTask is { IsCompleted: false })
+            pendingReasons.Add("pending_event_action");
+        if (_pendingShopPurchaseTask is { IsCompleted: false })
+            pendingReasons.Add("pending_shop_action");
+        return ProofStateExporter.ExportCompactBossHistoryKey(_runState, pendingReasons);
+    }
+
+    private static string ModelEntry(string rawId, string expectedType)
+    {
+        var prefix = expectedType + ".";
+        return rawId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? rawId[prefix.Length..]
+            : rawId;
+    }
+
+    private static SavedProperties? SavedPropertiesFromJson(JsonElement element)
+    {
+        if (element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return null;
+        if (element.ValueKind != JsonValueKind.Object)
+            throw new JsonException("card props must be an object");
+
+        var result = new SavedProperties();
+        var hasValues = false;
+        foreach (var group in element.EnumerateObject())
+        {
+            switch (group.Name)
+            {
+                case "ints":
+                    result.ints = group.Value.EnumerateArray()
+                        .Select(row => new SavedProperties.SavedProperty<int>(
+                            row.GetProperty("name").GetString() ?? "",
+                            row.GetProperty("value").GetInt32()))
+                        .ToList();
+                    hasValues |= result.ints.Count > 0;
+                    break;
+                case "bools":
+                    result.bools = group.Value.EnumerateArray()
+                        .Select(row => new SavedProperties.SavedProperty<bool>(
+                            row.GetProperty("name").GetString() ?? "",
+                            row.GetProperty("value").GetBoolean()))
+                        .ToList();
+                    hasValues |= result.bools.Count > 0;
+                    break;
+                case "strings":
+                    result.strings = group.Value.EnumerateArray()
+                        .Select(row => new SavedProperties.SavedProperty<string>(
+                            row.GetProperty("name").GetString() ?? "",
+                            row.GetProperty("value").GetString() ?? ""))
+                        .ToList();
+                    hasValues |= result.strings.Count > 0;
+                    break;
+                case "int_arrays":
+                    result.intArrays = group.Value.EnumerateArray()
+                        .Select(row => new SavedProperties.SavedProperty<int[]>(
+                            row.GetProperty("name").GetString() ?? "",
+                            row.GetProperty("value").EnumerateArray().Select(value => value.GetInt32()).ToArray()))
+                        .ToList();
+                    hasValues |= result.intArrays.Count > 0;
+                    break;
+                default:
+                    throw new JsonException($"unsupported card props group: {group.Name}");
+            }
+        }
+        return hasValues ? result : null;
+    }
+
+    private static SerializableCard SerializableCardFromJson(JsonElement element)
+    {
+        var rawId = element.GetProperty("id").GetString()
+            ?? throw new JsonException("card id must be a string");
+        var save = new SerializableCard
+        {
+            Id = new ModelId("CARD", ModelEntry(rawId, "CARD")),
+            CurrentUpgradeLevel = element.TryGetProperty("current_upgrade_level", out var level)
+                ? level.GetInt32()
+                : 0,
+            Props = element.TryGetProperty("props", out var props)
+                ? SavedPropertiesFromJson(props)
+                : null,
+        };
+        if (element.TryGetProperty("enchantment", out var enchantment)
+            && enchantment.ValueKind == JsonValueKind.Object)
+        {
+            var rawEnchantmentId = enchantment.GetProperty("id").GetString()
+                ?? throw new JsonException("enchantment id must be a string");
+            save.Enchantment = new SerializableEnchantment
+            {
+                Id = new ModelId(
+                    "ENCHANTMENT",
+                    ModelEntry(rawEnchantmentId, "ENCHANTMENT")),
+                Amount = enchantment.TryGetProperty("amount", out var amount)
+                    ? amount.GetInt32()
+                    : 0,
+                Props = enchantment.TryGetProperty("props", out var enchantmentProps)
+                    ? SavedPropertiesFromJson(enchantmentProps)
+                    : null,
+            };
+        }
+        return save;
+    }
+
+    /// <summary>
+    /// Capture the fully configured pre-combat run used by repeated fixed-seed
+    /// combat restores.  This is a room-entry checkpoint, not a mid-combat
+    /// snapshot.
+    /// </summary>
+    public string CaptureDirectCombatTemplate()
+    {
+        if (_runState == null)
+            throw new InvalidOperationException("No run in progress");
+        var room = _runState.CurrentRoom ?? new MapRoom();
+        return SaveManager.ToJson(RunManager.Instance.ToSave(room));
+    }
+
+    public int CurrentActFloor => _runState?.ActFloor ?? 0;
+
+    /// <summary>
+    /// Restore an internally generated pre-combat template without rebuilding
+    /// maps, rewards, and the configured player through the public command
+    /// surface.  The caller still enters the requested CombatRoom afterwards.
+    /// </summary>
+    public Dictionary<string, object?> RestoreDirectCombatTemplate(
+        string saveJson,
+        int actFloor,
+        string lang = "en")
+    {
+        try
+        {
+            PrepareForRunReplacement();
+            SetOutputLanguage(lang);
+            EnsureModelDbInitialized();
+            var readResult = SaveManager.FromJson<SerializableRun>(saveJson);
+            if (!readResult.Success || readResult.SaveData == null)
+                return Error($"Failed to parse direct-combat template: {readResult.Status} {readResult.ErrorMessage}");
+            var save = readResult.SaveData;
+            _runState = RunState.FromSerializable(save);
+            if (_runState == null)
+                return Error("Failed to restore direct-combat RunState");
+            _runState.ActFloor = actFloor;
+
+            var netService = new NetSingleplayerGameService();
+            RunManager.Instance.SetUpSavedSinglePlayer(_runState, save);
+            LocalContext.NetId = netService.NetId;
+            RegisterCombatEventHandlers();
+            CardSelectCmd.UseSelector(_cardSelector);
+            LocPatches._bundleSimRef = this;
+            RunManager.Instance.Launch();
+            return new Dictionary<string, object?> { ["type"] = "ok" };
+        }
+        catch (Exception ex)
+        {
+            return ErrorWithTrace("RestoreDirectCombatTemplate failed", ex);
+        }
+    }
+
+    public Dictionary<string, object?> SetPlayer(
+        Dictionary<string, System.Text.Json.JsonElement> args,
+        bool includeSummary = true)
     {
         try
         {
             if (_runState == null) return Error("No run in progress");
             var player = _runState.Players[0];
+            var strict = args.TryGetValue("strict", out var strictEl)
+                && strictEl.ValueKind == JsonValueKind.True;
+
+            if (args.TryGetValue("act", out var actEl))
+            {
+                var actIndex = actEl.GetInt32() - 1;
+                if (actIndex < 0 || actIndex >= _runState.Acts.Count)
+                    return Error($"Invalid act {actIndex + 1}; run has {_runState.Acts.Count} acts");
+                _runState.CurrentActIndex = actIndex;
+            }
+            if (args.TryGetValue("act_floor", out var actFloorEl))
+                _runState.ActFloor = Math.Max(0, actFloorEl.GetInt32());
 
             if (args.TryGetValue("hp", out var hpEl) && player.Creature != null)
                 SetField(player.Creature, "_currentHp", hpEl.GetInt32());
@@ -367,8 +629,13 @@ public class RunSimulator
                     foreach (var rEl in relicsEl.EnumerateArray())
                     {
                         var id = rEl.GetString();
-                        if (id == null) continue;
-                        var model = ModelDb.GetById<RelicModel>(new ModelId("RELIC", id));
+                        if (id == null)
+                        {
+                            if (strict) return Error("Relic id must be a string");
+                            continue;
+                        }
+                        var model = ModelDb.GetById<RelicModel>(
+                            new ModelId("RELIC", ModelEntry(id, "RELIC")));
                         if (model != null)
                         {
                             if (directRelicSetup)
@@ -383,6 +650,10 @@ public class RunSimulator
                                 _syncCtx.Pump();
                             }
                         }
+                        else if (strict)
+                        {
+                            return Error($"Unknown relic: {id}");
+                        }
                     }
                 }
             }
@@ -392,17 +663,39 @@ public class RunSimulator
                 foreach (var c in player.Deck.Cards.ToList())
                     _runState.RemoveCard(c);
                 player.Deck.Clear(silent: true);
-                // Add new cards via RunState.CreateCard (sets Owner + registers)
+                // Object entries use the engine's save deserializer so upgrades,
+                // enchantments, and saved card properties retain their semantics.
                 foreach (var cEl in deckEl.EnumerateArray())
                 {
-                    var id = cEl.GetString();
-                    if (id == null) continue;
-                    var canonical = ModelDb.GetById<CardModel>(new ModelId("CARD", id));
-                    if (canonical != null)
+                    CardModel? card = null;
+                    if (cEl.ValueKind == JsonValueKind.String)
                     {
-                        var card = _runState.CreateCard(canonical, player);
-                        player.Deck.AddInternal(card, silent: true);
+                        var id = cEl.GetString();
+                        if (id == null)
+                        {
+                            if (strict) return Error("Card id must be a string");
+                            continue;
+                        }
+                        var canonical = ModelDb.GetById<CardModel>(
+                            new ModelId("CARD", ModelEntry(id, "CARD")));
+                        if (canonical != null)
+                            card = _runState.CreateCard(canonical, player);
+                        else if (strict)
+                            return Error($"Unknown card: {id}");
                     }
+                    else if (cEl.ValueKind == JsonValueKind.Object)
+                    {
+                        var serializedCard = SerializableCardFromJson(cEl);
+                        if (strict)
+                            _ = ModelDb.GetById<CardModel>(serializedCard.Id!);
+                        card = _runState.LoadCard(serializedCard, player);
+                    }
+                    else if (strict)
+                    {
+                        return Error("Deck entries must be strings or objects");
+                    }
+                    if (card != null)
+                        player.Deck.AddInternal(card, silent: true);
                 }
             }
             if (args.TryGetValue("potions", out var potionsEl))
@@ -410,6 +703,12 @@ public class RunSimulator
                 var slots = GetPotionSlots(player);
                 if (slots != null)
                 {
+                    if (args.TryGetValue("max_potion_slot_count", out var slotCountEl))
+                    {
+                        var requestedSlots = Math.Max(0, slotCountEl.GetInt32());
+                        while (slots.Count < requestedSlots) slots.Add(null);
+                        while (slots.Count > requestedSlots) slots.RemoveAt(slots.Count - 1);
+                    }
                     for (int i = 0; i < slots.Count; i++) slots[i] = null;
                     int idx = 0;
                     foreach (var pEl in potionsEl.EnumerateArray())
@@ -418,7 +717,8 @@ public class RunSimulator
                         var id = pEl.GetString();
                         if (id != null)
                         {
-                            var model = ModelDb.GetById<PotionModel>(new ModelId("POTION", id));
+                            var model = ModelDb.GetById<PotionModel>(
+                                new ModelId("POTION", ModelEntry(id, "POTION")));
                             if (model != null)
                             {
                                 MegaCrit.Sts2.Core.Commands.PotionCmd
@@ -427,18 +727,23 @@ public class RunSimulator
                                     .GetResult();
                                 _syncCtx.Pump();
                             }
+                            else if (strict)
+                            {
+                                return Error($"Unknown potion: {id}");
+                            }
                         }
+                        else if (strict)
+                            return Error("Potion id must be a string");
                         idx++;
                     }
                 }
             }
 
             Log($"SetPlayer: hp={player.Creature?.CurrentHp} gold={player.Gold} relics={player.Relics.Count} deck={player.Deck?.Cards?.Count}");
-            return new Dictionary<string, object?>
-            {
-                ["type"] = "ok",
-                ["player"] = PlayerSummary(player),
-            };
+            var result = new Dictionary<string, object?> { ["type"] = "ok" };
+            if (includeSummary)
+                result["player"] = PlayerSummary(player);
+            return result;
         }
         catch (Exception ex) { return ErrorWithTrace("SetPlayer failed", ex); }
     }
@@ -515,7 +820,11 @@ public class RunSimulator
         }
     }
 
-    public Dictionary<string, object?> EnterRoom(string roomType, string? encounter, string? eventId)
+    public Dictionary<string, object?> EnterRoom(
+        string roomType,
+        string? encounter,
+        string? eventId,
+        bool detectDecision = true)
     {
         try
         {
@@ -532,7 +841,8 @@ public class RunSimulator
                 {
                     if (string.IsNullOrEmpty(encounter))
                         encounter = "SHRINKER_BEETLE_WEAK"; // default encounter
-                    var encModel = ModelDb.GetById<EncounterModel>(new ModelId("ENCOUNTER", encounter));
+                    var encModel = ModelDb.GetById<EncounterModel>(
+                        new ModelId("ENCOUNTER", ModelEntry(encounter, "ENCOUNTER")));
                     if (encModel == null) return Error($"Unknown encounter: {encounter}");
                     room = new CombatRoom(encModel.ToMutable(), runState);
                     break;
@@ -563,6 +873,13 @@ public class RunSimulator
             RunManager.Instance.EnterRoom(room).GetAwaiter().GetResult();
             _syncCtx.Pump();
             WaitForActionExecutor();
+            if (!detectDecision)
+            {
+                if (_engineErrorReason != null)
+                    return EngineError(_engineErrorReason);
+                PrimeCombatRuntimeIds();
+                return new Dictionary<string, object?> { ["type"] = "ok" };
+            }
             return DetectDecisionPoint();
         }
         catch (Exception ex) { return ErrorWithTrace("EnterRoom failed", ex); }
@@ -639,8 +956,7 @@ public class RunSimulator
             RunManager.Instance.SetUpSavedSinglePlayer(_runState, save);
             LocalContext.NetId = netService.NetId;
 
-            CombatManager.Instance.TurnStarted += _ => _turnStarted.Set();
-            CombatManager.Instance.CombatEnded += _ => _combatEnded.Set();
+            RegisterCombatEventHandlers();
             CardSelectCmd.UseSelector(_cardSelector);
             LocPatches._bundleSimRef = this;
 
@@ -1003,7 +1319,13 @@ public class RunSimulator
             && (_pendingRewards != null || _pendingCardReward != null);
     }
 
-    public Dictionary<string, object?> ExecuteAction(string action, Dictionary<string, object?>? args)
+    public Dictionary<string, object?> ExecuteAction(string action, Dictionary<string, object?>? args) =>
+        ExecuteAction(action, args, allowUnexportedCombatPolicy: false);
+
+    private Dictionary<string, object?> ExecuteAction(
+        string action,
+        Dictionary<string, object?>? args,
+        bool allowUnexportedCombatPolicy)
     {
         try
         {
@@ -1011,7 +1333,9 @@ public class RunSimulator
                 return Error("No run in progress");
 
             var player = _runState.Players[0];
-            var actionPolicyError = ExportedDecisionActionError(action);
+            var actionPolicyError = ExportedDecisionActionError(
+                action,
+                allowUnexportedCombatPolicy);
             if (actionPolicyError != null)
                 return ErrorWithLastExportedState(actionPolicyError);
 
@@ -1052,6 +1376,43 @@ public class RunSimulator
         }
     }
 
+    public Dictionary<string, object?> ExecuteActionTape(
+        IReadOnlyList<(string Action, Dictionary<string, object?>? Args)> actions,
+        bool allowUnexportedCombatPolicy = false)
+    {
+        if (actions.Count == 0)
+            return Error("action_tape must contain at least one action");
+        if (allowUnexportedCombatPolicy && HasPendingHeadlessChoice())
+            return Error("start_combat action_tape cannot start from a pending choice");
+
+        Dictionary<string, object?>? result = null;
+        try
+        {
+            for (var index = 0; index < actions.Count; index++)
+            {
+                _suppressDecisionExportForActionTape = index + 1 < actions.Count;
+                var (action, args) = actions[index];
+                result = ExecuteAction(action, args, allowUnexportedCombatPolicy);
+                if (result.GetValueOrDefault("type")?.ToString() == "error")
+                    return result;
+                if (!_suppressDecisionExportForActionTape)
+                    continue;
+                if (_engineErrorReason != null)
+                    return EngineError(_engineErrorReason);
+                if (HasPendingHeadlessChoice())
+                    return Error("action_tape crossed a pending choice before its final action");
+                var player = _runState?.Players.FirstOrDefault();
+                if (!CombatManager.Instance.IsInProgress || player?.Creature?.IsDead == true)
+                    return Error("action_tape reached a terminal state before its final action");
+            }
+            return result ?? Error("action_tape produced no result");
+        }
+        finally
+        {
+            _suppressDecisionExportForActionTape = false;
+        }
+    }
+
     private Dictionary<string, object?> ErrorWithLastExportedState(string message) =>
         ErrorWithLastExportedState(Error(message));
 
@@ -1068,10 +1429,17 @@ public class RunSimulator
         return result;
     }
 
-    private string? ExportedDecisionActionError(string action)
+    private string? ExportedDecisionActionError(
+        string action,
+        bool allowUnexportedCombatPolicy)
     {
         if (_lastExportedDecisionPolicy == null)
+        {
+            if (allowUnexportedCombatPolicy
+                && CombatPlayActionNames.Contains(action))
+                return null;
             return $"Cannot execute action '{action}' before an authoritative decision has been exported";
+        }
         if (_lastExportedDecisionPolicy.AllowedActionNames.Contains(action))
             return null;
 
@@ -1102,7 +1470,7 @@ public class RunSimulator
                 allowed.Add("select_map_node");
                 break;
             case "combat_play":
-                allowed.UnionWith(new[] { "play_card", "use_potion", "end_turn" });
+                allowed.UnionWith(CombatPlayActionNames);
                 break;
             case "combat_reward":
                 allowed.UnionWith(new[] { "claim_reward", "skip_reward", "discard_potion" });
@@ -2763,6 +3131,13 @@ public class RunSimulator
 
     private Dictionary<string, object?> DetectDecisionPoint()
     {
+        if (_suppressDecisionExportForActionTape)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "action_tape_intermediate",
+            };
+        }
         return TrackExportedDecision(DetectDecisionPointCore());
     }
 
@@ -2848,6 +3223,8 @@ public class RunSimulator
         {
             var opts = pendingSelection.Options.Select((card, i) =>
             {
+                if (_trainingObservationMode)
+                    return TrainingCardInfo(card, player, i, includeCanPlay: false);
                 var includeCombatPreview = ShouldExportCombatPreviewState(card);
                 var includeTargetRows = ShouldExportCombatCardState(card);
                 var useSourceDynamicContext = CombatManager.Instance.IsInProgress;
@@ -2884,6 +3261,30 @@ public class RunSimulator
                 return cardInfo;
             }).ToList();
 
+            if (_trainingObservationMode)
+            {
+                var trainingSelection = new Dictionary<string, object?>
+                {
+                    ["type"] = "decision",
+                    ["decision"] = "card_select",
+                    ["observation_mode"] = "training_compact",
+                    ["context"] = new Dictionary<string, object?>
+                    {
+                        ["act"] = _runState.CurrentActIndex + 1,
+                        ["floor"] = _runState.ActFloor,
+                        ["room_type"] = _runState.CurrentRoom?.RoomType.ToString(),
+                    },
+                    ["cards"] = opts,
+                    ["min_select"] = pendingSelection.MinSelect,
+                    ["max_select"] = pendingSelection.MaxSelect,
+                    ["can_skip"] = pendingSelection.CanSkip,
+                    ["player"] = TrainingPlayerSummary(player),
+                };
+                if (CombatManager.Instance.IsInProgress)
+                    trainingSelection["combat"] = TrainingCombatPlayState(player);
+                return trainingSelection;
+            }
+
             var sourceModel = pendingSelection.SourceModel;
             var sourceCard = _pendingCardSelectionSourceCard ?? sourceModel as CardModel;
             var sourcePower = sourceModel as PowerModel;
@@ -2910,7 +3311,9 @@ public class RunSimulator
                 ["min_select"] = pendingSelection.MinSelect,
                 ["max_select"] = pendingSelection.MaxSelect,
                 ["can_skip"] = pendingSelection.CanSkip,
-                ["player"] = PlayerSummary(player),
+                ["player"] = _trainingObservationMode
+                    ? TrainingPlayerSummary(player)
+                    : PlayerSummary(player),
             };
             if (prompt != null)
             {
@@ -2929,7 +3332,9 @@ public class RunSimulator
             }
             if (CombatManager.Instance.IsInProgress)
             {
-                state["combat"] = CombatSelectionContext(player);
+                state["combat"] = _trainingObservationMode
+                    ? TrainingCombatPlayState(player)
+                    : CombatSelectionContext(player);
             }
             if (_pendingCardSelectionSourceEventOption != null)
             {
@@ -3018,14 +3423,14 @@ public class RunSimulator
                 && !CombatHasAliveEnemies())
             {
                 if (CombatShouldStayActiveWithoutAliveEnemies())
-                    return CombatPlayState(player);
+                    return CurrentCombatPlayState(player);
                 if (TryResolveCombatWithNoAliveEnemies(player))
                     return DetectPostCombatState(player, combatRoom);
             }
 
             if (CombatManager.Instance.IsInProgress && CombatManager.Instance.IsPlayPhase)
             {
-                return CombatPlayState(player);
+                return CurrentCombatPlayState(player);
             }
             if (!CombatManager.Instance.IsInProgress || (player.Creature != null && player.Creature.IsDead))
             {
@@ -3036,10 +3441,10 @@ public class RunSimulator
             {
                 _syncCtx.Pump();
                 Thread.Sleep(5);
-                if (CombatManager.Instance.IsPlayPhase) return CombatPlayState(player);
+                if (CombatManager.Instance.IsPlayPhase) return CurrentCombatPlayState(player);
                 if (!CombatManager.Instance.IsInProgress) return DetectPostCombatState(player, combatRoom);
             }
-            return CombatPlayState(player);
+            return CurrentCombatPlayState(player);
         }
 
         // Event room
@@ -3179,6 +3584,227 @@ public class RunSimulator
             _creatureRuntimeIds[creature] = id;
         }
         return id;
+    }
+
+    private void PrimeCombatRuntimeIds()
+    {
+        var player = _runState?.Players.FirstOrDefault();
+        var combatState = CombatManager.Instance.DebugOnlyGetState();
+        var playerCombatState = player?.PlayerCombatState;
+        if (player == null || combatState == null || playerCombatState == null)
+            return;
+
+        foreach (var card in playerCombatState.Hand.Cards)
+            CardRuntimeId(card);
+        foreach (var enemy in combatState.Enemies.Where(enemy => enemy != null && enemy.IsAlive))
+            CreatureRuntimeId(enemy);
+        foreach (var enemy in combatState.Enemies.Where(enemy => enemy != null && !enemy.IsAlive))
+            CreatureRuntimeId(enemy);
+        foreach (var pile in new[]
+                 {
+                     playerCombatState.DrawPile,
+                     playerCombatState.DiscardPile,
+                     playerCombatState.ExhaustPile,
+                 })
+        {
+            foreach (var card in pile.Cards)
+                CardRuntimeId(card);
+        }
+    }
+
+    private Dictionary<string, object?> CurrentCombatPlayState(Player player)
+    {
+        return _trainingObservationMode
+            ? TrainingCombatPlayState(player)
+            : CombatPlayState(player);
+    }
+
+    private Dictionary<string, object?> TrainingCardInfo(
+        CardModel card,
+        Player player,
+        int index,
+        bool includeCanPlay)
+    {
+        var info = new Dictionary<string, object?>
+        {
+            ["index"] = index,
+            ["instance_id"] = CardRuntimeId(card),
+            ["id"] = card.Id.ToString(),
+            ["cost"] = GetEnergyCostDisplay(card),
+            ["type"] = card.Type.ToString(),
+            ["target_type"] = card.TargetType.ToString(),
+            ["current_upgrade_level"] = card.CurrentUpgradeLevel,
+            ["vars"] = ExportDynamicVars(card),
+        };
+        if (includeCanPlay)
+            info["can_play"] = card.Type != CardType.None && card.CanPlay(out _, out _);
+        if (card.Enchantment != null)
+        {
+            info["enchantment_id"] = card.Enchantment.Id.ToString();
+            info["enchantment_amount"] = card.Enchantment.Amount;
+        }
+        if (card.Affliction != null)
+        {
+            info["affliction_id"] = card.Affliction.Id.ToString();
+            info["affliction_amount"] = card.Affliction.Amount;
+        }
+        var keywords = card.Keywords?
+            .Where(keyword => keyword != CardKeyword.None)
+            .Select(keyword => keyword.ToString())
+            .ToList();
+        if (keywords?.Count > 0)
+            info["keywords"] = keywords;
+        return info;
+    }
+
+    private List<Dictionary<string, object?>> TrainingPileInfo(
+        IEnumerable<CardModel>? cards,
+        Player player)
+    {
+        return cards?
+            .Where(card => card != null)
+            .Select((card, index) => TrainingCardInfo(card, player, index, includeCanPlay: false))
+            .ToList() ?? new List<Dictionary<string, object?>>();
+    }
+
+    private static Dictionary<string, object?> TrainingPowerInfo(PowerModel power)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["id"] = power.Id.ToString(),
+            ["amount"] = power.Amount,
+            ["type"] = power.Type.ToString(),
+            ["vars"] = ExportDynamicVars(power),
+        };
+    }
+
+    private Dictionary<string, object?> TrainingPlayerSummary(Player player)
+    {
+        var potions = player.Potions?
+            .Select((potion, index) => potion == null
+                ? null
+                : new Dictionary<string, object?>
+                {
+                    ["index"] = index,
+                    ["id"] = potion.Id.ToString(),
+                    ["target_type"] = potion.TargetType.ToString(),
+                    ["vars"] = ExportDynamicVars(potion),
+                })
+            .Where(potion => potion != null)
+            .Cast<Dictionary<string, object?>>()
+            .ToList() ?? new List<Dictionary<string, object?>>();
+        var relics = player.Relics?
+            .Where(relic => relic != null)
+            .Select(relic =>
+            {
+                var info = new Dictionary<string, object?>
+                {
+                    ["id"] = relic.Id.ToString(),
+                    ["vars"] = RelicVars(relic),
+                };
+                if (relic.ShowCounter)
+                    info["display_amount"] = relic.DisplayAmount;
+                return info;
+            })
+            .ToList() ?? new List<Dictionary<string, object?>>();
+        var potionSlotCount = GetPotionSlots(player)?.Count ?? potions.Count;
+        return new Dictionary<string, object?>
+        {
+            ["hp"] = player.Creature?.CurrentHp ?? 0,
+            ["max_hp"] = player.Creature?.MaxHp ?? 0,
+            ["block"] = player.Creature?.Block ?? 0,
+            ["gold"] = player.Gold,
+            ["relics"] = relics,
+            ["potions"] = potions,
+            ["potion_slots"] = potionSlotCount,
+            ["potion_empty_slots"] = Math.Max(0, potionSlotCount - potions.Count),
+        };
+    }
+
+    private Dictionary<string, object?> TrainingCombatPlayState(Player player)
+    {
+        var pcs = player.PlayerCombatState;
+        var combatState = CombatManager.Instance.DebugOnlyGetState();
+        if (player.Creature != null && player.Creature.CurrentHp > 0)
+            _lastKnownHp = player.Creature.CurrentHp;
+
+        var hand = pcs?.Hand?.Cards?
+            .Select((card, index) => TrainingCardInfo(card, player, index, includeCanPlay: true))
+            .ToList() ?? new List<Dictionary<string, object?>>();
+        if (pcs != null)
+        {
+            foreach (var (card, info) in pcs.Hand.Cards.Zip(hand))
+            {
+                if (card.CurrentStarCost > 0 && pcs.Stars < card.CurrentStarCost)
+                    info["can_play"] = false;
+            }
+        }
+
+        var playerCreatures = combatState?.PlayerCreatures?.ToList();
+        var allEnemies = combatState?.Enemies?.Where(enemy => enemy != null).ToList() ?? new();
+        var enemies = allEnemies.Where(enemy => enemy.IsAlive).Select((enemy, index) =>
+        {
+            var intents = new List<Dictionary<string, object?>>();
+            if (enemy.Monster?.NextMove?.Intents != null)
+            {
+                foreach (var intent in enemy.Monster.NextMove.Intents)
+                {
+                    var intentInfo = new Dictionary<string, object?>
+                    {
+                        ["type"] = intent.IntentType.ToString(),
+                    };
+                    if (intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent attack
+                        && playerCreatures != null)
+                    {
+                        var totalDamage = attack.GetTotalDamage(playerCreatures, enemy);
+                        intentInfo["damage"] = attack.Repeats > 1
+                            ? totalDamage / attack.Repeats
+                            : totalDamage;
+                        intentInfo["hits"] = attack.Repeats;
+                        intentInfo["total_damage"] = totalDamage;
+                    }
+                    intents.Add(intentInfo);
+                }
+            }
+            return new Dictionary<string, object?>
+            {
+                ["index"] = index,
+                ["instance_id"] = CreatureRuntimeId(enemy),
+                ["combat_index"] = allEnemies.IndexOf(enemy),
+                ["id"] = enemy.Monster?.Id.ToString(),
+                ["hp"] = enemy.CurrentHp,
+                ["max_hp"] = enemy.MaxHp,
+                ["block"] = enemy.Block,
+                ["alive"] = true,
+                ["targetable"] = true,
+                ["move_id"] = MoveEntry(enemy.Monster?.NextMove),
+                ["intents"] = intents.Count > 0 ? intents : null,
+                ["powers"] = enemy.Powers?.Select(TrainingPowerInfo).ToList(),
+            };
+        }).ToList();
+
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "combat_play",
+            ["observation_mode"] = "training_compact",
+            ["context"] = new Dictionary<string, object?>
+            {
+                ["act"] = _runState!.CurrentActIndex + 1,
+                ["floor"] = _runState.ActFloor,
+                ["room_type"] = _runState.CurrentRoom?.RoomType.ToString(),
+            },
+            ["round"] = combatState?.RoundNumber ?? 0,
+            ["energy"] = pcs?.Energy ?? 0,
+            ["max_energy"] = pcs?.MaxEnergy ?? 0,
+            ["hand"] = hand,
+            ["enemies"] = enemies,
+            ["player"] = TrainingPlayerSummary(player),
+            ["player_powers"] = player.Creature?.Powers?.Select(TrainingPowerInfo).ToList(),
+            ["draw_pile"] = TrainingPileInfo(pcs?.DrawPile?.Cards, player),
+            ["discard_pile"] = TrainingPileInfo(pcs?.DiscardPile?.Cards, player),
+            ["exhaust_pile"] = TrainingPileInfo(pcs?.ExhaustPile?.Cards, player),
+        };
     }
 
     private Dictionary<string, object?> CombatPlayState(Player player)
@@ -10886,7 +11512,13 @@ public class RunSimulator
         try
         {
             if (RunManager.Instance.IsInProgress)
+            {
+                // A forced reset bypasses the engine's natural CombatEnded event.
+                // Clear NetCombatCardDb's pile subscriptions before RunManager
+                // drops the combat so old RunState graphs can be collected.
+                CleanUpForcedCombatCardSubscriptions();
                 RunManager.Instance.CleanUp(graceful: true);
+            }
         }
         catch (Exception ex)
         {
@@ -10894,6 +11526,7 @@ public class RunSimulator
         }
         finally
         {
+            UnregisterCombatEventHandlers();
             _runState = null;
             ResetTransientHeadlessState();
             ResetHeadlessCommandState();

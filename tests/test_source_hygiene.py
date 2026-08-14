@@ -107,7 +107,9 @@ def test_unrecognized_exported_decisions_block_every_raw_action():
         "private static bool StateFlag",
     )
 
-    assert "ExportedDecisionActionError(action)" in execute_source
+    assert "ExecuteAction(action, args, allowUnexportedCombatPolicy: false)" in execute_source
+    assert "var actionPolicyError = ExportedDecisionActionError(" in execute_source
+    assert "allowUnexportedCombatPolicy);" in execute_source
     assert "PendingDecisionActionError" not in source
     assert "BlockedExportedDecisionActionError" not in source
     assert 'case "event_blocked":' in policy_source

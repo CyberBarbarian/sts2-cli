@@ -14,6 +14,10 @@ class Program
         WriteIndented = false,
     };
 
+    private static string? _directCombatTemplateCommand;
+    private static string? _directCombatTemplateJson;
+    private static int _directCombatTemplateActFloor;
+
     /// <summary>
     /// Locate the directory containing sts2.dll: STS2_LIB env, walk up from BaseDirectory, then BaseDirectory/lib.
     /// </summary>
@@ -113,6 +117,38 @@ class Program
         var cmdType = cmd.GetProperty("cmd").GetString() ?? "";
         switch (cmdType)
         {
+            case "proof_state_token":
+                return sim.ProofStateToken();
+
+            case "proof_state_compact_key":
+                return sim.ProofStateCompactBossHistoryKey();
+
+            case "runtime_stats":
+            {
+                var collect = cmd.TryGetProperty("collect", out var collectElement)
+                    && collectElement.ValueKind == JsonValueKind.True;
+                if (collect)
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                }
+                var memory = GC.GetGCMemoryInfo();
+                return new Dictionary<string, object?>
+                {
+                    ["type"] = "runtime_stats",
+                    ["collection_forced"] = collect,
+                    ["managed_heap_bytes"] = GC.GetTotalMemory(forceFullCollection: false),
+                    ["total_allocated_bytes"] = GC.GetTotalAllocatedBytes(precise: false),
+                    ["heap_size_bytes"] = memory.HeapSizeBytes,
+                    ["fragmented_bytes"] = memory.FragmentedBytes,
+                    ["working_set_bytes"] = Environment.WorkingSet,
+                    ["gen0_collections"] = GC.CollectionCount(0),
+                    ["gen1_collections"] = GC.CollectionCount(1),
+                    ["gen2_collections"] = GC.CollectionCount(2),
+                };
+            }
+
             case "reset":
                 sim.CleanUp();
                 sim = new RunSimulator();
@@ -125,6 +161,97 @@ class Program
                     cmd.TryGetProperty("seed", out var s) ? s.GetString() : null,
                     cmd.TryGetProperty("lang", out var lang) ? lang.GetString() ?? "en" : "en"
                 );
+
+            case "start_combat":
+            {
+                if (!cmd.TryGetProperty("player", out var playerElement)
+                    || playerElement.ValueKind != JsonValueKind.Object)
+                {
+                    return new Dictionary<string, object?>
+                    {
+                        ["type"] = "error",
+                        ["message"] = "start_combat requires a player object",
+                    };
+                }
+                List<(string Action, Dictionary<string, object?>? Args)>? actionTape = null;
+                if (cmd.TryGetProperty("action_tape", out var actionTapeElement))
+                {
+                    var tapeError = ParseActionTape(actionTapeElement, out actionTape);
+                    if (tapeError != null)
+                        return tapeError;
+                }
+                var combatCharacterValue = cmd.TryGetProperty("character", out var combatCharacter)
+                    ? combatCharacter.GetString() ?? "Ironclad"
+                    : "Ironclad";
+                var combatAscensionValue = cmd.TryGetProperty("ascension", out var combatAscension)
+                    ? combatAscension.GetInt32()
+                    : 0;
+                var combatSeedValue = cmd.TryGetProperty("seed", out var combatSeed)
+                    ? combatSeed.GetString()
+                    : null;
+                sim.CleanUp();
+                sim = new RunSimulator();
+                var observationModeValue = cmd.TryGetProperty("observation_mode", out var observationMode)
+                    ? observationMode.GetString()
+                    : null;
+                sim.SetObservationMode(
+                    observationModeValue);
+                var combatLangValue = cmd.TryGetProperty("lang", out var combatLang)
+                    ? combatLang.GetString() ?? "en"
+                    : "en";
+                var encounter = cmd.TryGetProperty("encounter", out var combatEncounter)
+                    ? combatEncounter.GetString()
+                    : null;
+                var requestKey = string.Join(
+                    "\0",
+                    combatCharacterValue,
+                    combatAscensionValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    combatSeedValue ?? "",
+                    combatLangValue,
+                    encounter ?? "",
+                    observationModeValue ?? "",
+                    playerElement.GetRawText());
+
+                if (string.Equals(_directCombatTemplateCommand, requestKey, StringComparison.Ordinal)
+                    && _directCombatTemplateJson != null)
+                {
+                    var restored = sim.RestoreDirectCombatTemplate(
+                        _directCombatTemplateJson,
+                        _directCombatTemplateActFloor,
+                        combatLangValue);
+                    if (!(restored.TryGetValue("type", out var restoredType)
+                          && restoredType as string == "error"))
+                    {
+                        return EnterCombat(sim, encounter, actionTape);
+                    }
+
+                    _directCombatTemplateCommand = null;
+                    _directCombatTemplateJson = null;
+                    _directCombatTemplateActFloor = 0;
+                    sim.CleanUp();
+                    sim = new RunSimulator();
+                    sim.SetObservationMode(observationModeValue);
+                }
+
+                var start = sim.StartRun(
+                    combatCharacterValue,
+                    combatAscensionValue,
+                    combatSeedValue,
+                    combatLangValue,
+                    detectDecision: false);
+                if (start.TryGetValue("type", out var startType) && startType as string == "error")
+                    return start;
+                var playerArgs = playerElement.EnumerateObject()
+                    .ToDictionary(property => property.Name, property => property.Value);
+                var configured = sim.SetPlayer(playerArgs, includeSummary: false);
+                if (configured.TryGetValue("type", out var configuredType)
+                    && configuredType as string == "error")
+                    return configured;
+                _directCombatTemplateJson = sim.CaptureDirectCombatTemplate();
+                _directCombatTemplateActFloor = sim.CurrentActFloor;
+                _directCombatTemplateCommand = requestKey;
+                return EnterCombat(sim, encounter, actionTape);
+            }
 
             case "action":
             {
@@ -139,6 +266,22 @@ class Program
                     }
                 }
                 return sim.ExecuteAction(action, actionArgs);
+            }
+
+            case "action_tape":
+            {
+                if (!cmd.TryGetProperty("actions", out var actionsElement))
+                {
+                    return new Dictionary<string, object?>
+                    {
+                        ["type"] = "error",
+                        ["message"] = "action_tape requires an actions array",
+                    };
+                }
+                var tapeError = ParseActionTape(actionsElement, out var tape);
+                if (tapeError != null)
+                    return tapeError;
+                return sim.ExecuteActionTape(tape);
             }
 
             case "load_save":
@@ -242,6 +385,76 @@ class Program
             default:
                 return new Dictionary<string, object?> { ["type"] = "error", ["message"] = $"Unknown command: {cmdType}" };
         }
+    }
+
+    private static Dictionary<string, object?> EnterCombat(
+        RunSimulator sim,
+        string? encounter,
+        IReadOnlyList<(string Action, Dictionary<string, object?>? Args)>? actionTape)
+    {
+        var state = sim.EnterRoom(
+            "combat",
+            encounter,
+            null,
+            detectDecision: actionTape == null);
+        if (actionTape == null
+            || state.GetValueOrDefault("type")?.ToString() == "error")
+            return state;
+        return sim.ExecuteActionTape(actionTape, allowUnexportedCombatPolicy: true);
+    }
+
+    private static Dictionary<string, object?>? ParseActionTape(
+        JsonElement actionsElement,
+        out List<(string Action, Dictionary<string, object?>? Args)> tape)
+    {
+        tape = new List<(string Action, Dictionary<string, object?>? Args)>();
+        if (actionsElement.ValueKind != JsonValueKind.Array)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "error",
+                ["message"] = "action_tape requires an actions array",
+            };
+        }
+        foreach (var actionElement in actionsElement.EnumerateArray())
+        {
+            if (actionElement.ValueKind != JsonValueKind.Object
+                || !actionElement.TryGetProperty("cmd", out var nestedCmd)
+                || nestedCmd.GetString() != "action"
+                || !actionElement.TryGetProperty("action", out var nestedAction))
+            {
+                return new Dictionary<string, object?>
+                {
+                    ["type"] = "error",
+                    ["message"] = "action_tape accepts only action commands",
+                };
+            }
+            Dictionary<string, object?>? actionArgs = null;
+            if (actionElement.TryGetProperty("args", out var argsElement))
+            {
+                if (argsElement.ValueKind != JsonValueKind.Object)
+                {
+                    return new Dictionary<string, object?>
+                    {
+                        ["type"] = "error",
+                        ["message"] = "action_tape action args must be an object",
+                    };
+                }
+                actionArgs = argsElement.EnumerateObject().ToDictionary(
+                    property => property.Name,
+                    property => ConvertJsonValue(property.Value));
+            }
+            tape.Add((nestedAction.GetString() ?? "", actionArgs));
+        }
+        if (tape.Count == 0)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "error",
+                ["message"] = "action_tape must contain at least one action",
+            };
+        }
+        return null;
     }
 
     static object? ConvertJsonValue(JsonElement value)
