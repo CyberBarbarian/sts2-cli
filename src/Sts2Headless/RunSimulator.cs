@@ -428,19 +428,23 @@ public class RunSimulator
 
     public Dictionary<string, object?> ProofStateToken()
     {
-        var pendingReasons = new List<string>();
-        if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
-            pendingReasons.Add("pending_card_choice");
-        if (_pendingBundles != null || _pendingBundleTcs != null)
-            pendingReasons.Add("pending_bundle_choice");
-        if (_pendingEventOptionTask is { IsCompleted: false })
-            pendingReasons.Add("pending_event_action");
-        if (_pendingShopPurchaseTask is { IsCompleted: false })
-            pendingReasons.Add("pending_shop_action");
-        return ProofStateExporter.Export(_runState, pendingReasons);
+        return ProofStateExporter.Export(_runState, ProofPendingReasons());
     }
 
     public Dictionary<string, object?> ProofStateCompactBossHistoryKey()
+    {
+        return ProofStateExporter.ExportCompactBossHistoryKey(_runState, ProofPendingReasons());
+    }
+
+    public Dictionary<string, object?> CombatEffectEnvelope()
+    {
+        return CombatEffectEnvelopeExporter.Export(
+            _runState,
+            ProofPendingReasons(),
+            CardRuntimeId);
+    }
+
+    private List<string> ProofPendingReasons()
     {
         var pendingReasons = new List<string>();
         if (_cardSelector.HasPending || _cardSelector.HasPendingReward)
@@ -451,7 +455,7 @@ public class RunSimulator
             pendingReasons.Add("pending_event_action");
         if (_pendingShopPurchaseTask is { IsCompleted: false })
             pendingReasons.Add("pending_shop_action");
-        return ProofStateExporter.ExportCompactBossHistoryKey(_runState, pendingReasons);
+        return pendingReasons;
     }
 
     private static string ModelEntry(string rawId, string expectedType)

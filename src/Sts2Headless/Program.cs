@@ -123,6 +123,9 @@ class Program
             case "proof_state_compact_key":
                 return sim.ProofStateCompactBossHistoryKey();
 
+            case "combat_effect_envelope":
+                return sim.CombatEffectEnvelope();
+
             case "runtime_stats":
             {
                 var collect = cmd.TryGetProperty("collect", out var collectElement)
